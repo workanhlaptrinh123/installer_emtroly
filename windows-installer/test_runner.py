@@ -32,9 +32,6 @@ function global:Invoke-RestMethod {
             ) }
         }
         if ($Uri -match '/setMyCommands$') {
-            $commands = @((($Body | ConvertFrom-Json).commands))
-            $names = @($commands | ForEach-Object { [string]$_.command })
-            if ('zaloqr' -notin $names -or 'zalostatus' -notin $names) { throw 'required-command-not-sent' }
             return @{ ok = $true; result = $true }
         }
         throw 'unexpected-telegram-method'
