@@ -165,7 +165,7 @@ class UserDependencyTests(unittest.TestCase):
 
 class DependencyPolicyTests(unittest.TestCase):
     def test_auto_install_has_integrity_checks_and_no_winget_requirement(self):
-        text = DEPENDENCIES.read_text()
+        text = DEPENDENCIES.read_text(encoding="utf-8")
         self.assertNotIn('node -e', text)
         self.assertNotIn('winget', text.lower())
         self.assertIn('node-v24.21.0-win-$architecture.zip', text)

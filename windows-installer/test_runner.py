@@ -25,9 +25,9 @@ function global:Invoke-RestMethod {
     }
     if ($Uri -match '^https://api\.telegram\.org/bot') {
         if ($Uri -match '/getMe$') { return @{ ok = $true; result = @{ is_bot = $true } } }
-        if ($Uri -match '/getMyCommands$') { return @{ ok = $true; result = @($script:TelegramCommands) } }
+        if ($Uri -match '/getMyCommands$') { return @{ ok = $true; result = @($global:TelegramCommands) } }
         if ($Uri -match '/setMyCommands$') {
-            $script:TelegramCommands = @((($Body | ConvertFrom-Json).commands))
+            $global:TelegramCommands = @((($Body | ConvertFrom-Json).commands))
             return @{ ok = $true; result = $true }
         }
         throw 'unexpected-telegram-method'
