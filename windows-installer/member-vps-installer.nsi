@@ -12,17 +12,17 @@ Unicode true
   !define RELEASE_VERSION "2026.11.17"
 !endif
 
-Name "OpenClaw Member V6"
+Name "installer_emtroly"
 OutFile "${OUTFILE}"
 RequestExecutionLevel user
 SilentInstall silent
 SetCompressor /SOLID lzma
 
 VIProductVersion "${RELEASE_VERSION}.0"
-VIAddVersionKey "ProductName" "OpenClaw Member V6"
+VIAddVersionKey "ProductName" "installer_emtroly"
 VIAddVersionKey "ProductVersion" "${RELEASE_VERSION}"
 VIAddVersionKey "FileVersion" "${RELEASE_VERSION}.0"
-VIAddVersionKey "FileDescription" "OpenClaw Member V6 Windows installer"
+VIAddVersionKey "FileDescription" "installer_emtroly Windows installer"
 VIAddVersionKey "CompanyName" "Anh Lap Trinh"
 
 Section

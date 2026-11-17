@@ -1,4 +1,5 @@
 release=member-vps-golden-20261116
+product=installer_emtroly
 installer_version=2026.11.17
 image=member-vps-golden:20261116
 base_image=vps-user-env:latest

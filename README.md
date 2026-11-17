@@ -1,4 +1,4 @@
-# Member VPS v6 Template
+# installer_emtroly
 
 ## Native image API key — 2026-10-23
 

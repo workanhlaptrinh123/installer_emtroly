@@ -7,7 +7,7 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'OpenClaw Member V6 - Cai dat'
+$form.Text = 'installer_emtroly - Cai dat'
 $form.StartPosition = 'CenterScreen'
 $form.Size = New-Object System.Drawing.Size(780, 620)
 $form.MinimumSize = New-Object System.Drawing.Size(780, 620)

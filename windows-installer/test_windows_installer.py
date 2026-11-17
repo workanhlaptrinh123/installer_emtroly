@@ -18,6 +18,8 @@ class WindowsInstallerTests(unittest.TestCase):
         qr_plugin = (ROOT / "native/skills/telegram-zalo-owner-login/assets/index.mjs").read_text(encoding="utf-8")
         qr_helper = (ROOT / "native/skills/openclaw-zalo-qr-login/scripts/send_zalo_qr_to_telegram_owner.mjs").read_text(encoding="utf-8")
         self.assertIn("wizard.ps1", nsi)
+        self.assertIn('Name "installer_emtroly"', nsi)
+        self.assertIn("installer_emtroly - Cai dat", wizard)
         self.assertIn("UseSystemPasswordChar", wizard)
         self.assertIn("accept_full_access", wizard)
         self.assertIn("$fullAccessCheck.Checked = $true", wizard)

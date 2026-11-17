@@ -83,5 +83,5 @@ jobs:
             native-full-bundle.tar.gz \
             native-full-bundle.sha256 \
             MANIFEST.txt \
-            --title "OpenClaw Member V6 ${{ steps.version.outputs.version }}" \
+            --title "installer_emtroly ${{ steps.version.outputs.version }}" \
             --generate-notes
