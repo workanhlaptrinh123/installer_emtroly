@@ -1,0 +1,87 @@
+name: Build Windows Installer
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-installer:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHON_BIN: python
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install NSIS
+        shell: powershell
+        run: choco install nsis --yes --no-progress
+
+      - name: Resolve release version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" == v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(sed -n 's/^openclaw=//p' MANIFEST.txt | head -n 1)"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release version: $version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building version $version"
+
+      - name: Run installer tests
+        run: python -m unittest discover -s windows-installer -p 'test_*.py'
+
+      - name: Build native bundle
+        run: PYTHON_BIN="$PYTHON_BIN" ./build-native-bundle.sh
+
+      - name: Build caidattroly.exe
+        run: |
+          NSIS="/c/Program Files (x86)/NSIS/makensis.exe" \
+          PYTHON_BIN="$PYTHON_BIN" \
+          RELEASE_VERSION="${{ steps.version.outputs.version }}" \
+          ./build-windows-installer.sh caidattroly.exe
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: caidattroly-${{ steps.version.outputs.version }}
+          path: |
+            caidattroly.exe
+            caidattroly.exe.sha256
+            native-full-bundle.tar.gz
+            native-full-bundle.sha256
+            MANIFEST.txt
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            caidattroly.exe \
+            caidattroly.exe.sha256 \
+            native-full-bundle.tar.gz \
+            native-full-bundle.sha256 \
+            MANIFEST.txt \
+            --title "OpenClaw Member V6 ${{ steps.version.outputs.version }}" \
+            --generate-notes

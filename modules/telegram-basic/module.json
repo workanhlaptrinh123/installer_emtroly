@@ -1,0 +1,11 @@
+{
+  "id": "telegram-basic",
+  "version": "1.0.1",
+  "description": "Telegram messaging, permissions, media delivery and task response skills",
+  "tier": "core",
+  "requires": ["basic-assistant"],
+  "conflicts": [],
+  "platforms": ["docker", "linux", "macos", "windows"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin"
+}

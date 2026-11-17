@@ -1,0 +1,11 @@
+{
+  "id": "audio-media-basic",
+  "version": "1.0.0",
+  "description": "Basic audio, speech and reliable media delivery workflows",
+  "tier": "core",
+  "requires": ["basic-assistant", "telegram-basic"],
+  "conflicts": [],
+  "platforms": ["docker", "linux", "macos", "windows"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin"
+}

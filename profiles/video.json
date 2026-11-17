@@ -1,0 +1,7 @@
+{
+  "id": "video",
+  "version": "1.0.0",
+  "description": "Basic assistant plus member video workflow skills",
+  "extends": "basic-assistant-full",
+  "modules": ["video-factory-member"]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "basic-assistant-full",
+  "version": "1.0.0",
+  "description": "Complete default assistant baseline for every new Linux/Docker member, including Zalo Personal",
+  "modules": [
+    "basic-assistant",
+    "image-generation",
+    "telegram-basic",
+    "document-office-ocr",
+    "audio-media-basic",
+    "workspace-memory",
+    "scheduler-watchdog",
+    "web-research-basic",
+    "member-health-recovery",
+    "zalo-personal"
+  ]
+}

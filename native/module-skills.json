@@ -1,0 +1,113 @@
+{
+  "basic-assistant": [
+    "core-openclaw-runtime",
+    "validate-openclaw-json",
+    "core-security-secrets",
+    "tao-tro-ly-openclaw-windows-macos-linux",
+    "sync-openclaw-owner-training"
+  ],
+  "image-generation": [
+    "imagegen",
+    "9router-image",
+    "reliable-media-delivery",
+    "local-image-fallback"
+  ],
+  "telegram-basic": [
+    "openclaw-member-media-allowlist",
+    "core-openclaw-telegram",
+    "cap-full-quyen-telegram-openclaw",
+    "cap-quyen-telegram-admin-openclaw",
+    "unify-openclaw-bot-workspace",
+    "set-openclaw-agent-full-exec",
+    "core-openclaw-telegram-permissions",
+    "openclaw-telegram-approval-bridge",
+    "openclaw-telegram-context-guard",
+    "openclaw-telegram-task-delivery",
+    "reliable-media-delivery"
+  ],
+  "document-office-ocr": [
+    "openclaw-docx-reader",
+    "openclaw-large-pdf-recovery",
+    "openclaw-long-document-pipeline",
+    "core-openclaw-media",
+    "openclaw-python-docx-telegram"
+  ],
+  "audio-media-basic": [
+    "core-audio-voice",
+    "text-file-to-mp3-messenger",
+    "reliable-media-delivery"
+  ],
+  "workspace-memory": [
+    "member-workspace-training-knowledge",
+    "sync-openclaw-owner-training",
+    "second-ai-brain-vps-structure",
+    "unify-openclaw-bot-workspace"
+  ],
+  "scheduler-watchdog": [
+    "schedule-task-cron",
+    "self-healing-watchdog",
+    "shared-watchdog-center",
+    "core-automation-watchdog",
+    "openclaw-timeout-guard"
+  ],
+  "web-research-basic": [
+    "9router-web-search",
+    "9router-web-fetch"
+  ],
+  "member-health-recovery": [
+    "core-openclaw-recovery",
+    "recover-openclaw-member-gateway",
+    "member-vps-resource-oom-guard",
+    "openclaw-compaction-recovery",
+    "openclaw-9router-overload-recovery"
+  ],
+  "zalo-personal": [
+    "telegram-zalo-owner-login",
+    "zalo-group-file-delivery-recovery",
+    "core-openclaw-zalo",
+    "openclaw-telegram-zalo-qr-delivery",
+    "openclaw-zalo-reply-mention",
+    "openclaw-zalo-qr-login",
+    "openclaw-zalouser-onboarding-standard",
+    "openclaw-zalouser-owner-access",
+    "openclaw-zalo-reliability",
+    "openclaw-zalo-reliability-deploy",
+    "openclaw-zalo-no-response",
+    "openclaw-zalo-context-rotation-70k",
+    "openclaw-compaction-recovery",
+    "shared-watchdog-center",
+    "recover-openclaw-member-gateway",
+    "member-vps-resource-oom-guard",
+    "zalo-auto-send-contact",
+    "zalo-buffer-file-send",
+    "zalo-reliable-task-delivery",
+    "openclaw-zalo-text-delivery-guard"
+  ],
+  "facebook-fanpage-auto-reply": [
+    "core-social-messaging",
+    "facebook-messenger-human-pause",
+    "messenger-customer-history-archive",
+    "messenger-customer-history-daily-telegram-report",
+    "messenger-qa-proposal-approval",
+    "messenger-bstuannk-fanpage",
+    "facebook-youtube-auto-publisher"
+  ],
+  "video-factory-member": [
+    "core-video-production",
+    "video-clone-ytb",
+    "tao-video-chia-se-loi-ich-alt",
+    "video-transcript-facebook",
+    "video-to-website",
+    "video-to-fanpage-alt-sheet",
+    "transcript-centered-video-render"
+  ],
+  "google-drive-sync": [
+    "google-drive-rclone-setup",
+    "google-drive-vps-sync"
+  ],
+  "wordpress-chatbot": [
+    "wordpress-openclaw-chatbot",
+    "openclaw-course-website-bridge",
+    "core-website-operations"
+  ]
+}

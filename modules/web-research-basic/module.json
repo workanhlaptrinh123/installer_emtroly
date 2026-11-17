@@ -1,0 +1,11 @@
+{
+  "id": "web-research-basic",
+  "version": "1.0.0",
+  "description": "Web search and URL fetching workflows through the configured provider",
+  "tier": "core",
+  "requires": ["basic-assistant"],
+  "conflicts": [],
+  "platforms": ["docker", "linux", "macos", "windows"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin"
+}

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "release": "member-vps-v6-20261006",
+  "core_profile": "basic-assistant-full",
+  "module_state_dir": "/root/.openclaw/module-state",
+  "secret_policy": "credentials-are-injected-per-member-and-never-stored-in-modules",
+  "optional_modules": [
+    "zalo-personal",
+    "image-generation",
+    "facebook-fanpage-auto-reply",
+    "video-factory-member",
+    "google-drive-sync",
+    "wordpress-chatbot"
+  ]
+}

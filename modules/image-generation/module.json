@@ -1,0 +1,11 @@
+{
+  "id": "image-generation",
+  "version": "1.1.0",
+  "description": "Native image_generate using member API key and endpoint (cx/gpt-image-2)",
+  "tier": "core",
+  "requires": ["basic-assistant", "audio-media-basic"],
+  "conflicts": [],
+  "platforms": ["docker", "linux", "macos", "windows"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin"
+}

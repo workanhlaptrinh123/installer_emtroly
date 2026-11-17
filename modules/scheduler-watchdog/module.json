@@ -1,0 +1,11 @@
+{
+  "id": "scheduler-watchdog",
+  "version": "1.0.0",
+  "description": "Safe scheduling, timeout protection and automation watchdog skills",
+  "tier": "core",
+  "requires": ["basic-assistant"],
+  "conflicts": [],
+  "platforms": ["docker", "linux", "macos", "windows"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin"
+}

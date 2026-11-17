@@ -1,0 +1,13 @@
+{
+  "member": "member01",
+  "assistant_name": "Trợ lý của bạn",
+  "owner_ids": ["REPLACE_WITH_TELEGRAM_USER_ID"],
+  "group_id": "",
+  "telegram_token": "ENTER_PRIVATELY",
+  "base_url": "https://codex.anhlaptrinh.vn/v1",
+  "api_key": "ENTER_PRIVATELY",
+  "api": "openai-completions",
+  "model": "gpt-6.1-sol",
+  "profile": "basic-assistant-full",
+  "modules": []
+}

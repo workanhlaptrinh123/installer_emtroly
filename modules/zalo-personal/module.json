@@ -1,0 +1,12 @@
+{
+  "id": "zalo-personal",
+  "version": "1.0.1",
+  "description": "Zalo Personal — cài plugin, đăng nhập QR qua bot Telegram của member; có thể bổ sung sau",
+  "tier": "optional",
+  "requires": ["basic-assistant", "telegram-basic", "member-health-recovery"],
+  "conflicts": [],
+  "platforms": ["docker", "linux", "windows"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin",
+  "requires_external_credentials": true
+}

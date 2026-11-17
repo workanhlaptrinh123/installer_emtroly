@@ -1,0 +1,11 @@
+{
+  "id": "document-office-ocr",
+  "version": "1.0.0",
+  "description": "Office document reading, large PDF recovery and OCR workflows",
+  "tier": "core",
+  "requires": ["basic-assistant", "telegram-basic"],
+  "conflicts": [],
+  "platforms": ["docker", "linux", "macos", "windows"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin"
+}

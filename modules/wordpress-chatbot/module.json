@@ -1,0 +1,12 @@
+{
+  "id": "wordpress-chatbot",
+  "version": "1.0.0",
+  "description": "WordPress OpenClaw chatbot deployment and operations workflows",
+  "tier": "optional",
+  "requires": ["basic-assistant", "web-research-basic"],
+  "conflicts": [],
+  "platforms": ["docker", "linux", "macos", "windows"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin",
+  "requires_external_credentials": true
+}

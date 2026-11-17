@@ -1,0 +1,7 @@
+{
+  "id": "social",
+  "version": "1.0.0",
+  "description": "Basic assistant plus Facebook fanpage workflows",
+  "extends": "basic-assistant-full",
+  "modules": ["facebook-fanpage-auto-reply"]
+}

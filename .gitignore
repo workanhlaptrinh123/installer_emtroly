@@ -1,0 +1,26 @@
+# Generated installers and release archives
+*.exe
+*.exe.sha256
+*.tar.gz
+*.zip
+*.sha256
+SHA256SUMS
+
+# Python caches and local backup snapshots
+__pycache__/
+*.py[cod]
+*.bak-*
+
+# Local runtime/configuration state
+.env
+.env.*
+*.token
+*.secret
+*.sqlite
+*.sqlite3
+*.db
+customer_history/
+
+# Local build output
+.native-full-bundle.*.tar.gz
+.openclaw-member-*/

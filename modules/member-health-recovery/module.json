@@ -1,0 +1,11 @@
+{
+  "id": "member-health-recovery",
+  "version": "1.0.0",
+  "description": "Gateway recovery, resource guard and member runtime recovery workflows",
+  "tier": "core",
+  "requires": ["basic-assistant"],
+  "conflicts": [],
+  "platforms": ["docker", "linux", "macos", "windows"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin"
+}

@@ -1,0 +1,11 @@
+{
+  "id": "basic-assistant",
+  "version": "1.0.0",
+  "description": "Core OpenClaw assistant skill pack",
+  "tier": "core",
+  "requires": [],
+  "conflicts": [],
+  "platforms": ["docker", "linux", "macos", "windows"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin"
+}

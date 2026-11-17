@@ -1,0 +1,12 @@
+{
+  "id": "video-factory-member",
+  "version": "1.0.0",
+  "description": "Member-facing video production workflow skills",
+  "tier": "optional",
+  "requires": ["basic-assistant", "audio-media-basic", "member-health-recovery"],
+  "conflicts": [],
+  "platforms": ["docker", "linux"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin",
+  "requires_external_credentials": true
+}

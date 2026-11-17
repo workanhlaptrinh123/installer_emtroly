@@ -1,0 +1,7 @@
+{
+  "id": "business",
+  "version": "1.0.0",
+  "description": "Basic assistant plus Drive and WordPress workflows",
+  "extends": "basic-assistant-full",
+  "modules": ["google-drive-sync", "wordpress-chatbot"]
+}

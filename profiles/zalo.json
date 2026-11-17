@@ -1,0 +1,7 @@
+{
+  "id": "zalo",
+  "version": "1.0.0",
+  "description": "Basic assistant plus Zalo Personal workflows",
+  "extends": "basic-assistant-full",
+  "modules": ["zalo-personal"]
+}

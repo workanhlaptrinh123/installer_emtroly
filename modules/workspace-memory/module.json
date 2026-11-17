@@ -1,0 +1,11 @@
+{
+  "id": "workspace-memory",
+  "version": "1.0.0",
+  "description": "Member workspace, training context and owner policy synchronization",
+  "tier": "core",
+  "requires": ["basic-assistant"],
+  "conflicts": [],
+  "platforms": ["docker", "linux", "macos", "windows"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin"
+}

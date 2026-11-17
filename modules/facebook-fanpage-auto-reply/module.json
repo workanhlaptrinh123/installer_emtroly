@@ -1,0 +1,12 @@
+{
+  "id": "facebook-fanpage-auto-reply",
+  "version": "1.0.0",
+  "description": "Facebook and Messenger fanpage reply workflows",
+  "tier": "optional",
+  "requires": ["basic-assistant", "telegram-basic", "member-health-recovery"],
+  "conflicts": [],
+  "platforms": ["docker", "linux"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin",
+  "requires_external_credentials": true
+}

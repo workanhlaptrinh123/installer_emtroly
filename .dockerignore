@@ -1,0 +1,7 @@
+*.tar.gz
+*.sha256
+SHA256SUMS
+**/*.bak-*
+**/__pycache__/
+**/*.pyc
+.git/

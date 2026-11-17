@@ -1,0 +1,12 @@
+{
+  "id": "google-drive-sync",
+  "version": "1.0.0",
+  "description": "Google Drive synchronization workflows",
+  "tier": "optional",
+  "requires": ["basic-assistant", "document-office-ocr"],
+  "conflicts": [],
+  "platforms": ["docker", "linux", "macos", "windows"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin",
+  "requires_external_credentials": true
+}
