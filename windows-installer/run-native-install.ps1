@@ -20,10 +20,10 @@ function Invoke-TelegramApi {
     [Parameter(Mandatory=$true)][string]$Method,
     [object]$Body = $null
   )
-  $method = if ($null -ne $Body) { 'Post' } else { 'Get' }
+  $httpMethod = if ($null -ne $Body) { 'Post' } else { 'Get' }
   $parameters = @{
     UseBasicParsing = $true
-    Method = $method
+    Method = $httpMethod
     Uri = 'https://api.telegram.org/bot' + $Token + '/' + $Method
     TimeoutSec = 45
     MaximumRedirection = 0

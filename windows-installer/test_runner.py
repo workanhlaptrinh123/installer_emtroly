@@ -19,9 +19,6 @@ param($Runner, $Settings, $Payload, $Log)
 function global:Invoke-RestMethod {
     param([switch]$UseBasicParsing, $Method, $Uri, $Headers, $TimeoutSec, $MaximumRedirection, $ContentType, $Body)
     if ($MaximumRedirection -ne 0) { throw 'unexpected-redirect-policy' }
-    $debugUri = $Uri -replace '^https://api\.telegram\.org/bot[^/]+/', '/'
-    $bodyType = if ($null -eq $Body) { 'null' } else { $Body.GetType().FullName }
-    [IO.File]::AppendAllText($env:TEST_DEBUG_FILE, "method=$Method uri=$debugUri body=$bodyType`n")
     if ($Uri -eq 'https://provider.example/v1/models') {
         if ($env:TEST_MODE -eq 'missing-model') { return @{ data = @(@{ id = 'different-model' }) } }
         return @{ data = @(@{ id = 'GPT-6.1-SOL' }) }
@@ -151,8 +148,7 @@ class RunnerTests(unittest.TestCase):
             user_home = root / "home"
             user_home.mkdir()
             environment = {**os.environ, "USERPROFILE": str(user_home), "TEST_MODE": mode,
-                           "TEST_TOKEN": TOKEN, "TEST_API_KEY": API_KEY,
-                           "TEST_DEBUG_FILE": str(root / "telegram-debug.txt")}
+                           "TEST_TOKEN": TOKEN, "TEST_API_KEY": API_KEY}
             process = subprocess.run(
                 [PWSH, "-NoLogo", "-NoProfile", "-File", str(driver),
                  "-Runner", str(RELEASE / "windows-installer/run-native-install.ps1"),
@@ -160,9 +156,6 @@ class RunnerTests(unittest.TestCase):
                 env=environment, capture_output=True, text=True, timeout=30,
             )
             text = (log.read_text(encoding="utf-8") if log.exists() else "") + process.stdout + process.stderr
-            debug = root / "telegram-debug.txt"
-            if debug.exists():
-                text += "\nTELEGRAM_DEBUG\n" + debug.read_text(encoding="utf-8")
             self.assertNotIn(TOKEN, text)
             self.assertNotIn(API_KEY, text)
             self.assertFalse(secret_file.exists())
