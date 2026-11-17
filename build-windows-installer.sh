@@ -5,7 +5,7 @@ BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT="${1:-$BASE/caidattroly.exe}"
 NSIS="${NSIS:-$(command -v makensis || true)}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-RELEASE_VERSION="${RELEASE_VERSION:-2026.11.4}"
+RELEASE_VERSION="${RELEASE_VERSION:-2026.11.17}"
 
 if [[ -z "$NSIS" ]]; then
   for candidate in /tmp/nsis-stage/extract/usr/bin/makensis /usr/bin/makensis; do

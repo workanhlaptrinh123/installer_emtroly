@@ -9,7 +9,7 @@ Unicode true
   !error "OUTFILE must point to the executable to build"
 !endif
 !ifndef RELEASE_VERSION
-  !define RELEASE_VERSION "2026.11.4"
+  !define RELEASE_VERSION "2026.11.17"
 !endif
 
 Name "OpenClaw Member V6"

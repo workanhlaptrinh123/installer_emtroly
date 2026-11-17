@@ -21,6 +21,10 @@ it may incur image-generation charges. No Python/curl image helper is installed.
 
 ### Public Zalo chat default — 2026-10-16
 
+Installer releases use the calendar format `YYYY.MM.DD`; the current installer
+release is `2026.11.17`. The bundled OpenClaw runtime remains tracked separately
+as `2026.11.4` in `MANIFEST.txt`.
+
 New Zalo onboarding sets `dmPolicy=open` and includes `*` in `allowFrom` at
 both channel and account level. After QR login and a healthy connection, anyone
 can DM without pairing; groups remain open without mention. Owner commands,

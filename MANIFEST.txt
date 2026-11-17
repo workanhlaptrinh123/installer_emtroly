@@ -1,4 +1,5 @@
 release=member-vps-golden-20261116
+installer_version=2026.11.17
 image=member-vps-golden:20261116
 base_image=vps-user-env:latest
 openclaw=2026.11.4
