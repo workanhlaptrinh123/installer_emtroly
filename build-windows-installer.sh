@@ -53,11 +53,16 @@ mkdir -p "$(dirname "$OUT")"
 OUT="$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")"
 nsis_dir="$(dirname "$(dirname "$NSIS")")/share/nsis"
 if [[ -d "$nsis_dir" && -z "${NSISDIR:-}" ]]; then export NSISDIR="$nsis_dir"; fi
-"$NSIS" \
+nsis_args=(
   -D"PAYLOAD_DIR=$payload" \
   -D"OUTFILE=$OUT" \
   -D"RELEASE_VERSION=$RELEASE_VERSION" \
   "$BASE/windows-installer/member-vps-installer.nsi"
+)
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) nsis_args=(-DWINDOWS_BUILD "${nsis_args[@]}" ) ;;
+esac
+"$NSIS" "${nsis_args[@]}"
 
 (cd "$(dirname "$OUT")" && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256")
 printf 'Built %s\n' "$OUT"

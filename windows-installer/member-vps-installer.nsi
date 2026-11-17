@@ -33,7 +33,11 @@ Section
   ${EndIf}
   InitPluginsDir
   SetOutPath "$PLUGINSDIR"
+  !ifdef WINDOWS_BUILD
+  File /r "${PAYLOAD_DIR}\*"
+  !else
   File /r "${PAYLOAD_DIR}/*"
+  !endif
   ClearErrors
   ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$PLUGINSDIR\windows-installer\wizard.ps1" -PayloadRoot "$PLUGINSDIR"' $0
   IfErrors launch_error
