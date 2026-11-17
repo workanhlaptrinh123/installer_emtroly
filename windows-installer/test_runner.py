@@ -26,19 +26,15 @@ function global:Invoke-RestMethod {
     if ($Uri -match '^https://api\.telegram\.org/bot') {
         if ($Uri -match '/getMe$') { return @{ ok = $true; result = @{ is_bot = $true } } }
         if ($Uri -match '/getMyCommands$') {
-            if ([Environment]::GetEnvironmentVariable('TEST_COMMANDS_SET', 'Process') -eq '1') {
-                return @{ ok = $true; result = @(
-                    @{ command = 'zaloqr'; description = 'Tao QR dang nhap Zalo' },
-                    @{ command = 'zalostatus'; description = 'Kiem tra trang thai Zalo' }
-                ) }
-            }
-            return @{ ok = $true; result = @() }
+            return @{ ok = $true; result = @(
+                @{ command = 'zaloqr'; description = 'Tao QR dang nhap Zalo' },
+                @{ command = 'zalostatus'; description = 'Kiem tra trang thai Zalo' }
+            ) }
         }
         if ($Uri -match '/setMyCommands$') {
             $commands = @((($Body | ConvertFrom-Json).commands))
             $names = @($commands | ForEach-Object { [string]$_.command })
             if ('zaloqr' -notin $names -or 'zalostatus' -notin $names) { throw 'required-command-not-sent' }
-            [Environment]::SetEnvironmentVariable('TEST_COMMANDS_SET', '1', 'Process')
             return @{ ok = $true; result = $true }
         }
         throw 'unexpected-telegram-method'
@@ -155,8 +151,7 @@ class RunnerTests(unittest.TestCase):
             user_home = root / "home"
             user_home.mkdir()
             environment = {**os.environ, "USERPROFILE": str(user_home), "TEST_MODE": mode,
-                           "TEST_TOKEN": TOKEN, "TEST_API_KEY": API_KEY,
-                           "TEST_COMMANDS_SET": "0"}
+                           "TEST_TOKEN": TOKEN, "TEST_API_KEY": API_KEY}
             process = subprocess.run(
                 [PWSH, "-NoLogo", "-NoProfile", "-File", str(driver),
                  "-Runner", str(RELEASE / "windows-installer/run-native-install.ps1"),
