@@ -26,16 +26,19 @@ function global:Invoke-RestMethod {
     if ($Uri -match '^https://api\.telegram\.org/bot') {
         if ($Uri -match '/getMe$') { return @{ ok = $true; result = @{ is_bot = $true } } }
         if ($Uri -match '/getMyCommands$') {
-            $commands = @()
-            if (Test-Path -LiteralPath $env:TEST_COMMANDS_FILE) {
-                $raw = [IO.File]::ReadAllText($env:TEST_COMMANDS_FILE)
-                if ($raw.Trim()) { $commands = @($raw | ConvertFrom-Json) }
+            if ([Environment]::GetEnvironmentVariable('TEST_COMMANDS_SET', 'Process') -eq '1') {
+                return @{ ok = $true; result = @(
+                    @{ command = 'zaloqr'; description = 'Tao QR dang nhap Zalo' },
+                    @{ command = 'zalostatus'; description = 'Kiem tra trang thai Zalo' }
+                ) }
             }
-            return @{ ok = $true; result = $commands }
+            return @{ ok = $true; result = @() }
         }
         if ($Uri -match '/setMyCommands$') {
             $commands = @((($Body | ConvertFrom-Json).commands))
-            [IO.File]::WriteAllText($env:TEST_COMMANDS_FILE, ($commands | ConvertTo-Json -Depth 8 -Compress))
+            $names = @($commands | ForEach-Object { [string]$_.command })
+            if ('zaloqr' -notin $names -or 'zalostatus' -notin $names) { throw 'required-command-not-sent' }
+            [Environment]::SetEnvironmentVariable('TEST_COMMANDS_SET', '1', 'Process')
             return @{ ok = $true; result = $true }
         }
         throw 'unexpected-telegram-method'
@@ -149,13 +152,11 @@ class RunnerTests(unittest.TestCase):
             secret_file = root / "settings.json"
             secret_file.write_text(json.dumps(settings), encoding="utf-8")
             log = root / "status.txt"
-            commands_file = root / "telegram-commands.json"
-            commands_file.write_text("[]", encoding="utf-8")
             user_home = root / "home"
             user_home.mkdir()
             environment = {**os.environ, "USERPROFILE": str(user_home), "TEST_MODE": mode,
                            "TEST_TOKEN": TOKEN, "TEST_API_KEY": API_KEY,
-                           "TEST_COMMANDS_FILE": str(commands_file)}
+                           "TEST_COMMANDS_SET": "0"}
             process = subprocess.run(
                 [PWSH, "-NoLogo", "-NoProfile", "-File", str(driver),
                  "-Runner", str(RELEASE / "windows-installer/run-native-install.ps1"),
