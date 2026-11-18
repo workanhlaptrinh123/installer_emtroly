@@ -34,14 +34,16 @@ class CliShimWindowsTests(unittest.TestCase):
             shim.write_bytes(CLI.shim_payload(Path(sys.executable), entry, environment, "fixture"))
             shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
             process_environment = {**os.environ, "PATH": str(home) + os.pathsep + os.environ["PATH"]}
-            for arguments in (("status", "--json"), ("--version",)):
+            cases = (("status", "--json"), ("--version",))
+            for arguments in cases:
                 result = subprocess.run(
                     [str(shell), "-NoProfile", "-NonInteractive", "-Command", "openclaw " + " ".join(arguments)],
                     env=process_environment, capture_output=True, text=True, encoding="utf-8", timeout=30, check=False,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 payload = json.loads(result.stdout)
-                self.assertEqual(payload["args"], list(arguments))
+                expected = ["gateway", "status", "--json"] if arguments[0] == "status" else list(arguments)
+                self.assertEqual(payload["args"], expected)
                 self.assertEqual(payload["root"], str(root))
 
 
