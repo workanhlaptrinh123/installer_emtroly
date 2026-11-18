@@ -67,7 +67,7 @@ if ($env:TEST_MODE -eq 'zalo-unsafe-detail') {
     throw 'fixture-private-error'
 }
 $root = Join-Path $env:USERPROFILE ('.openclaw-member-' + $Name)
-foreach ($item in @('openclaw.json', 'installer-instance.json', 'openclaw-instance.ps1',
+foreach ($item in @('openclaw.json', 'installer-instance.json', 'openclaw-instance.ps1', 'windows-cli.json',
     'workspace\skills\openclaw-zalo-reply-mention\SKILL.md',
     'workspace\skills\openclaw-telegram-zalo-qr-delivery\SKILL.md',
     'workspace\skills\cap-full-quyen-telegram-openclaw\SKILL.md')) {

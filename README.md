@@ -22,7 +22,7 @@ it may incur image-generation charges. No Python/curl image helper is installed.
 ### Public Zalo chat default — 2026-10-16
 
 Installer releases use the calendar format `YYYY.MM.DD`; the current installer
-release is `2026.11.17`. The bundled OpenClaw runtime remains tracked separately
+release is `2026.11.18`. The bundled OpenClaw runtime remains tracked separately
 as `2026.11.4` in `MANIFEST.txt`.
 
 New Zalo onboarding sets `dmPolicy=open` and includes `*` in `allowFrom` at
@@ -104,6 +104,22 @@ signature. Downloads require Internet access and sufficient disk space; the
 installer does not require winget for these dependencies. Existing suitable
 tools are reused without uninstalling other OpenClaw instances. A failed
 partial instance is deliberately left in place and must not be overwritten.
+
+After a successful user-scope installation, the installer creates a verified
+`openclaw.cmd` shim in the current user's `AppData\Local\OpenClaw\bin` and
+persists that directory in the user's PATH without replacing the machine PATH.
+Open a new PowerShell window after installation, then `openclaw status` and
+other CLI arguments are passed to the selected private runtime. If another
+unrelated `openclaw` command already owns the generic name, the installer
+preserves it and shows a unique `openclaw-member-*.cmd` alias on completion.
+The selected command and path are also recorded in the instance's
+`windows-cli.json`. Existing terminals must be reopened to pick up the User
+PATH change; an existing installation is not automatically modified.
+
+Every push to `main` runs tests and creates a Windows installer artifact kept
+for seven days. Pushing a `vYYYY.MM.DD` tag runs the checks again and publishes
+the installer and checksums as a GitHub Release; a `main` push alone does not
+publish a Release.
 
 The Zalo installer checks whether the matching plugin is already enabled
 before requesting another enable operation. Native CLI stderr is captured

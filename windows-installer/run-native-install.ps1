@@ -121,7 +121,7 @@ try {
   $env:MEMBER_INSTALL_STATUS_FILE = $LogFile
   & $installer @arguments *> $null
   if ($LASTEXITCODE -ne 0) { throw 'installer-failed' }
-  foreach ($required in @('openclaw.json', 'installer-instance.json', 'openclaw-instance.ps1', 'workspace\skills\openclaw-zalo-reply-mention\SKILL.md', 'workspace\skills\openclaw-telegram-zalo-qr-delivery\SKILL.md', 'workspace\skills\cap-full-quyen-telegram-openclaw\SKILL.md')) {
+  foreach ($required in @('openclaw.json', 'installer-instance.json', 'openclaw-instance.ps1', 'windows-cli.json', 'workspace\skills\openclaw-zalo-reply-mention\SKILL.md', 'workspace\skills\openclaw-telegram-zalo-qr-delivery\SKILL.md', 'workspace\skills\cap-full-quyen-telegram-openclaw\SKILL.md')) {
     if (-not (Test-Path -LiteralPath (Join-Path $root $required))) { throw 'incomplete-installation' }
   }
   $instance = Get-Content -LiteralPath (Join-Path $root 'installer-instance.json') -Raw | ConvertFrom-Json
@@ -184,6 +184,10 @@ try {
     'FFmpeg download failed.' = 'Khong tai duoc FFmpeg. Hay kiem tra Internet va quyen tai file.'
     'Python dependency verification failed.' = 'Python chua san sang sau khi bo cai thu tai va cai dat.'
     'FFmpeg dependency verification failed.' = 'FFmpeg chua san sang sau khi bo cai thu cai dat.'
+    'OpenClaw CLI PATH helper is missing.' = 'Bo cai thieu cong cu dang ky lenh openclaw.'
+    'OpenClaw CLI PATH installation failed.' = 'Khong the dang ky lenh openclaw vao PATH cua tai khoan Windows.'
+    'OpenClaw CLI shim was not created.' = 'Khong tim thay lenh OpenClaw vua dang ky.'
+    'OpenClaw CLI shim verification failed.' = 'Lenh OpenClaw da tao nhung khong xac minh duoc phien ban.'
     'FFmpeg checksum verification failed.' = 'Khong xac minh duoc goi FFmpeg da tai. Hay thu lai voi Internet on dinh.'
     'Portable Node checksum verification failed.' = 'Khong xac minh duoc goi Node portable da tai. Hay thu lai voi Internet on dinh.'
     'Python installer signature verification failed.' = 'Khong xac minh duoc chu ky bo cai Python da tai.'

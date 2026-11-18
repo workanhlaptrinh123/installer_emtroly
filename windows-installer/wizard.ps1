@@ -299,7 +299,18 @@ $timer.Add_Tick({
     $script:resultCode = $code
     if ($code -eq 0) {
       $statusLabel.Text = 'Cai dat hoan tat. /zaloqr va /zalostatus da san sang.'
-      [System.Windows.Forms.MessageBox]::Show($form, 'OpenClaw da qua cac buoc kiem tra local. Hay nhan /zaloqr trong chat rieng Telegram, quet ma tren dien thoai va dung /zalostatus de kiem tra Zalo. Gateway chay an khi user Windows dang nhap.', 'Hoan tat buoc local', 'OK', 'Information') | Out-Null
+      $cliNotice = 'Mo PowerShell moi, sau do chay: openclaw status.'
+      $cliInfoPath = Join-Path (Join-Path $env:USERPROFILE ('.openclaw-member-' + $nameBox.Text.Trim())) 'windows-cli.json'
+      if (Test-Path -LiteralPath $cliInfoPath) {
+        try {
+          $cliInfo = [IO.File]::ReadAllText($cliInfoPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
+          if (-not $cliInfo.default -and $cliInfo.command -match '^openclaw-member-[a-f0-9]{12}$') {
+            $cliNotice = "Lenh openclaw da ton tai va duoc giu nguyen. Mo PowerShell moi, sau do chay: $($cliInfo.command) status."
+          }
+        } catch { $cliNotice = 'Mo PowerShell moi. Neu lenh openclaw da co san, xem windows-cli.json trong thu muc instance de biet ten lenh rieng.' }
+      }
+      $successMessage = "OpenClaw da qua cac buoc kiem tra local. Hay nhan /zaloqr trong chat rieng Telegram va dung /zalostatus de kiem tra Zalo sau khi quet QR.`n`n$cliNotice`n`nGateway chay an khi user Windows dang nhap."
+      [System.Windows.Forms.MessageBox]::Show($form, $successMessage, 'Hoan tat buoc local', 'OK', 'Information') | Out-Null
       $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
       $form.Close()
     } else {

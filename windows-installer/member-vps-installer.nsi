@@ -9,7 +9,7 @@ Unicode true
   !error "OUTFILE must point to the executable to build"
 !endif
 !ifndef RELEASE_VERSION
-  !define RELEASE_VERSION "2026.11.17"
+  !define RELEASE_VERSION "2026.11.18"
 !endif
 
 Name "installer_emtroly"
