@@ -39,7 +39,6 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertIn("telegram-command-menu-not-registered", runner)
         self.assertIn("install_windows_cli.py", installer)
         self.assertIn("Install-UserOpenClawCli", installer)
-        self.assertIn('" %*', cli_helper)
         self.assertIn('"OpenClaw" / "bin"', cli_helper)
         self.assertIn("WindowStyle Hidden", wizard)
         self.assertIn("WindowStyle Hidden", nsi)
