@@ -155,7 +155,7 @@ class WindowsCliTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        self.home = Path(temporary.name) / "Minh Vương & 100%!"
+        self.home = Path(temporary.name).resolve() / "Minh Vương & 100%!"
         self.state = self.home / ".openclaw-member-fixture"
         self.state.mkdir(parents=True)
         self.localappdata = self.home / "AppData/Local"
