@@ -82,19 +82,8 @@ def shim_payload(node, cli_entry, environment, identifier):
     lines = ["@echo off", "@rem OpenClaw member CLI " + identifier,
              '"%SystemRoot%\\System32\\chcp.com" 65001 >nul', "setlocal DisableDelayedExpansion"]
     lines.extend('set "' + name + "=" + escaped(value) + '"' for name, value in environment.items())
-    command = '"' + escaped(node) + '" "' + escaped(cli_entry) + '"'
-    lines.extend([
-        'set "PATH=' + escaped(node.parent) + ';%PATH%"',
-        'if /I "%~1"=="status" goto openclaw_gateway_status',
-        'goto openclaw_passthrough',
-        ':openclaw_gateway_status',
-        command + ' gateway status %2 %3 %4 %5 %6 %7 %8 %9',
-        'exit /b %errorlevel%',
-        ':openclaw_passthrough',
-        command + ' %*',
-        'exit /b %errorlevel%',
-        "",
-    ])
+    lines.extend(['set "PATH=' + escaped(node.parent) + ';%PATH%"',
+                  '"' + escaped(node) + '" "' + escaped(cli_entry) + '" %*', "exit /b %errorlevel%", ""])
     return "\r\n".join(lines).encode("utf-8")
 
 

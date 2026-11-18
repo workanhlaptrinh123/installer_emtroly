@@ -42,8 +42,7 @@ class CliShimWindowsTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 payload = json.loads(result.stdout)
-                expected = ["gateway", "status", "--json"] if arguments[0] == "status" else list(arguments)
-                self.assertEqual(payload["args"], expected)
+                self.assertEqual(payload["args"], list(arguments))
                 self.assertEqual(payload["root"], str(root))
 
 
