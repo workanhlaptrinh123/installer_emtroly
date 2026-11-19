@@ -4,6 +4,7 @@ import argparse
 import os
 from pathlib import Path
 import platform
+import shlex
 import sys
 
 import python_runtime
@@ -132,7 +133,13 @@ def main(argv=None):
         print("\nCài đặt hoàn tất; không cần quét QR để hoàn tất cài đặt.")
         print("Thư mục: " + result["root"])
         print("Lệnh kiểm tra: " + result["cli"]["command"] + " status")
-        print("Mở terminal mới nếu lệnh chưa có trong PATH. Trên Telegram dùng /zaloqr hoặc /zalostatus.")
+        print('Nếu cài bằng bash, chạy trong terminal hiện tại: export PATH="$PATH:$HOME/.local/bin"; hash -r')
+        shell_path = result["cli"].get("shell_path", {})
+        if not (shell_path.get("updated") or shell_path.get("reason") == "already-configured"):
+            print("Chưa thiết lập được PATH lâu dài (" + shell_path.get("reason", "không rõ") + ").")
+        print("Lệnh trực tiếp: " + shlex.quote(str(Path(result["cli"]["directory"]) /
+                                                   result["cli"]["command"])) + " status")
+        print("Trên Telegram dùng /zaloqr hoặc /zalostatus.")
         return 0
     except (EOFError, KeyboardInterrupt):
         print("\nĐã dừng. Nếu đã tạo instance, hãy kiểm tra trước khi cài lại.", file=sys.stderr)

@@ -3,7 +3,8 @@
 ## Ubuntu Terminal Installer — Preview
 
 For an Ubuntu VPS without a desktop, use `./install-ubuntu.sh --check` and
-then `./install-ubuntu.sh` from an interactive SSH session as a non-root user.
+then `source install-ubuntu.sh` from an interactive Bash session as a non-root
+user, so the current shell receives the command PATH after installation.
 This is a development preview, not the existing Docker `install.sh` and not a
 browser dashboard. See `unix-installer/README.md` for prerequisites, systemd
 user services, owner Full Exec risks and the separate Zalo acceptance test.

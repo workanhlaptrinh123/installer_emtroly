@@ -28,8 +28,11 @@ def configure_shell_path(root, home, shell):
     existed = target.exists()
     original = target.read_bytes() if existed else b""
     text = original.decode("utf-8")
+    path_command = ('case ":$PATH:" in *":$HOME/.local/bin:"*) ;; '
+                    '*) export PATH="$PATH:$HOME/.local/bin" ;; esac')
     if PATH_START in text or PATH_END in text:
-        if text.count(PATH_START) == text.count(PATH_END) == 1 and text.index(PATH_START) < text.index(PATH_END):
+        if (text.count(PATH_START) == text.count(PATH_END) == 1 and
+                PATH_START + "\n" + path_command + "\n" + PATH_END in text):
             return {"updated": False, "reason": "already-configured"}
         return {"updated": False, "reason": "invalid-existing-markers"}
     backup = root / "backups" / "shell"
@@ -41,8 +44,7 @@ def configure_shell_path(root, home, shell):
         descriptor = os.open(backup_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(original)
-    snippet = ("\n" + PATH_START + '\ncase ":$PATH:" in *":$HOME/.local/bin:"*) ;; '
-               '*) export PATH="$PATH:$HOME/.local/bin" ;; esac\n' + PATH_END + "\n").encode()
+    snippet = ("\n" + PATH_START + "\n" + path_command + "\n" + PATH_END + "\n").encode()
     descriptor, name = tempfile.mkstemp(prefix=".installer-path-", dir=home)
     temporary = Path(name)
     try:

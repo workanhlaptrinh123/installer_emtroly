@@ -91,7 +91,8 @@ class TerminalInstallerTests(unittest.TestCase):
 
     def test_success_calls_shared_installer_and_reports_cli(self):
         result = {"root": "/home/test/.openclaw-member-member01", "gateway_port": 19789,
-                  "cli": {"command": "openclaw"}}
+                  "cli": {"command": "openclaw", "directory": "/home/test/.local/bin",
+                          "shell_path": {"updated": True}}}
         with patch.object(cli, "preflight"), patch.object(cli, "bootstrap_python"), \
                 patch.object(cli, "collect", return_value=sample()), \
                 patch.object(cli.runner, "install", return_value=result) as install, \
@@ -99,7 +100,18 @@ class TerminalInstallerTests(unittest.TestCase):
             self.assertEqual(cli.main([]), 0)
         self.assertEqual(install.call_args.args[1], Path(cli.__file__).resolve().parent.parent)
         self.assertIn("openclaw status", output.getvalue())
+        self.assertIn('export PATH="$PATH:$HOME/.local/bin"', output.getvalue())
         self.assertIn("/zaloqr", output.getvalue())
+
+    def test_shell_path_failure_is_reported(self):
+        result = {"root": "/home/test/.openclaw-member-member01",
+                  "cli": {"command": "openclaw", "directory": "/home/test/.local/bin",
+                          "shell_path": {"updated": False, "reason": "unsafe-shell-config"}}}
+        with patch.object(cli, "preflight"), patch.object(cli, "bootstrap_python"), \
+                patch.object(cli, "collect", return_value=sample()), \
+                patch.object(cli.runner, "install", return_value=result), redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(cli.main([]), 0)
+        self.assertIn("unsafe-shell-config", output.getvalue())
 
     def test_old_python_is_reexecuted_using_private_runtime(self):
         target = Path("/home/test/dependencies/python/bin/python3")

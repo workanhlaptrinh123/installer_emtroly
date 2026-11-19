@@ -1,10 +1,25 @@
 #!/usr/bin/env bash
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  if command bash "${BASH_SOURCE[0]}" "$@"; then
+    if [[ $# -eq 0 ]]; then
+      case ":${PATH-}:" in
+        *":$HOME/.local/bin:"*) ;;
+        *) export PATH="${PATH:+$PATH:}$HOME/.local/bin" ;;
+      esac
+      hash -r
+      printf '%s\n' 'Đã cập nhật PATH cho terminal hiện tại.'
+    fi
+    return 0
+  else
+    return $?
+  fi
+fi
 set -euo pipefail
 
 base="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-  printf '%s\n' 'Cách dùng: ./install-ubuntu.sh [--check]' \
+  printf '%s\n' 'Cách dùng: source install-ubuntu.sh hoặc bash install-ubuntu.sh [--check]' \
     'Chạy tương tác bằng user Ubuntu thường, không dùng root.' \
     'Dùng --check để kiểm tra điều kiện mà không cài đặt.'
   exit 0

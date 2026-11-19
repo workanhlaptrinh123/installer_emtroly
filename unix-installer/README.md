@@ -7,7 +7,12 @@ on customer machines or with a real Telegram bot and Zalo account.
 ## Ubuntu terminal preview
 
 For Ubuntu Desktop or a headless Ubuntu VPS, clone the repository as a normal
-user and run `./install-ubuntu.sh`. The existing root `install.sh` is a
+user and run `source install-ubuntu.sh` in Bash to update PATH in the current
+shell after a successful installation. Running `bash install-ubuntu.sh` also
+installs the assistant, but cannot change the parent shell's PATH; run
+`export PATH="$PATH:$HOME/.local/bin"; hash -r` there or open a new shell.
+If shell configuration cannot be updated, the installer reports the issue and
+prints the absolute command path. The existing root `install.sh` is a
 different Docker member installer and must not be used for this workflow.
 The terminal installer does not provide a browser dashboard. If the repository
 is private, the user needs GitHub read access before cloning.

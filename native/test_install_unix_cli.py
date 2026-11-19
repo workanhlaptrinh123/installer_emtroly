@@ -98,6 +98,14 @@ class UnixCliTests(unittest.TestCase):
         self.assertEqual(result["reason"], "unsafe-shell-config")
         self.assertEqual(target.read_text(), "keep")
 
+    def test_modified_path_markers_are_not_treated_as_configured(self):
+        config = self.home / ".bashrc"
+        text = install_unix_cli.PATH_START + "\n# changed\n" + install_unix_cli.PATH_END + "\n"
+        config.write_text(text)
+        result = install_unix_cli.configure_shell_path(self.root, self.home, "/bin/bash")
+        self.assertEqual(result["reason"], "invalid-existing-markers")
+        self.assertEqual(config.read_text(), text)
+
 
 if __name__ == "__main__":
     unittest.main()
