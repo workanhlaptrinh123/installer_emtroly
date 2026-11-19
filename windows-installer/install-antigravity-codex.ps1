@@ -196,13 +196,15 @@ shell.Run """$($editor.Replace('"','""'))"" --user-data-dir ""$($userData.Replac
 "@
   [IO.File]::WriteAllText($launchPath, $script, [Text.Encoding]::Unicode)
   $shell = New-Object -ComObject WScript.Shell
-  $shortcut = $shell.CreateShortcut($shortcutPath)
+  $temporaryShortcut = Join-Path $downloadDir 'antigravity.lnk'
+  $shortcut = $shell.CreateShortcut($temporaryShortcut)
   $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
   $shortcut.Arguments = '//B //Nologo ' + (Quote-Cmd $launchPath)
   $shortcut.WorkingDirectory = $base
   $shortcut.IconLocation = $editor + ',0'
   $shortcut.Description = 'Em Trợ Lý - Antigravity IDE và Codex riêng'
   $shortcut.Save()
+  [IO.File]::Move($temporaryShortcut, $shortcutPath)
   if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { throw 'editor-shortcut-failed' }
 } finally {
   $env:CODEX_HOME = $oldCodexHome
