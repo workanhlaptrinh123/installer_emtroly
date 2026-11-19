@@ -13,7 +13,7 @@ import runner
 
 
 def main():
-    source = Path(sys._MEIPASS)
+    source = Path(sys._MEIPASS).resolve(strict=True)
     assert (source / "native/skills/telegram-zalo-owner-login/SKILL.md").is_file()
     assert (source / "zalo/configure-zalo.py").is_file()
     tkinter.Tcl().eval("info patchlevel")
