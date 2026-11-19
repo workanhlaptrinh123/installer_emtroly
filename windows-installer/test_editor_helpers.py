@@ -103,7 +103,11 @@ class EditorWindowsFixtureTests(unittest.TestCase):
             temp = Path(temporary)
             driver = temp / 'driver.ps1'
             staged_module = temp / 'install-antigravity-codex.ps1'
-            staged_module.write_text(MODULE.read_text(encoding='utf-8'), encoding='utf-8-sig')
+            module_source = MODULE.read_text(encoding='utf-8')
+            download = '  Get-VerifiedDownload -Url $extensionUrl -Path $vsix -Hash $extensionHash'
+            self.assertEqual(module_source.count(download), 1)
+            module_source = module_source.replace(download, "  [IO.File]::WriteAllText($vsix, 'fixture')")
+            staged_module.write_text(module_source, encoding='utf-8-sig')
             shutil.copytree(ROOT / 'windows-installer/activation-probe', temp / 'activation-probe')
             driver.write_text(r'''
 param($ModulePath, $Directory)
