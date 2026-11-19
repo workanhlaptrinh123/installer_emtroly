@@ -24,3 +24,4 @@ customer_history/
 # Local build output
 .native-full-bundle.*.tar.gz
 .openclaw-member-*/
+build/unix-preview-*/

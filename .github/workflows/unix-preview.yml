@@ -1,0 +1,97 @@
+name: Build macOS and Ubuntu Preview
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Preview platform; manual runs consume Actions minutes
+        type: choice
+        required: true
+        options:
+          - ubuntu-x64
+          - macos-arm64
+          - macos-x64
+      live_test:
+        description: Run network integration with fake credentials (slower)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ${{ fromJSON('{"ubuntu-x64":"ubuntu-22.04","macos-arm64":"macos-15","macos-x64":"macos-15-intel"}')[inputs.target] }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ubuntu Python and Tk
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-tk python3-venv
+          /usr/bin/python3 -m venv "$RUNNER_TEMP/installer-venv"
+          echo "$RUNNER_TEMP/installer-venv/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/setup-python@v5
+        if: runner.os == 'macOS'
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: |
+          python3 -c 'import tkinter, sqlite3'
+          python3 -m pip install 'pyinstaller==6.17.0'
+
+      - name: Run isolated tests
+        run: |
+          python3 -m unittest discover -s unix-installer -p 'test_*.py'
+          python3 -m unittest discover -s native -p test_install_unix_cli.py
+
+      - name: Run OpenClaw and Zalo integration with fake credentials
+        if: inputs.live_test
+        run: UNIX_INSTALLER_LIVE_TEST=1 python3 -m unittest discover -s unix-installer -p test_live_integration.py
+
+      - name: Build preview
+        env:
+          OUTPUT: ${{ runner.temp }}/unix-preview
+        run: bash unix-installer/build-preview.sh
+
+      - name: Smoke-test packaged helper and payload
+        shell: bash
+        env:
+          OUTPUT: ${{ runner.temp }}/unix-preview
+        run: |
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            name="caidattroly-${{ inputs.target }}-PREVIEW"
+            executable="$OUTPUT/dist/$name.app/Contents/MacOS/$name"
+          else
+            executable="$OUTPUT/dist/caidattroly-${{ inputs.target }}-PREVIEW"
+          fi
+          "$executable" --run-python-script "$GITHUB_WORKSPACE/unix-installer/frozen_smoke.py"
+
+      - name: Test packaged OpenClaw and Zalo with fake credentials
+        if: inputs.live_test
+        shell: bash
+        env:
+          OUTPUT: ${{ runner.temp }}/unix-preview
+        run: |
+          name="caidattroly-${{ inputs.target }}-PREVIEW"
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            executable="$OUTPUT/dist/$name.app/Contents/MacOS/$name"
+          else
+            executable="$OUTPUT/dist/$name"
+          fi
+          "$executable" --run-python-script "$GITHUB_WORKSPACE/unix-installer/frozen_integration.py"
+
+      - name: Upload preview only
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-${{ inputs.target }}-${{ github.run_number }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/unix-preview/*-PREVIEW.zip
+            ${{ runner.temp }}/unix-preview/*-PREVIEW.zip.sha256
+            ${{ runner.temp }}/unix-preview/*-PREVIEW.tar.gz
+            ${{ runner.temp }}/unix-preview/*-PREVIEW.tar.gz.sha256
