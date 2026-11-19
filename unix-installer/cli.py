@@ -1,12 +1,10 @@
 """Interactive, per-user Ubuntu terminal installer."""
 
 import argparse
-import getpass
 import os
 from pathlib import Path
 import platform
 import sys
-import warnings
 
 import python_runtime
 import runner
@@ -66,17 +64,6 @@ def prompt(label, default=""):
     return input(label + suffix + ": ").strip() or default
 
 
-def secret(label, visible=False):
-    if visible:
-        return input(label + " (hiển thị trên màn hình): ").strip()
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", getpass.GetPassWarning)
-        try:
-            return getpass.getpass(label + ": ").strip()
-        except getpass.GetPassWarning:
-            raise RuntimeError("Không thể ẩn thông tin bí mật trên terminal này.") from None
-
-
 def collect():
     print("\nCài Em Trợ Lý cho Ubuntu (bản thử nghiệm)")
     print("Cần Internet và một bot Telegram riêng. Không cần quét QR trong lúc cài.")
@@ -88,14 +75,13 @@ def collect():
     values["owner_ids"] = ",".join(owner.strip() for owner in values["owner_ids"].split(","))
     first_owner = values["owner_ids"].split(",", 1)[0].strip()
     group_id = prompt("Telegram group ID (số âm)")
-    print("Nếu chọn hiện, người khác hoặc ảnh chụp màn hình có thể thấy token và API key.")
-    show_secrets = prompt("Hiện token và API key khi nhập? [y/N]", "N").lower() == "y"
+    print("Token và API key sẽ hiện trên màn hình khi nhập; không chia sẻ màn hình hoặc ảnh chụp.")
     values.update({
         "qr_owner_id": first_owner,
         "group_id": group_id,
-        "telegram_token": secret("Telegram bot token", visible=show_secrets),
+        "telegram_token": prompt("Telegram bot token"),
         "base_url": DEFAULT_BASE_URL,
-        "ai_api_key": secret("Provider API key", visible=show_secrets),
+        "ai_api_key": prompt("Provider API key"),
         "model": "gpt-6.1-sol",
         "gateway_port": "0",
         "audience": "",

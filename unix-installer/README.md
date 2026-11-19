@@ -27,8 +27,8 @@ and re-executes the installer with it. The normal flow prepares private Node,
 Python and FFmpeg as needed; it does not replace system runtimes.
 
 The prompts require owner ID(s), a negative Telegram group ID, bot token and
-API key; credentials are hidden unless the user explicitly chooses to display
-them. Visible credentials can be seen by others or captured in screenshots.
+API key; credentials are visible on screen while typing and can be seen by
+others or captured in screenshots.
 Owner IDs have preset
 values and MUST be reviewed or replaced for each customer. Every selected ID
 receives Full Exec after explicit consent, even if the ID belongs to someone

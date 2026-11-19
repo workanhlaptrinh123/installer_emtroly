@@ -9,24 +9,23 @@ from test_settings import sample
 
 
 class TerminalInstallerTests(unittest.TestCase):
-    def test_collect_uses_hidden_input_and_explicit_consent(self):
-        inputs = iter(["member01", "Assistant", "12345,67890", "-12345", "", "", "DONGY"])
+    def test_collect_uses_visible_input_and_explicit_consent(self):
+        inputs = iter(["member01", "Assistant", "12345,67890", "-12345",
+                       "123456:" + "x" * 30, "test-only-key", "", "DONGY"])
         with patch("builtins.input", side_effect=lambda _: next(inputs)), \
-                patch.object(cli, "secret", side_effect=["123456:" + "x" * 30, "test-only-key"]) as hidden, \
                 redirect_stdout(io.StringIO()):
             values = cli.collect()
-        self.assertEqual(hidden.call_count, 2)
-        self.assertTrue(all(not call.kwargs["visible"] for call in hidden.call_args_list))
+        self.assertEqual(values["ai_api_key"], "test-only-key")
         self.assertEqual(values["qr_owner_id"], "12345")
         self.assertEqual(values["base_url"], cli.DEFAULT_BASE_URL)
         self.assertTrue(values["accept_full_access"])
         cli.settings.validate(values)
 
     def test_defaults_are_visible_before_full_exec_consent(self):
-        inputs = iter(["", "", "", "-12345", "", "", "DONGY"])
+        inputs = iter(["", "", "", "-12345", "123456:" + "x" * 30,
+                       "test-only-key", "", "DONGY"])
         output = io.StringIO()
         with patch("builtins.input", side_effect=lambda _: next(inputs)), \
-                patch.object(cli, "secret", side_effect=["123456:" + "x" * 30, "test-only-key"]), \
                 redirect_stdout(output):
             values = cli.collect()
         self.assertEqual(values["owner_ids"], cli.DEFAULT_OWNERS)
@@ -35,30 +34,17 @@ class TerminalInstallerTests(unittest.TestCase):
         cli.settings.validate(values)
 
     def test_advanced_settings_remain_editable(self):
-        inputs = iter(["", "", "12345,67890", "-12345", "", "y", "67890",
+        inputs = iter(["", "", "12345,67890", "-12345", "123456:" + "x" * 30,
+                       "test-only-key", "y", "67890",
                        "https://example.com/v1", "gpt-6.1-terra", "19888",
                        "", "", "", "DONGY"])
         with patch("builtins.input", side_effect=lambda _: next(inputs)), \
-                patch.object(cli, "secret", side_effect=["123456:" + "x" * 30, "test-only-key"]), \
                 redirect_stdout(io.StringIO()):
             values = cli.collect()
         self.assertEqual(values["qr_owner_id"], "67890")
         self.assertEqual(values["base_url"], "https://example.com/v1")
         self.assertEqual(values["gateway_port"], "19888")
         cli.settings.validate(values)
-
-    def test_visible_credentials_require_explicit_choice(self):
-        inputs = iter(["", "", "12345", "-12345", "y", "", "DONGY"])
-        with patch("builtins.input", side_effect=lambda _: next(inputs)), \
-                patch.object(cli, "secret", side_effect=["123456:" + "x" * 30, "test-only-key"]) as entered, \
-                redirect_stdout(io.StringIO()):
-            cli.collect()
-        self.assertTrue(all(call.kwargs["visible"] for call in entered.call_args_list))
-        with patch("builtins.input", return_value="test-only-key") as visible, \
-                patch.object(cli.getpass, "getpass") as hidden:
-            self.assertEqual(cli.secret("API key", visible=True), "test-only-key")
-        visible.assert_called_once()
-        hidden.assert_not_called()
 
     def test_user_must_explicitly_accept_full_exec(self):
         values = sample()
