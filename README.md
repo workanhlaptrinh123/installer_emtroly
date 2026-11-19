@@ -143,6 +143,14 @@ integration requires additional downloads of roughly
 left in place for investigation. Antigravity/Codex Windows end-to-end testing
 is still required before this development version can be distributed.
 
+The Antigravity page lets users select an existing `Antigravity IDE.exe`;
+its Google signature, CLI and supported product version are checked before
+reuse. Codex and the dedicated profile remain isolated. When installing a new
+IDE, a stale uninstall registry entry is not treated as proof of an existing
+application if its recorded paths no longer contain an Antigravity executable.
+Residual installation folders are preserved and a separate installation path
+is chosen. Ambiguous registry entries still require manual inspection.
+
 Every push to `main` runs tests and creates a Windows installer artifact kept
 for seven days. Pushing a `vYYYY.MM.DD` tag runs the checks again and publishes
 the installer and checksums as a GitHub Release; a `main` push alone does not

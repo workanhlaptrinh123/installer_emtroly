@@ -95,6 +95,41 @@ $fullAccessCheck.Checked = $false
 [void]$profile.Controls.Add($fullAccessCheck)
 Add-Note $profile 'Full Exec có thể đọc, sửa, xóa file và chạy lệnh trên máy. Chỉ cấp quyền cho những người bạn tin tưởng.' 330
 
+$editorPage = New-Page 'Antigravity'
+$existingEditorCheck = New-Object System.Windows.Forms.CheckBox
+$existingEditorCheck.Text = 'Máy đã có Antigravity IDE - dùng bản đang cài'
+$existingEditorCheck.Location = New-Object System.Drawing.Point(24, 42)
+$existingEditorCheck.Size = New-Object System.Drawing.Size(650, 30)
+[void]$editorPage.Controls.Add($existingEditorCheck)
+Add-Label $editorPage 'Tệp Antigravity IDE.exe' 24 102
+$existingEditorBox = Add-TextBox $editorPage '' 99
+$existingEditorBox.Size = New-Object System.Drawing.Size(345, 25)
+$existingEditorBox.Enabled = $false
+$existingEditorBrowse = New-Object System.Windows.Forms.Button
+$existingEditorBrowse.Text = 'Chọn tệp...'
+$existingEditorBrowse.Location = New-Object System.Drawing.Point(605, 97)
+$existingEditorBrowse.Size = New-Object System.Drawing.Size(95, 28)
+$existingEditorBrowse.Enabled = $false
+[void]$editorPage.Controls.Add($existingEditorBrowse)
+$existingEditorCheck.Add_CheckedChanged({
+  $existingEditorBox.Enabled = $existingEditorCheck.Checked
+  $existingEditorBrowse.Enabled = $existingEditorCheck.Checked
+  if ($existingEditorCheck.Checked -and [string]::IsNullOrWhiteSpace($existingEditorBox.Text)) {
+    $defaultEditor = Join-Path $env:LOCALAPPDATA 'Programs\Antigravity IDE\Antigravity IDE.exe'
+    if (Test-Path -LiteralPath $defaultEditor -PathType Leaf) { $existingEditorBox.Text = $defaultEditor }
+  }
+})
+$existingEditorBrowse.Add_Click({
+  $dialog = New-Object System.Windows.Forms.OpenFileDialog
+  $dialog.Title = 'Chọn Antigravity IDE.exe đã cài'
+  $dialog.Filter = 'Antigravity IDE.exe|Antigravity IDE.exe|Tệp EXE|*.exe'
+  try {
+    if ($dialog.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) { $existingEditorBox.Text = $dialog.FileName }
+  } finally { $dialog.Dispose() }
+})
+Add-Note $editorPage 'Nếu chưa có, bỏ chọn để bộ cài tải Antigravity IDE. Codex và cấu hình Em Trợ Lý vẫn được cài riêng.' 165
+Add-Note $editorPage 'Bản đã cài phải là Antigravity IDE tương thích và có chữ ký Google hợp lệ. Bộ cài không xóa dữ liệu ứng dụng cũ.' 245
+
 $zalo = New-Page 'Zalo'
 $zaloCheck = New-Object System.Windows.Forms.CheckBox
 $zaloCheck.Text = 'Cài plugin Zalo và lệnh /zaloqr (bắt buộc)'
@@ -139,7 +174,7 @@ $cancelButton.Location = New-Object System.Drawing.Point(240, 520)
 $cancelButton.Size = New-Object System.Drawing.Size(100, 32)
 $form.Controls.Add($cancelButton)
 
-$pages = @($connect, $secret, $profile, $zalo, $installPage)
+$pages = @($connect, $secret, $profile, $editorPage, $zalo, $installPage)
 $job = $null
 $secretFile = $null
 $statusFile = $null
@@ -169,7 +204,11 @@ function Test-Page([int]$Index) {
     Show-Error 'Hãy xác nhận bạn hiểu và chấp nhận Full Exec cho owner và nhóm tin cậy.'
     return $false
   }
-  if ($Index -eq 3 -and $zaloCheck.Checked) {
+  if ($Index -eq 3 -and $existingEditorCheck.Checked -and -not (Test-Path -LiteralPath $existingEditorBox.Text.Trim() -PathType Leaf)) {
+    Show-Error 'Hãy chọn tệp Antigravity IDE.exe đã cài trên máy.'
+    return $false
+  }
+  if ($Index -eq 4 -and $zaloCheck.Checked) {
     if ([string]::IsNullOrWhiteSpace($qrOwnerBox.Text)) {
       $qrOwnerBox.Text = (($ownersBox.Text -split ',')[0]).Trim()
     }
@@ -194,7 +233,7 @@ function Cleanup-Secret {
 }
 
 function Start-Install {
-  if (-not (Test-Page 0) -or -not (Test-Page 1) -or -not (Test-Page 2) -or -not (Test-Page 3)) { return }
+  if (-not (Test-Page 0) -or -not (Test-Page 1) -or -not (Test-Page 2) -or -not (Test-Page 3) -or -not (Test-Page 4)) { return }
   $answer = [System.Windows.Forms.MessageBox]::Show($form, 'Các Owner IDs và mọi thành viên trong nhóm Telegram đã chọn có thể yêu cầu đọc, sửa, xóa file và chạy lệnh trên máy. Bạn có tin tưởng họ?', 'Xác nhận Full Exec', 'YesNo', 'Warning')
   if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) { return }
   if ($zaloCheck.Checked) {
@@ -218,6 +257,8 @@ function Start-Install {
     style = $styleBox.Text.Trim()
     accept_full_access = [bool]$fullAccessCheck.Checked
     configure_zalo = [bool]$zaloCheck.Checked
+    use_existing_antigravity = [bool]$existingEditorCheck.Checked
+    antigravity_exe = $existingEditorBox.Text.Trim()
     qr_owner_id = $qrOwnerBox.Text.Trim()
     telegram_token = $tokenBox.Text
     ai_api_key = $apiKeyBox.Text

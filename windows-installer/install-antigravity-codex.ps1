@@ -17,8 +17,24 @@ $base = Join-Path $env:LOCALAPPDATA 'EmTroLy'
 $userData = Join-Path $base 'Antigravity\UserData'
 $extensions = Join-Path $base 'Antigravity\Extensions'
 $codexHome = Join-Path $base 'Codex'
-$appDir = Join-Path $env:LOCALAPPDATA 'Programs\Antigravity IDE'
+$defaultAppDir = Join-Path $env:LOCALAPPDATA 'Programs\Antigravity IDE'
+$useExistingEditor = $Settings.use_existing_antigravity -eq $true
+$appDir = $defaultAppDir
 $editor = Join-Path $appDir 'Antigravity IDE.exe'
+if ($useExistingEditor) {
+  $selectedEditor = [string]$Settings.antigravity_exe
+  if ([string]::IsNullOrWhiteSpace($selectedEditor) -or
+      -not [IO.Path]::IsPathRooted($selectedEditor) -or
+      [IO.Path]::GetFileName($selectedEditor) -ine 'Antigravity IDE.exe' -or
+      -not (Test-Path -LiteralPath $selectedEditor -PathType Leaf)) { throw 'editor-existing-not-found' }
+  $editor = [IO.Path]::GetFullPath($selectedEditor)
+  $appDir = Split-Path -Parent $editor
+} elseif (Test-Path -LiteralPath $defaultAppDir) {
+  if ((Test-Path -LiteralPath $editor -PathType Leaf) -or
+      (Test-Path -LiteralPath (Join-Path $defaultAppDir 'Antigravity.exe') -PathType Leaf)) { throw 'editor-select-existing' }
+  $appDir = Join-Path $env:LOCALAPPDATA ('Programs\EmTroLy-Antigravity-IDE-' + [guid]::NewGuid().ToString('N'))
+  $editor = Join-Path $appDir 'Antigravity IDE.exe'
+}
 $editorCli = Join-Path $appDir 'bin\antigravity-ide.cmd'
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Em Trợ Lý - Antigravity.lnk'
 $downloadDir = Join-Path $env:TEMP ('emtroly-editor-' + [guid]::NewGuid().ToString('N'))
@@ -62,6 +78,20 @@ function Quote-Cmd([string]$Value) {
   return '"' + $Value + '"'
 }
 
+function Get-EditorRegistryDirectories($Entry) {
+  $directories = @()
+  $location = [Environment]::ExpandEnvironmentVariables(([string]$Entry.InstallLocation).Trim().Trim('"'))
+  if ($location -and [IO.Path]::IsPathRooted($location)) { $directories += $location }
+  foreach ($value in @([string]$Entry.DisplayIcon, [string]$Entry.UninstallString)) {
+    $expanded = [Environment]::ExpandEnvironmentVariables($value.Trim())
+    if ($expanded -match '^"([^"\r\n]+\.exe)"' -or $expanded -match '^(.+?\.exe)(?:,\s*-?\d+|\s|$)') {
+      $executable = $Matches[1].Trim()
+      if ([IO.Path]::IsPathRooted($executable)) { $directories += (Split-Path -Parent $executable) }
+    }
+  }
+  return @($directories | Where-Object { $_ } | Select-Object -Unique)
+}
+
 function Test-EditorInstallation {
   if (-not (Test-Path -LiteralPath $editor -PathType Leaf) -or -not (Test-Path -LiteralPath $editorCli -PathType Leaf)) { throw 'editor-cli-missing' }
   $editorSignature = Get-AuthenticodeSignature -LiteralPath $editor
@@ -83,15 +113,25 @@ foreach ($file in @('test.js', 'extension.js', 'package.json')) {
 }
 if (Test-Path -LiteralPath $base) { throw 'editor-data-exists' }
 if (Test-Path -LiteralPath $shortcutPath) { throw 'editor-shortcut-exists' }
-if (-not (Test-Path -LiteralPath $editor -PathType Leaf) -and (Test-Path -LiteralPath $appDir)) { throw 'editor-install-conflict' }
-if (-not (Test-Path -LiteralPath $editor -PathType Leaf)) {
+if (-not $useExistingEditor) {
+  foreach ($programDirectory in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+    if (-not $programDirectory) { continue }
+    foreach ($relativePath in @('Antigravity IDE\Antigravity IDE.exe', 'Antigravity\Antigravity.exe')) {
+      if (Test-Path -LiteralPath (Join-Path $programDirectory $relativePath) -PathType Leaf) { throw 'editor-select-existing' }
+    }
+  }
   $uninstallKeys = @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')
   $appId = '{AA73B3E3-C6C8-45C8-B1DC-4AE56C751432}_is1'
-  foreach ($registryPath in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall', 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')) {
-    if (Test-Path -LiteralPath (Join-Path $registryPath $appId)) { throw 'editor-install-conflict' }
+  $existing = @(Get-ItemProperty $uninstallKeys -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match '^Antigravity IDE' -or $_.PSChildName -eq $appId })
+  foreach ($entry in $existing) {
+    $directories = @(Get-EditorRegistryDirectories $entry)
+    if ($directories.Count -eq 0) { throw 'editor-registry-ambiguous' }
+    foreach ($directory in $directories) {
+      foreach ($name in @('Antigravity IDE.exe', 'Antigravity.exe')) {
+        if (Test-Path -LiteralPath (Join-Path $directory $name) -PathType Leaf) { throw 'editor-select-existing' }
+      }
+    }
   }
-  $existing = @(Get-ItemProperty $uninstallKeys -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match '^Antigravity IDE' })
-  if ($existing.Count -gt 0) { throw 'editor-install-conflict' }
 } else {
   Test-EditorInstallation
 }
