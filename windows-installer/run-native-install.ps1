@@ -66,6 +66,40 @@ function Ensure-TelegramCommandMenu {
   throw 'telegram-command-menu-not-registered'
 }
 
+function Test-FreshOpenClawCommand {
+  param([string]$Root, [string]$Version)
+  $probe = Join-Path $PayloadRoot 'windows-installer\verify-openclaw-command.ps1'
+  if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) { throw 'cli-probe-missing' }
+  $shell = if ($env:OS -eq 'Windows_NT') {
+    Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  } else { Join-Path $PSHOME 'pwsh' }
+  $oldRoot = $env:EMTROLY_PROBE_ROOT
+  $oldVersion = $env:EMTROLY_PROBE_VERSION
+  try {
+    $env:EMTROLY_PROBE_ROOT = $Root
+    $env:EMTROLY_PROBE_VERSION = $Version
+    $arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $probe + '"'
+    $options = @{ FilePath = $shell; ArgumentList = $arguments; PassThru = $true }
+    if ($env:OS -eq 'Windows_NT') { $options.WindowStyle = 'Hidden' }
+    $process = Start-Process @options
+    if (-not $process.WaitForExit(120000)) {
+      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+      throw 'cli-probe-timeout'
+    }
+    switch ($process.ExitCode) {
+      0 { return }
+      11 { throw 'cli-probe-conflict' }
+      12 { throw 'cli-probe-path' }
+      13 { throw 'cli-probe-version' }
+      14 { throw 'cli-probe-status' }
+      default { throw 'cli-probe-failed' }
+    }
+  } finally {
+    $env:EMTROLY_PROBE_ROOT = $oldRoot
+    $env:EMTROLY_PROBE_VERSION = $oldVersion
+  }
+}
+
 $stage = 'input'
 $settings = $null
 $zaloStageFile = "$LogFile.zalo-stage"
@@ -78,11 +112,16 @@ try {
   }
   if ($env:OS -eq 'Windows_NT' -and ($env:PROCESSOR_ARCHITEW6432 -eq 'ARM64' -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64')) { throw 'unsupported-architecture' }
   Test-MemberInstallerSettings $settings
-  $root = Join-Path $env:USERPROFILE ('.openclaw-member-' + [string]$settings.member)
+  $root = Join-Path $env:USERPROFILE 'openclaw'
   if (Test-Path -LiteralPath $root) { throw 'instance-exists' }
+  if ($env:OS -eq 'Windows_NT' -and (Get-Command openclaw -ErrorAction SilentlyContinue)) { throw 'cli-probe-conflict' }
+  $stage = 'editor-preflight'
+  $editorInstaller = Join-Path $PayloadRoot 'windows-installer\install-antigravity-codex.ps1'
+  if (-not (Test-Path -LiteralPath $editorInstaller -PathType Leaf)) { throw 'editor-module-missing' }
+  & $editorInstaller -Settings $settings -StatusFile $LogFile -CheckOnly *> $null
 
   $stage = 'provider'
-  Write-SafeStatus 'Dang kiem tra API va model...'
+  Write-SafeStatus 'Đang kiểm tra API và model...'
   $baseUrl = ([string]$settings.base_url).TrimEnd('/')
   $headers = @{ Authorization = 'Bearer ' + [string]$settings.ai_api_key; Accept = 'application/json' }
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -95,14 +134,14 @@ try {
   $settings.model = $matching[0]
 
   $stage = 'telegram'
-  Write-SafeStatus 'Dang kiem tra Telegram bot...'
+  Write-SafeStatus 'Đang kiểm tra bot Telegram...'
   try {
     $telegram = Invoke-RestMethod -UseBasicParsing -Method Get -Uri ('https://api.telegram.org/bot' + [string]$settings.telegram_token + '/getMe') -TimeoutSec 45 -MaximumRedirection 0
   } catch { throw 'telegram-unavailable' }
   if (-not $telegram.ok -or -not $telegram.result.is_bot) { throw 'telegram-invalid-bot' }
 
   $stage = 'install'
-  Write-SafeStatus 'Dang cai runtime, module va gateway. Vui long doi...'
+  Write-SafeStatus 'Đang cài môi trường, module và Gateway. Vui lòng đợi...'
   $installer = Join-Path $PayloadRoot 'install-native-windows.ps1'
   if (-not (Test-Path -LiteralPath $installer)) { throw 'missing-payload' }
   $modules = @()
@@ -112,7 +151,7 @@ try {
     GroupId = [string]$settings.group_id; AssistantName = [string]$settings.assistant_name
     BaseUrl = $baseUrl; Model = [string]$settings.model; Profile = 'basic-assistant-full'
     Modules = $modules; QrOwnerId = [string]$settings.qr_owner_id
-    OpenClawVersion = '2026.11.4'; InstallMode = 'new'; GatewayPort = [int]$settings.gateway_port
+    OpenClawVersion = '2026.11.4'; InstallMode = 'new'; InstallRoot = $root; GatewayPort = [int]$settings.gateway_port
     Audience = [string]$settings.audience; Addressing = [string]$settings.addressing
     Style = [string]$settings.style; UserInstall = $true; CredentialData = $settings
   }
@@ -153,14 +192,48 @@ try {
       'zaloqr' -notin @($inspection.commands) -or 'zalostatus' -notin @($inspection.commands) -or
       'telegram_zalo_login_qr' -notin $qrTools) { throw 'zalo-qr-command-not-registered' }
   $stage = 'telegram-menu'
-  Write-SafeStatus 'Dang dong bo menu Telegram: /zaloqr va /zalostatus...'
+  Write-SafeStatus 'Đang đồng bộ menu Telegram: /zaloqr và /zalostatus...'
   Ensure-TelegramCommandMenu -Token ([string]$settings.telegram_token)
-  Write-SafeStatus 'SUCCESS: gateway, plugin Zalo, /zaloqr, /zalostatus va cau hinh Full Exec Telegram da duoc kiem tra. Quet QR va dang nhap Zalo la buoc van hanh sau cai dat.'
+  $stage = 'command'
+  Write-SafeStatus 'Đang kiểm tra lệnh openclaw trong PowerShell mới...'
+  Test-FreshOpenClawCommand -Root $root -Version $expectedVersion
+  $stage = 'editor'
+  Write-SafeStatus 'Đang chuẩn bị Antigravity IDE và Codex Extension...'
+  & $editorInstaller -Settings $settings -StatusFile $LogFile *> $null
+  Write-SafeStatus 'SUCCESS: OpenClaw, lệnh Zalo, Antigravity IDE và Codex đã qua kiểm tra. Quét QR là bước sau khi cài.'
   exit 0
 } catch {
   $code = [string]$_.Exception.Message
   $safeMessages = @{
     'invalid-member' = 'Ten member khong hop le.'
+    'cli-probe-missing' = 'Thiếu công cụ kiểm tra lệnh OpenClaw.'
+    'cli-probe-conflict' = 'Đã có lệnh openclaw khác. Bộ cài giữ nguyên lệnh cũ; cần xử lý xung đột trước khi dùng lệnh mặc định.'
+    'cli-probe-path' = 'PowerShell mới không nhận đúng lệnh openclaw trong PATH.'
+    'cli-probe-version' = 'Không xác minh được phiên bản của lệnh openclaw.'
+    'cli-probe-status' = 'Lệnh openclaw status chưa chạy thành công trong PowerShell mới.'
+    'cli-probe-timeout' = 'Hết thời gian kiểm tra lệnh openclaw trong PowerShell mới.'
+    'cli-probe-failed' = 'Không kiểm tra được lệnh openclaw trong PowerShell mới.'
+    'editor-module-missing' = 'Bộ cài thiếu mô-đun Antigravity và Codex.'
+    'editor-data-exists' = 'Thư mục dữ liệu Em Trợ Lý đã tồn tại; bộ cài không ghi đè dữ liệu cũ.'
+    'editor-shortcut-exists' = 'Shortcut Em Trợ Lý - Antigravity đã tồn tại; bộ cài không ghi đè.'
+    'editor-desktop-missing' = 'Không tìm thấy Desktop hoặc Windows Script Host để tạo shortcut an toàn.'
+    'editor-invalid-path' = 'Đường dẫn Windows chứa ký tự bộ cài chưa hỗ trợ; dữ liệu hiện có không bị ghi đè.'
+    'editor-install-conflict' = 'Phát hiện Antigravity IDE tại vị trí khác hoặc thư mục cài đã tồn tại; bộ cài không ghi đè.'
+    'editor-provider-unsupported' = 'Codex hiện chỉ hỗ trợ provider codex.anhlaptrinh.vn/v1 trong bộ cài này.'
+    'editor-download-failed' = 'Không tải được Antigravity IDE hoặc Codex Extension. Kiểm tra Internet và dung lượng trống.'
+    'editor-download-checksum' = 'Tệp tải về không khớp mã kiểm tra; đã dừng để bảo vệ máy.'
+    'editor-signature-invalid' = 'Không xác minh được chữ ký Google của Antigravity IDE.'
+    'editor-install-failed' = 'Antigravity IDE chưa cài được.'
+    'editor-cli-missing' = 'Không tìm thấy công cụ dòng lệnh Antigravity IDE.'
+    'editor-version-unsupported' = 'Antigravity IDE có sẵn không thuộc phiên bản đã kiểm thử; bộ cài không tự thay đổi phần mềm cũ.'
+    'editor-extension-install-failed' = 'Không cài được Codex Extension vào thư mục riêng.'
+    'editor-extension-verification-failed' = 'Không xác minh được phiên bản Codex Extension trong thư mục riêng.'
+    'editor-codex-missing' = 'Codex Extension thiếu chương trình Codex cho Windows.'
+    'editor-codex-probe-failed' = 'Codex chưa hoàn thành yêu cầu kiểm tra. Kiểm tra API key, model, mạng và quyền chạy Codex.'
+    'editor-activation-missing' = 'Bộ cài thiếu công cụ kiểm tra kích hoạt Codex Extension.'
+    'editor-activation-failed' = 'Antigravity chưa kích hoạt được Codex Extension. Cài đặt chưa hoàn tất.'
+    'editor-process-timeout' = 'Hết thời gian cài hoặc kiểm tra Antigravity/Codex.'
+    'editor-shortcut-failed' = 'Không tạo được shortcut Antigravity riêng trên Desktop.'
     'unsupported-architecture' = 'Bo cai nay chi ho tro Windows x64, khong ho tro ARM64 hoac 32-bit.'
     'missing-assistant-name' = 'Thieu ten tro ly.'
     'invalid-owners' = 'Telegram Owner IDs khong hop le.'
@@ -205,6 +278,7 @@ try {
     'telegram-command-menu-not-registered' = 'Telegram chua hien menu /zaloqr va /zalostatus. Hay kiem tra Internet/Telegram API va cai lai; instance dang do duoc giu nguyen.'
   }
   $message = if ($safeMessages.ContainsKey($code)) { $safeMessages[$code] } else { "That bai tai buoc $stage; lien he ho tro, khong ghi de instance dang do." }
+  if ($safeMessages.ContainsKey($code) -and $code -cmatch '^[a-z0-9-]+$') { $message += " Mã chẩn đoán: $code." }
   if ($stage -eq 'install' -and (Test-Path -LiteralPath $zaloStageFile)) {
     $zaloStep = [IO.File]::ReadAllText($zaloStageFile, [Text.Encoding]::ASCII).Trim()
     if ($zaloStep -in @('preflight','version','plugin-inspect','plugin-install','plugin-enable','plugin-doctor','plugin-source','gateway-stop','zalo-config','qr-install','mention-patch','gateway-start','verify')) {

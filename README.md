@@ -90,9 +90,11 @@ local update.
 
 Artifact: `caidattroly.exe` with the adjacent `caidattroly.exe.sha256`
 file. Double-clicking the executable opens a Windows Forms wizard. The wizard
-asks for member name, assistant name, provider HTTPS URL, model, Telegram owner
+asks for assistant name, provider HTTPS URL, model, Telegram owner
 IDs, negative Telegram Group ID, bot token, provider API key, optional profile
-text, Full Exec confirmation and Zalo QR setup (both enabled by default).
+text, and explicit Full Exec confirmation. Zalo QR setup is required.
+The OpenClaw instance is created at `%USERPROFILE%\openclaw`; an existing
+directory is never overwritten.
 
 The installer runs in user scope and does not require Docker or Administrator
 for a fresh instance. It requires Windows PowerShell 5.1, Windows x64,
@@ -120,10 +122,26 @@ persists that directory in the user's PATH without replacing the machine PATH.
 Open a new PowerShell window after installation, then `openclaw status` and
 other CLI arguments are passed to the selected private runtime. If another
 unrelated `openclaw` command already owns the generic name, the installer
-preserves it and shows a unique `openclaw-member-*.cmd` alias on completion.
+preserves it and reports a conflict instead of claiming full success.
 The selected command and path are also recorded in the instance's
 `windows-cli.json`. Existing terminals must be reopened to pick up the User
 PATH change; an existing installation is not automatically modified.
+
+The Windows development installer additionally installs Antigravity IDE
+2.7.0 and Codex extension 26.51111.21308 using pinned downloads and SHA-256.
+It verifies Google's Authenticode signature and reuses a compatible existing
+IDE without modifying its existing user data. Antigravity user data, the
+extension directory, and `CODEX_HOME` are isolated under
+`%LOCALAPPDATA%\EmTroLy`. A dedicated desktop shortcut starts the editor with
+those paths; other Codex, ChatGPT and Antigravity installations are not
+configured. The same provider API key is stored in the private Codex home and
+used by OpenClaw; the Telegram bot token remains separate. The installer
+requires a working real Codex request and an extension-host activation check
+before reporting success; the request may use provider credits. This
+integration requires additional downloads of roughly
+560 MB. Existing EmTroLy data is not overwritten; an interrupted install is
+left in place for investigation. Antigravity/Codex Windows end-to-end testing
+is still required before this development version can be distributed.
 
 Every push to `main` runs tests and creates a Windows installer artifact kept
 for seven days. Pushing a `vYYYY.MM.DD` tag runs the checks again and publishes

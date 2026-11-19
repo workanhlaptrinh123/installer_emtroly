@@ -15,6 +15,7 @@ param(
   [string]$OpenClawVersion = '2026.11.4',
   [ValidateSet('auto','new','upgrade')][string]$InstallMode = 'auto',
   [string]$ExistingRoot = '',
+  [string]$InstallRoot = '',
   [int]$GatewayPort = 0,
   [switch]$FullBundle,
   [switch]$DryRun,
@@ -52,6 +53,15 @@ if ($GroupId -notmatch '^-[1-9][0-9]*$') { throw 'GroupId must be an explicit ne
 if ($Modules -contains 'zalo-personal' -and ($QrOwnerId -notin $owners)) { throw 'QrOwnerId must be one of the Telegram owner IDs.' }
 if ($DryRun) { Write-Host "DRY-RUN: native OpenClaw $OpenClawVersion for $Name (model: $Model); no files or services changed."; exit 0 }
 $root = Join-Path $env:USERPROFILE ('.openclaw-member-' + $Name)
+if ($InstallRoot) {
+  $expectedRoot = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE 'openclaw')).TrimEnd('\')
+  $requestedRoot = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
+  if ($InstallMode -ne 'new' -or -not $UserInstall -or
+      -not [string]::Equals($requestedRoot, $expectedRoot, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Invalid install root; no files were changed.'
+  }
+  $root = $expectedRoot
+}
 $workspace = Join-Path $root 'workspace'
 $configPath = Join-Path $root 'openclaw.json'
 if (Test-Path $root) { throw "Independent install already exists at $root. Choose Upgrade or another Name. No existing files were changed." }

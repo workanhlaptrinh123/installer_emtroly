@@ -44,7 +44,7 @@ exit $LASTEXITCODE
 
 FAKE_INSTALLER = r"""
 param($Name, $OwnerIds, $GroupId, $AssistantName, $BaseUrl, $Model, $Profile,
-      $Modules, $QrOwnerId, $OpenClawVersion, $InstallMode, $GatewayPort,
+      $Modules, $QrOwnerId, $OpenClawVersion, $InstallMode, $InstallRoot, $GatewayPort,
       $Audience, $Addressing, $Style, [switch]$UserInstall, $CredentialData)
 if (-not $UserInstall -or $InstallMode -ne 'new' -or $Model -cne 'GPT-6.1-SOL') { throw 'invalid-installer-arguments' }
 if ($OwnerIds -ne $CredentialData.owner_ids) { throw 'invalid-owner-arguments' }
@@ -66,7 +66,8 @@ if ($env:TEST_MODE -eq 'zalo-unsafe-detail') {
     [IO.File]::WriteAllText(($env:MEMBER_INSTALL_ZALO_STAGE_FILE + '.detail'), 'fixture-private-error')
     throw 'fixture-private-error'
 }
-$root = Join-Path $env:USERPROFILE ('.openclaw-member-' + $Name)
+$root = Join-Path $env:USERPROFILE 'openclaw'
+if ($InstallRoot -ne $root) { throw 'invalid-install-root' }
 foreach ($item in @('openclaw.json', 'installer-instance.json', 'openclaw-instance.ps1', 'windows-cli.json',
     'workspace\skills\openclaw-zalo-reply-mention\SKILL.md',
     'workspace\skills\openclaw-telegram-zalo-qr-delivery\SKILL.md',
@@ -131,6 +132,18 @@ class RunnerTests(unittest.TestCase):
             payload = root / "payload"
             (payload / "windows-installer").mkdir(parents=True)
             shutil.copy2(RELEASE / "windows-installer/validation.ps1", payload / "windows-installer")
+            (payload / "windows-installer/verify-openclaw-command.ps1").write_text(
+                "if ($env:TEST_MODE -eq 'cli-conflict') { exit 11 }; "
+                "if ($env:TEST_MODE -eq 'cli-path') { exit 12 }; "
+                "if ($env:TEST_MODE -eq 'cli-version') { exit 13 }; "
+                "if ($env:TEST_MODE -eq 'cli-status') { exit 14 }; exit 0", encoding="utf-8")
+            (payload / "windows-installer/install-antigravity-codex.ps1").write_text(
+                "param($Settings, $StatusFile, [switch]$CheckOnly)\n"
+                "if ($Settings.ai_api_key -ne $env:TEST_API_KEY) { throw 'fixture-private-error' }\n"
+                "if ($CheckOnly -and $env:TEST_MODE -eq 'editor-existing') { throw 'editor-data-exists' }\n"
+                "if (-not $CheckOnly -and $env:TEST_MODE -eq 'editor-failure') { throw 'editor-codex-probe-failed' }\n"
+                "if (-not $CheckOnly -and $env:TEST_MODE -eq 'editor-activation-failure') { throw 'editor-activation-failed' }\n",
+                encoding="utf-8")
             (payload / "install-native-windows.ps1").write_text(FAKE_INSTALLER, encoding="utf-8")
             driver = root / "driver.ps1"
             driver.write_text(DRIVER, encoding="utf-8")
@@ -147,6 +160,10 @@ class RunnerTests(unittest.TestCase):
             log = root / "status.txt"
             user_home = root / "home"
             user_home.mkdir()
+            if mode == "existing-root":
+                existing = user_home / "openclaw"
+                existing.mkdir()
+                (existing / "user-data.txt").write_text("do-not-overwrite", encoding="utf-8")
             environment = {**os.environ, "USERPROFILE": str(user_home), "TEST_MODE": mode,
                            "TEST_TOKEN": TOKEN, "TEST_API_KEY": API_KEY}
             process = subprocess.run(
@@ -159,13 +176,44 @@ class RunnerTests(unittest.TestCase):
             self.assertNotIn(TOKEN, text)
             self.assertNotIn(API_KEY, text)
             self.assertFalse(secret_file.exists())
-            return process.returncode, text, (user_home / ".openclaw-member-fixture").exists()
+            if mode == "existing-root":
+                self.assertEqual((user_home / "openclaw" / "user-data.txt").read_text(), "do-not-overwrite")
+            return process.returncode, text, (user_home / "openclaw").exists()
 
     def test_success_passes_credentials_in_memory_and_verifies_artifacts(self):
         code, text, created = self.execute()
         self.assertEqual(code, 0, text)
         self.assertTrue(created)
         self.assertIn("SUCCESS", text)
+
+    def test_existing_openclaw_directory_is_never_overwritten(self):
+        code, text, created = self.execute("existing-root")
+        self.assertNotEqual(code, 0)
+        self.assertTrue(created)
+        self.assertNotIn("SUCCESS", text)
+
+    def test_command_probe_failures_never_report_success(self):
+        for mode in ("cli-conflict", "cli-path", "cli-version", "cli-status"):
+            with self.subTest(mode=mode):
+                code, text, created = self.execute(mode)
+                self.assertNotEqual(code, 0)
+                self.assertTrue(created)
+                self.assertNotIn("SUCCESS", text)
+
+    def test_editor_failure_never_reports_success(self):
+        for mode in ("editor-failure", "editor-activation-failure"):
+            with self.subTest(mode=mode):
+                code, text, created = self.execute(mode)
+                self.assertNotEqual(code, 0)
+                self.assertTrue(created)
+                self.assertNotIn("SUCCESS", text)
+                self.assertIn("Codex", text)
+
+    def test_editor_conflict_is_detected_before_installation(self):
+        code, text, created = self.execute("editor-existing")
+        self.assertNotEqual(code, 0)
+        self.assertFalse(created)
+        self.assertNotIn("SUCCESS", text)
 
     def test_reports_only_safe_zalo_stage_on_failure(self):
         code, text, created = self.execute("zalo-stage-error")

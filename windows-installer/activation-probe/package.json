@@ -1,0 +1,7 @@
+{
+  "name": "activation-check",
+  "publisher": "emtroly-test",
+  "version": "1.0.0",
+  "engines": { "vscode": "^1.96.0" },
+  "main": "./extension.js"
+}

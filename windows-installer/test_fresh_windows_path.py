@@ -1,0 +1,89 @@
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+
+
+PROBE = Path(__file__).resolve().parent / 'verify-openclaw-command.ps1'
+WINDOWS_CI = os.name == 'nt' and os.environ.get('GITHUB_ACTIONS') == 'true'
+
+
+@unittest.skipUnless(WINDOWS_CI, 'Requires a disposable Windows GitHub Actions runner')
+class FreshWindowsPathTests(unittest.TestCase):
+    def setUp(self):
+        import winreg
+
+        self.winreg = winreg
+        self.key = winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, 'Environment', 0,
+                                      winreg.KEY_QUERY_VALUE | winreg.KEY_SET_VALUE)
+        try:
+            self.previous_path = winreg.QueryValueEx(self.key, 'Path')
+        except FileNotFoundError:
+            self.previous_path = None
+        self.addCleanup(self.restore_path)
+        self.temporary = tempfile.TemporaryDirectory(prefix='emtroly-path-')
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name) / 'Th\u1eed nghi\u1ec7m c\u00f3 d\u1ea5u' / 'openclaw'
+        self.root.mkdir(parents=True)
+        self.bin = self.root.parent / 'bin with spaces'
+        self.bin.mkdir()
+        self.command = self.bin / 'openclaw.cmd'
+        self.write_command()
+        self.write_info()
+
+    def restore_path(self):
+        if self.previous_path is None:
+            try:
+                self.winreg.DeleteValue(self.key, 'Path')
+            except FileNotFoundError:
+                pass
+        else:
+            self.winreg.SetValueEx(self.key, 'Path', 0, self.previous_path[1], self.previous_path[0])
+        self.key.Close()
+
+    def write_info(self, default=True):
+        (self.root / 'windows-cli.json').write_text(json.dumps({
+            'default': default, 'command': 'openclaw' if default else 'openclaw-member-0123456789ab',
+            'path': str(self.command),
+        }), encoding='utf-8')
+
+    def write_command(self, version='2026.11.4', status=0):
+        self.command.write_text(
+            '@echo off\r\n'
+            'if "%OPENCLAW_STATE_DIR%"=="should-not-inherit" exit /b 17\r\n'
+            f'if "%1"=="--version" (echo {version}& exit /b 0)\r\n'
+            f'if "%1"=="status" exit /b {status}\r\n'
+            'exit /b 1\r\n', encoding='ascii')
+
+    def run_probe(self, directories):
+        self.winreg.SetValueEx(self.key, 'Path', 0, self.winreg.REG_EXPAND_SZ,
+                               ';'.join(str(path) for path in directories))
+        env = dict(os.environ, EMTROLY_PROBE_ROOT=str(self.root),
+                   EMTROLY_PROBE_VERSION='2026.11.4', OPENCLAW_STATE_DIR='should-not-inherit')
+        shell = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+        return subprocess.run([str(shell), '-NoLogo', '-NoProfile', '-NonInteractive',
+                               '-ExecutionPolicy', 'Bypass', '-File', str(PROBE)],
+                              env=env, capture_output=True, timeout=60,
+                              creationflags=subprocess.CREATE_NO_WINDOW).returncode
+
+    def test_fresh_shell_finds_expected_command_without_installer_environment(self):
+        self.assertEqual(self.run_probe([self.bin]), 0)
+
+    def test_existing_other_command_is_not_claimed(self):
+        other = self.root.parent / 'existing'
+        other.mkdir()
+        (other / 'openclaw.cmd').write_text('@exit /b 0\r\n', encoding='ascii')
+        self.assertEqual(self.run_probe([other, self.bin]), 12)
+
+    def test_missing_command_and_nondefault_alias_fail(self):
+        self.assertEqual(self.run_probe([]), 12)
+        self.write_info(default=False)
+        self.assertEqual(self.run_probe([self.bin]), 11)
+
+    def test_wrong_version_and_failing_status_fail(self):
+        self.write_command(version='0.0.0')
+        self.assertEqual(self.run_probe([self.bin]), 13)
+        self.write_command(status=1)
+        self.assertEqual(self.run_probe([self.bin]), 14)

@@ -5,7 +5,7 @@ BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT="${1:-$BASE/caidattroly.exe}"
 NSIS="${NSIS:-$(command -v makensis || true)}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-RELEASE_VERSION="${RELEASE_VERSION:-2026.11.18}"
+RELEASE_VERSION="${RELEASE_VERSION:-2026.11.19}"
 
 if [[ -z "$NSIS" ]]; then
   for candidate in /tmp/nsis-stage/extract/usr/bin/makensis /usr/bin/makensis; do
@@ -35,6 +35,9 @@ cp -a "$BASE/zalo" "$payload/"
 cp "$BASE/windows-installer/run-native-install.ps1" "$payload/windows-installer/"
 cp "$BASE/windows-installer/wizard.ps1" "$payload/windows-installer/"
 cp "$BASE/windows-installer/validation.ps1" "$payload/windows-installer/"
+cp "$BASE/windows-installer/verify-openclaw-command.ps1" "$payload/windows-installer/"
+cp "$BASE/windows-installer/install-antigravity-codex.ps1" "$payload/windows-installer/"
+cp -a "$BASE/windows-installer/activation-probe" "$payload/windows-installer/"
 
 find "$payload" -type d -name '__pycache__' -prune -exec rm -rf {} +
 find "$payload" -type f -name '*.pyc' -delete

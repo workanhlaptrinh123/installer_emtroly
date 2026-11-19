@@ -7,6 +7,17 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class WindowsInstallerTests(unittest.TestCase):
+    def test_wizard_uses_fixed_internal_name_and_windows_user_openclaw_directory(self):
+        wizard = (ROOT / "windows-installer/wizard.ps1").read_text(encoding="utf-8")
+        runner = (ROOT / "windows-installer/run-native-install.ps1").read_text(encoding="utf-8")
+        installer = (ROOT / "install-native-windows.ps1").read_text(encoding="utf-8")
+        self.assertNotIn("$nameBox", wizard)
+        self.assertIn("member = 'emtroly'", wizard)
+        self.assertIn("Join-Path $env:USERPROFILE 'openclaw'", runner)
+        self.assertIn("InstallRoot = $root", runner)
+        self.assertIn("Invalid install root; no files were changed.", installer)
+        self.assertIn("$fullAccessCheck.Checked = $false", wizard)
+
     def test_payload_contains_gui_and_safe_runner(self):
         nsi = (ROOT / "windows-installer/member-vps-installer.nsi").read_text(encoding="utf-8")
         wizard = (ROOT / "windows-installer/wizard.ps1").read_text(encoding="utf-8")
@@ -20,10 +31,10 @@ class WindowsInstallerTests(unittest.TestCase):
         qr_helper = (ROOT / "native/skills/openclaw-zalo-qr-login/scripts/send_zalo_qr_to_telegram_owner.mjs").read_text(encoding="utf-8")
         self.assertIn("wizard.ps1", nsi)
         self.assertIn('Name "installer_emtroly"', nsi)
-        self.assertIn("installer_emtroly - Cai dat", wizard)
+        self.assertIn("Em Trợ Lý - Cài đặt", wizard)
         self.assertIn("UseSystemPasswordChar", wizard)
         self.assertIn("accept_full_access", wizard)
-        self.assertIn("$fullAccessCheck.Checked = $true", wizard)
+        self.assertIn("$fullAccessCheck.Checked = $false", wizard)
         self.assertIn("$zaloCheck.Checked = $true", wizard)
         self.assertIn("$zaloCheck.Enabled = $false", wizard)
         self.assertIn("$qrOwnerBox.Text = (($ownersBox.Text -split ',')[0]).Trim()", wizard)
@@ -49,6 +60,17 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertIn("windowsHide: true", qr_helper)
         self.assertIn("-WindowStyle Hidden", installer)
         self.assertIn("-WindowStyle Hidden", dependencies)
+
+    def test_fresh_shell_probe_is_packaged_and_uses_windows_powershell(self):
+        runner = (ROOT / "windows-installer/run-native-install.ps1").read_text(encoding="utf-8")
+        probe = (ROOT / "windows-installer/verify-openclaw-command.ps1").read_text(encoding="utf-8")
+        build = (ROOT / "build-windows-installer.sh").read_text(encoding="utf-8")
+        self.assertIn("System32\\WindowsPowerShell\\v1.0\\powershell.exe", runner)
+        self.assertIn("verify-openclaw-command.ps1", build)
+        self.assertIn("GetEnvironmentVariable('Path', 'Machine')", probe)
+        self.assertIn("GetEnvironmentVariable('Path', 'User')", probe)
+        self.assertIn("OPENCLAW_STATE_DIR", probe)
+        self.assertIn("$command.Source status", probe)
 
     def test_installer_assigns_all_entered_owner_ids_to_full_exec_policy(self):
         installer = (ROOT / "install-native-windows.ps1").read_text(encoding="utf-8")
