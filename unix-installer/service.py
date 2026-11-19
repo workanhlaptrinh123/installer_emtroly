@@ -1,9 +1,24 @@
 """Install and verify the private gateway without replacing existing services."""
 
 import json
+import shutil
+import subprocess
 import time
 
 from runtime import _run
+
+
+def check_linux_user_service():
+    systemctl = shutil.which("systemctl")
+    if not systemctl:
+        raise RuntimeError("linux-user-service-unavailable")
+    try:
+        result = subprocess.run([systemctl, "--user", "show-environment"], stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        raise RuntimeError("linux-user-service-unavailable") from None
+    if result.returncode != 0:
+        raise RuntimeError("linux-user-service-unavailable")
 
 
 def _json(node, entry, env, arguments):

@@ -21,6 +21,14 @@ on customer machines or with a real Telegram bot and Zalo account.
 - Linux requires a desktop session and a working systemd user service. On
   macOS, the gateway uses the user launch service. The computer must be on
   and the user session available for the gateway to respond.
+- Ubuntu x64 builds can also be packaged as a `.deb` preview with
+  `python3 unix-installer/build-ubuntu-deb.py <binary> <new-file.deb> --architecture amd64 --minimum-glibc 2.35`.
+  That example assumes the executable was built on Ubuntu 22.04; set the
+  minimum glibc to match the build machine, not the intended target machine.
+  On a test machine, install it with `sudo apt install ./<new-file.deb>`, then
+  open **Em Tro Ly (ban thu)** from the desktop application menu as the normal
+  logged-in user. Never launch the assistant installer with `sudo`. Removing
+  the package does not remove installed assistant data in the user's home.
 - macOS preview builds are unsigned and not notarized. Before distributing to
   customers, build and test both Intel and Apple Silicon, then arrange Apple
   signing/notarization. Do not disable system security as a workaround.
@@ -30,4 +38,7 @@ tests. Set `UNIX_INSTALLER_LIVE_TEST=1` to run the slower network integration
 using fake credentials; this does not start a gateway or contact Telegram.
 `build-preview.sh` builds on the host OS when Python, Tk and PyInstaller are
 present. `.github/workflows/unix-preview.yml` offers manual preview builds only;
-it does not publish a Release or change the existing Windows pipeline.
+it does not publish a Release or change the existing Windows pipeline. Its
+optional `systemd_test` creates and removes a separate temporary user service
+only on a disposable Ubuntu GitHub runner, using fake credentials and with
+Telegram disabled. This is not a substitute for testing a customer's desktop.

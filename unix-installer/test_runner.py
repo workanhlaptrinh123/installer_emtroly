@@ -36,6 +36,7 @@ class RunnerTests(unittest.TestCase):
                 return root
             with patch.object(runner.os, "geteuid", return_value=1000), \
                     patch.object(runner.platform, "system", return_value="Linux"), \
+                    patch.object(runner.service, "check_linux_user_service"), \
                     patch.object(runner.Path, "home", return_value=home), \
                     patch.object(runner.telegram, "verify_bot"), \
                     patch.object(runner.provider, "verify", return_value="gpt-6.1-sol"), \
@@ -52,6 +53,17 @@ class RunnerTests(unittest.TestCase):
                     runner.install(sample(), ".")
             self.assertIn("Gateway có thể đã chạy", str(error.exception))
             self.assertIn(str(root), str(error.exception))
+
+    def test_missing_systemd_stops_before_network_and_instance_creation(self):
+        with patch.object(runner.os, "geteuid", return_value=1000), \
+                patch.object(runner.platform, "system", return_value="Linux"), \
+                patch.object(runner.service, "check_linux_user_service", side_effect=RuntimeError("linux-user-service-unavailable")), \
+                patch.object(runner.telegram, "verify_bot") as remote, \
+                patch.object(runner.instance, "initialize") as create:
+            with self.assertRaisesRegex(RuntimeError, "linux-user-service-unavailable"):
+                runner.install(sample(), ".")
+            remote.assert_not_called()
+            create.assert_not_called()
 
 
 if __name__ == "__main__":

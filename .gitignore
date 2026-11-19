@@ -3,6 +3,7 @@
 *.exe.sha256
 *.tar.gz
 *.zip
+*.deb
 *.sha256
 SHA256SUMS
 

@@ -48,6 +48,8 @@ def install(values, source, progress=lambda message: None):
     prospective = home / (".openclaw-member-" + values_checked["member"])
     if prospective.exists() or prospective.is_symlink():
         raise FileExistsError("Instance already exists; it was not changed")
+    if platform.system() == "Linux":
+        service.check_linux_user_service()
     progress("Đang kiểm tra Telegram và nhà cung cấp AI...")
     telegram.verify_bot(values_checked["telegram_token"])
     values = dict(values)

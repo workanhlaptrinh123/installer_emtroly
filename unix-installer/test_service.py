@@ -6,6 +6,17 @@ import service
 
 
 class ServiceTests(unittest.TestCase):
+    def test_user_service_probe_handles_unavailable_manager(self):
+        with patch.object(service.shutil, "which", return_value=None), self.assertRaisesRegex(RuntimeError, "linux-user-service-unavailable"):
+            service.check_linux_user_service()
+        with patch.object(service.shutil, "which", return_value="/usr/bin/systemctl"), \
+                patch.object(service.subprocess, "run") as run:
+            run.return_value.returncode = 1
+            with self.assertRaisesRegex(RuntimeError, "linux-user-service-unavailable"):
+                service.check_linux_user_service()
+            run.return_value.returncode = 0
+            service.check_linux_user_service()
+
     def test_gateway_success_requires_health_plugins_and_commands(self):
         calls = []
         def run(command, env, timeout, step):

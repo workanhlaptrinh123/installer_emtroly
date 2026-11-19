@@ -106,6 +106,7 @@ def main():
                     "invalid-port": "Port phải là 0 hoặc nằm trong khoảng 1024–65000.",
                     "full-access-consent-required": "Cần xác nhận quyền Full Exec trước khi cài.",
                     "invalid-qr-owner": "Owner nhận QR phải nằm trong danh sách owner ID.",
+                    "linux-user-service-unavailable": "Không kết nối được dịch vụ systemd của người dùng. Hãy đăng nhập vào Ubuntu Desktop bằng tài khoản người dùng và thử lại; không chạy bằng sudo.",
                 }
                 message = messages.get(str(error), str(error)) if isinstance(error, (ValueError, RuntimeError, FileExistsError)) else "Lỗi không xác định. Kiểm tra môi trường và thử lại."
                 events.put(("failure", message))

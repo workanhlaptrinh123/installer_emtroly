@@ -30,6 +30,7 @@ def main():
         runner.telegram.verify_bot = lambda token: None
         runner.provider.verify = lambda url, key, model: model
         runner.choose_port = lambda requested: 19789
+        runner.service.check_linux_user_service = lambda: None
         runner.dependencies.install_node = lambda directory: (node, npm)
         runner.python_runtime.install = lambda directory: Path(sys.executable)
         runner.ffmpeg.install = lambda directory: Path(sys.executable)

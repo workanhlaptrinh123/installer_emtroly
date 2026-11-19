@@ -15,6 +15,10 @@ on:
         description: Run network integration with fake credentials (slower)
         type: boolean
         default: false
+      systemd_test:
+        description: Test a temporary user service on the disposable Ubuntu runner
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -54,6 +58,15 @@ jobs:
           OUTPUT: ${{ runner.temp }}/unix-preview
         run: bash unix-installer/build-preview.sh
 
+      - name: Package Ubuntu preview as deb
+        if: runner.os == 'Linux'
+        env:
+          OUTPUT: ${{ runner.temp }}/unix-preview
+        run: |
+          python3 unix-installer/build-ubuntu-deb.py \
+            "$OUTPUT/dist/caidattroly-ubuntu-x64-PREVIEW" \
+            "$OUTPUT/caidattroly-ubuntu-x64-PREVIEW.deb" --architecture amd64 --minimum-glibc 2.35
+
       - name: Smoke-test packaged helper and payload
         shell: bash
         env:
@@ -81,6 +94,18 @@ jobs:
           fi
           "$executable" --run-python-script "$GITHUB_WORKSPACE/unix-installer/frozen_integration.py"
 
+      - name: Test isolated Ubuntu systemd user service
+        if: inputs.systemd_test && runner.os == 'Linux'
+        shell: bash
+        env:
+          OUTPUT: ${{ runner.temp }}/unix-preview
+        run: |
+          sudo loginctl enable-linger "$(id -un)"
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          systemctl --user show-environment >/dev/null
+          "$OUTPUT/dist/caidattroly-ubuntu-x64-PREVIEW" --run-python-script \
+            "$GITHUB_WORKSPACE/unix-installer/frozen_systemd_integration.py"
+
       - name: Upload preview only
         uses: actions/upload-artifact@v4
         with:
@@ -92,3 +117,5 @@ jobs:
             ${{ runner.temp }}/unix-preview/*-PREVIEW.zip.sha256
             ${{ runner.temp }}/unix-preview/*-PREVIEW.tar.gz
             ${{ runner.temp }}/unix-preview/*-PREVIEW.tar.gz.sha256
+            ${{ runner.temp }}/unix-preview/*-PREVIEW.deb
+            ${{ runner.temp }}/unix-preview/*-PREVIEW.deb.sha256
