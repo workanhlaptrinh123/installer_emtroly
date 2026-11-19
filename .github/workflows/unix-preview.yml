@@ -25,16 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Ubuntu Python and Tk
+      - name: Install Ubuntu Tk libraries
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y python3-tk python3-venv
-          /usr/bin/python3 -m venv "$RUNNER_TEMP/installer-venv"
-          echo "$RUNNER_TEMP/installer-venv/bin" >> "$GITHUB_PATH"
+          sudo apt-get install -y python3-tk
 
       - uses: actions/setup-python@v5
-        if: runner.os == 'macOS'
         with:
           python-version: '3.12'
 
