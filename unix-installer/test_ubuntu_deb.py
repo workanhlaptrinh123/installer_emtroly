@@ -27,7 +27,10 @@ class UbuntuDebTests(unittest.TestCase):
             control = directory / "control"
             subprocess.run(["dpkg-deb", "--control", str(package), str(control)], check=True)
             self.assertEqual({item.name for item in control.iterdir()}, {"control"})
-            self.assertIn("libc6 (>= 2.35)", (control / "control").read_text())
+            metadata = (control / "control").read_text()
+            self.assertIn("libc6 (>= 2.35)", metadata)
+            self.assertIn("libsqlite3-0", metadata)
+            self.assertIn("ca-certificates", metadata)
             self.assertTrue(package.with_suffix(".deb.sha256").is_file())
             with self.assertRaises(ValueError):
                 ubuntu_deb.build(executable, package, "0.20261119~preview1", "amd64", "2.35")

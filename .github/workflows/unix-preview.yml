@@ -67,6 +67,20 @@ jobs:
             "$OUTPUT/dist/caidattroly-ubuntu-x64-PREVIEW" \
             "$OUTPUT/caidattroly-ubuntu-x64-PREVIEW.deb" --architecture amd64 --minimum-glibc 2.35
 
+      - name: Smoke-test deb on clean Ubuntu 22.04
+        if: runner.os == 'Linux' && inputs.live_test
+        env:
+          OUTPUT: ${{ runner.temp }}/unix-preview
+        run: |
+          docker run --rm --memory=1g --pids-limit=192 \
+            -v "$OUTPUT:/pkg:ro" \
+            -v "$GITHUB_WORKSPACE/unix-installer/frozen_smoke.py:/tmp/frozen_smoke.py:ro" \
+            ubuntu:22.04 /bin/bash -euc '
+              apt-get update -qq
+              DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /pkg/caidattroly-ubuntu-x64-PREVIEW.deb
+              /usr/lib/installer-emtroly/caidattroly --run-python-script /tmp/frozen_smoke.py
+            '
+
       - name: Smoke-test packaged helper and payload
         shell: bash
         env:

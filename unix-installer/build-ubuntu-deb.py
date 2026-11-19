@@ -40,7 +40,7 @@ def build(executable, output, version, architecture, minimum_glibc):
             "Section: utils\nPriority: optional\n"
             f"Architecture: {architecture}\n"
             "Maintainer: installer_emtroly\n"
-            f"Depends: libc6 (>= {minimum_glibc}), libx11-6, libxext6, libxft2, zlib1g\n"
+            f"Depends: libc6 (>= {minimum_glibc}), libx11-6, libxext6, libxft2, libsqlite3-0, zlib1g, ca-certificates\n"
             "Description: Em Tro Ly installer (testing preview)\n"
             " This preview is not an official customer release.\n", encoding="utf-8")
         (desktop_dir / "installer-emtroly-preview.desktop").write_text(

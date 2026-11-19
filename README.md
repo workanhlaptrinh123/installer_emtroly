@@ -1,5 +1,13 @@
 # installer_emtroly
 
+## Ubuntu Terminal Installer — Preview
+
+For an Ubuntu VPS without a desktop, use `./install-ubuntu.sh --check` and
+then `./install-ubuntu.sh` from an interactive SSH session as a non-root user.
+This is a development preview, not the existing Docker `install.sh` and not a
+browser dashboard. See `unix-installer/README.md` for prerequisites, systemd
+user services, owner Full Exec risks and the separate Zalo acceptance test.
+
 ## Native image API key — 2026-10-23
 
 Image generation uses OpenClaw's native `image_generate` tool, not a custom helper.
