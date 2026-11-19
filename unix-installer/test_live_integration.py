@@ -3,11 +3,11 @@
 import json
 import os
 from pathlib import Path
-import shutil
 import tempfile
 import unittest
 from unittest.mock import patch
 
+import dependencies
 import instance
 import payload
 import runtime
@@ -18,13 +18,10 @@ from test_settings import sample
 @unittest.skipUnless(os.environ.get("UNIX_INSTALLER_LIVE_TEST") == "1", "Explicit network test is not enabled")
 class LiveIntegrationTests(unittest.TestCase):
     def test_openclaw_and_zalo_plugins_in_temporary_instance(self):
-        node = shutil.which("node")
-        npm = shutil.which("npm")
-        if not node or not npm:
-            self.skipTest("Node and npm are required for the network integration test")
         with tempfile.TemporaryDirectory(prefix="unix-installer-test-") as temporary:
             home = Path(temporary).resolve()
             with patch.dict(os.environ, {"HOME": str(home)}):
+                node, npm = dependencies.install_node(home / "dependencies")
                 root = instance.initialize(sample(), home, 18799)
                 entry, env = runtime.install(root, home, Path(node).resolve(), Path(npm))
                 source = Path(__file__).resolve().parent.parent
