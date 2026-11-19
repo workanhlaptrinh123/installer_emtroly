@@ -16,7 +16,7 @@ def validate(settings):
         return value.strip() if isinstance(value, str) else ""
 
     member = text("member")
-    if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", member):
+    if not re.fullmatch(r"[a-z][a-z0-9_-]{0,56}", member):
         raise ValueError("invalid-member")
     assistant_name = text("assistant_name")
     if not assistant_name:

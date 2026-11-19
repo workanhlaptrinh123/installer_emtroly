@@ -42,7 +42,7 @@ def main():
         def install_runtime(root, selected_home, selected_node, selected_npm, extra_bins=()):
             entry = root / "openclaw.mjs"
             entry.touch()
-            return entry, {"OPENCLAW_PROFILE": "member-smoke"}
+            return entry, {"OPENCLAW_PROFILE": "member-member01"}
         runner.instance.initialize = initialize
         runner.runtime.install = install_runtime
         runner.payload.install = lambda *args: None

@@ -40,6 +40,10 @@ class SettingsTests(unittest.TestCase):
         data["owner_ids"] = "12345,12345"
         with self.assertRaises(ValueError):
             settings.validate(data)
+        data = sample()
+        data["member"] = "a" * 58
+        with self.assertRaises(ValueError):
+            settings.validate(data)
 
     def test_secrets_not_in_validation_errors(self):
         data = sample()

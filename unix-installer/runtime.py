@@ -1,6 +1,5 @@
 """Install the pinned OpenClaw runtime inside one fresh Unix instance."""
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -15,17 +14,22 @@ OPENCLAW_VERSION = "2026.11.4"
 
 def instance_environment(root, home, node):
     root, home, node = Path(root), Path(home), Path(node)
+    prefix = ".openclaw-member-"
+    if root.parent != home or not root.name.startswith(prefix):
+        raise ValueError("Instance must use the canonical profile path in the user home")
+    member = root.name[len(prefix):]
+    if not re.fullmatch(r"[a-z][a-z0-9_-]{0,56}", member):
+        raise ValueError("Invalid instance profile")
     env = restore_library_path(dict(os.environ))
     for name in ("OPENCLAW_HOME", "OPENCLAW_GATEWAY_PORT", "OPENCLAW_GATEWAY_TOKEN",
                  "OPENCLAW_GATEWAY_PASSWORD", "OPENCLAW_SYSTEMD_UNIT", "OPENCLAW_LAUNCHD_LABEL",
                  "OPENCLAW_WINDOWS_TASK_NAME", "OPENCLAW_TASK_SCRIPT", "OPENCLAW_WRAPPER",
                  "OPENCLAW_SERVICE_KIND", "OPENCLAW_SERVICE_MARKER", "PYTHONHOME", "PYTHONPATH"):
         env.pop(name, None)
-    identifier = hashlib.sha256(str(root).encode()).hexdigest()[:12]
     env.update({"HOME": str(home), "OPENCLAW_STATE_DIR": str(root),
                 "OPENCLAW_CONFIG_PATH": str(root / "openclaw.json"),
                 "OPENCLAW_WORKSPACE_DIR": str(root / "workspace"),
-                "OPENCLAW_PROFILE": "member-" + identifier,
+                "OPENCLAW_PROFILE": "member-" + member,
                 "PATH": str(node.parent) + os.pathsep + env.get("PATH", "")})
     return env
 
