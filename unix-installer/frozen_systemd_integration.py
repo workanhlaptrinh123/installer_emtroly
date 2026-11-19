@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -48,6 +49,29 @@ def main():
         config = json.loads(config_path.read_text())
         config["channels"]["telegram"]["enabled"] = False
         config_path.write_text(json.dumps(config), encoding="utf-8")
+        original_run = service._run
+        def diagnostic_run(command, environment, timeout, step):
+            if step != "Gateway service installation":
+                return original_run(command, environment, timeout, step)
+            try:
+                result = subprocess.run([str(item) for item in command], env=environment, timeout=timeout,
+                                        capture_output=True, text=True, stdin=subprocess.DEVNULL)
+            except subprocess.TimeoutExpired:
+                print("ci_gateway_install=timeout", flush=True)
+                raise RuntimeError("Gateway service installation timed out") from None
+            if result.returncode:
+                text = (result.stdout + "\n" + result.stderr)[-3000:]
+                for secret in (config["gateway"]["auth"]["token"], settings["telegram_token"], settings["ai_api_key"]):
+                    text = text.replace(secret, "[redacted]")
+                text = re.sub(r"[A-Za-z0-9_./:=+\-]{20,}", "[redacted]", text)
+                for line in text.splitlines():
+                    if re.search(r"token|password|secret|authorization|api.?key", line, re.IGNORECASE):
+                        print("ci_gateway_install: [sensitive line omitted]", flush=True)
+                    elif line.strip():
+                        print("ci_gateway_install:", line, flush=True)
+                raise RuntimeError("Gateway service installation failed")
+            return result.stdout
+        service._run = diagnostic_run
         attempted_service = True
         service.install_and_verify(node, entry, env, port)
         print("systemd_user_gateway_and_plugins=ok; telegram_disabled", flush=True)
@@ -63,8 +87,10 @@ def main():
             shutil.rmtree(root)
         if removed_service:
             temporary.cleanup()
-        else:
+        elif sys.exc_info()[0] is None:
             raise RuntimeError("Could not remove the temporary CI gateway service")
+        else:
+            print("ci_service_cleanup=failed", flush=True)
 
 
 if __name__ == "__main__":
