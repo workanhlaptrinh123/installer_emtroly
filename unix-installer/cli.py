@@ -66,7 +66,9 @@ def prompt(label, default=""):
     return input(label + suffix + ": ").strip() or default
 
 
-def secret(label):
+def secret(label, visible=False):
+    if visible:
+        return input(label + " (hiển thị trên màn hình): ").strip()
     with warnings.catch_warnings():
         warnings.simplefilter("error", getpass.GetPassWarning)
         try:
@@ -85,12 +87,15 @@ def collect():
     }
     values["owner_ids"] = ",".join(owner.strip() for owner in values["owner_ids"].split(","))
     first_owner = values["owner_ids"].split(",", 1)[0].strip()
+    group_id = prompt("Telegram group ID (số âm)")
+    print("Nếu chọn hiện, người khác hoặc ảnh chụp màn hình có thể thấy token và API key.")
+    show_secrets = prompt("Hiện token và API key khi nhập? [y/N]", "N").lower() == "y"
     values.update({
         "qr_owner_id": first_owner,
-        "group_id": prompt("Telegram group ID (số âm)"),
-        "telegram_token": secret("Telegram bot token (không hiển thị)"),
+        "group_id": group_id,
+        "telegram_token": secret("Telegram bot token", visible=show_secrets),
         "base_url": DEFAULT_BASE_URL,
-        "ai_api_key": secret("Provider API key (không hiển thị)"),
+        "ai_api_key": secret("Provider API key", visible=show_secrets),
         "model": "gpt-6.1-sol",
         "gateway_port": "0",
         "audience": "",
