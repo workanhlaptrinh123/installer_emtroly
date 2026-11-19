@@ -14,6 +14,10 @@ import service
 import settings
 
 
+DEFAULT_OWNERS = "8764883034,8342048167,6980864856,1828236146,8977732250"
+DEFAULT_BASE_URL = "https://codex.anhlaptrinh.vn/v1"
+
+
 ERROR_MESSAGES = {
     "invalid-member": "Tên instance phải bắt đầu bằng chữ thường và chỉ gồm chữ thường, số, - hoặc _.",
     "missing-assistant-name": "Vui lòng nhập tên trợ lý.",
@@ -77,24 +81,36 @@ def collect():
     values = {
         "member": prompt("Tên instance", "member01"),
         "assistant_name": prompt("Tên trợ lý", "Trợ lý"),
-        "owner_ids": prompt("Telegram owner ID (nhiều ID cách nhau bằng dấu phẩy)"),
+        "owner_ids": prompt("Telegram owner ID (thay đổi nếu cần)", DEFAULT_OWNERS),
     }
     values["owner_ids"] = ",".join(owner.strip() for owner in values["owner_ids"].split(","))
     first_owner = values["owner_ids"].split(",", 1)[0].strip()
     values.update({
-        "qr_owner_id": prompt("Owner ID nhận QR", first_owner),
+        "qr_owner_id": first_owner,
         "group_id": prompt("Telegram group ID (số âm)"),
         "telegram_token": secret("Telegram bot token (không hiển thị)"),
-        "base_url": prompt("Provider URL", "https://codex.anhlaptrinh.vn/v1"),
+        "base_url": DEFAULT_BASE_URL,
         "ai_api_key": secret("Provider API key (không hiển thị)"),
-        "model": prompt("Model", "gpt-6.1-sol"),
-        "gateway_port": prompt("Gateway port (0 = tự động)", "0"),
-        "audience": prompt("Đối tượng phục vụ (có thể bỏ trống)"),
-        "addressing": prompt("Cách xưng hô (có thể bỏ trống)"),
-        "style": prompt("Phong cách trả lời (có thể bỏ trống)"),
+        "model": "gpt-6.1-sol",
+        "gateway_port": "0",
+        "audience": "",
+        "addressing": "",
+        "style": "",
     })
-    print("\nFull Exec cho phép owner chạy lệnh và truy cập tệp của user này.")
-    values["accept_full_access"] = prompt("Nhập DONGY để cấp quyền và bắt đầu") == "DONGY"
+    if prompt("Tùy chỉnh nâng cao? [y/N]", "N").lower() == "y":
+        values.update({
+            "qr_owner_id": prompt("Owner ID nhận QR", first_owner),
+            "base_url": prompt("Provider URL", DEFAULT_BASE_URL),
+            "model": prompt("Model", values["model"]),
+            "gateway_port": prompt("Gateway port (0 = tự động)", "0"),
+            "audience": prompt("Đối tượng phục vụ (có thể bỏ trống)"),
+            "addressing": prompt("Cách xưng hô (có thể bỏ trống)"),
+            "style": prompt("Phong cách trả lời (có thể bỏ trống)"),
+        })
+    print("\nCác Telegram ID sẽ được cấp Full Exec: " + values["owner_ids"])
+    print("Các ID này có thể chạy lệnh và truy cập tệp của user này, kể cả ID không phải của bạn.")
+    print("Chỉ tiếp tục nếu bạn tin tưởng TẤT CẢ các ID; nhấn Ctrl+C và chạy lại để thay đổi.")
+    values["accept_full_access"] = prompt("Nhập DONGY để cấp quyền cho các ID trên và bắt đầu") == "DONGY"
     return values
 
 

@@ -10,15 +10,40 @@ from test_settings import sample
 
 class TerminalInstallerTests(unittest.TestCase):
     def test_collect_uses_hidden_input_and_explicit_consent(self):
-        inputs = iter(["member01", "Assistant", "12345,67890", "", "-12345", "",
-                       "gpt-6.1-sol", "0", "", "", "", "DONGY"])
+        inputs = iter(["member01", "Assistant", "12345,67890", "-12345", "", "DONGY"])
         with patch("builtins.input", side_effect=lambda _: next(inputs)), \
                 patch.object(cli, "secret", side_effect=["123456:" + "x" * 30, "test-only-key"]) as hidden, \
                 redirect_stdout(io.StringIO()):
             values = cli.collect()
         self.assertEqual(hidden.call_count, 2)
         self.assertEqual(values["qr_owner_id"], "12345")
+        self.assertEqual(values["base_url"], cli.DEFAULT_BASE_URL)
         self.assertTrue(values["accept_full_access"])
+        cli.settings.validate(values)
+
+    def test_defaults_are_visible_before_full_exec_consent(self):
+        inputs = iter(["", "", "", "-12345", "", "DONGY"])
+        output = io.StringIO()
+        with patch("builtins.input", side_effect=lambda _: next(inputs)), \
+                patch.object(cli, "secret", side_effect=["123456:" + "x" * 30, "test-only-key"]), \
+                redirect_stdout(output):
+            values = cli.collect()
+        self.assertEqual(values["owner_ids"], cli.DEFAULT_OWNERS)
+        self.assertEqual(values["qr_owner_id"], cli.DEFAULT_OWNERS.split(",")[0])
+        self.assertIn(cli.DEFAULT_OWNERS, output.getvalue())
+        cli.settings.validate(values)
+
+    def test_advanced_settings_remain_editable(self):
+        inputs = iter(["", "", "12345,67890", "-12345", "y", "67890",
+                       "https://example.com/v1", "gpt-6.1-terra", "19888",
+                       "", "", "", "DONGY"])
+        with patch("builtins.input", side_effect=lambda _: next(inputs)), \
+                patch.object(cli, "secret", side_effect=["123456:" + "x" * 30, "test-only-key"]), \
+                redirect_stdout(io.StringIO()):
+            values = cli.collect()
+        self.assertEqual(values["qr_owner_id"], "67890")
+        self.assertEqual(values["base_url"], "https://example.com/v1")
+        self.assertEqual(values["gateway_port"], "19888")
         cli.settings.validate(values)
 
     def test_user_must_explicitly_accept_full_exec(self):

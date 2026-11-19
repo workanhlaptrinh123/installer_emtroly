@@ -26,11 +26,14 @@ than 3.11 or lacks SQLite/SSL, it downloads a checksum-verified private Python
 and re-executes the installer with it. The normal flow prepares private Node,
 Python and FFmpeg as needed; it does not replace system runtimes.
 
-The prompts require owner ID(s), a negative Telegram group ID, bot token,
-provider URL and API key; credentials are entered without terminal echo. Use a
-dedicated bot, do not paste secrets into shell commands or chat, and authorize
-Full Exec only for trusted owners. Full Exec permits those owners to execute
-commands and access files available to that Linux account. A successful
+The prompts require owner ID(s), a negative Telegram group ID, bot token and
+API key; credentials are entered without terminal echo. Owner IDs have preset
+values and MUST be reviewed or replaced for each customer. Every selected ID
+receives Full Exec after explicit consent, even if the ID belongs to someone
+else. The provider URL and other optional settings can be changed via the
+advanced prompts. Use a dedicated bot, do not paste secrets into shell commands
+or chat, and authorize Full Exec only for trusted owners. Full Exec permits
+those owners to execute commands and access files available to that Linux account. A successful
 installer checks service/plugin/command registration; real Telegram delivery,
 QR scanning and Zalo connection are separate acceptance checks.
 
