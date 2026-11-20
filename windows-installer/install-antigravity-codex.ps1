@@ -25,7 +25,6 @@ $recoveryBackup = $null
 # A dedicated destination lets a retry reuse only the IDE installed by this job.
 $appDir = Join-Path $env:LOCALAPPDATA ('Programs\EmTroLy-Antigravity-IDE-' + $jobId)
 $editor = Join-Path $appDir 'Antigravity IDE.exe'
-if (-not $resuming -and (Test-Path -LiteralPath $appDir)) { throw 'editor-data-exists' }
 $editorCli = Join-Path $appDir 'bin\antigravity-ide.cmd'
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Em Trợ Lý - Antigravity.lnk'
 $downloadDir = Join-Path $env:TEMP ('emtroly-editor-' + [guid]::NewGuid().ToString('N'))
@@ -124,6 +123,10 @@ if (Test-Path -LiteralPath $base -PathType Container) {
     $recoveryBackup = Join-Path (Split-Path -Parent $base) $backupName
     try { Move-Item -LiteralPath $base -Destination $recoveryBackup -ErrorAction Stop } catch { throw 'editor-data-recovery-failed' }
   }
+}
+if (-not $resuming -and (Test-Path -LiteralPath $appDir -PathType Container) -and
+    (-not (Test-Path -LiteralPath $editor -PathType Leaf) -or -not (Test-Path -LiteralPath $editorCli -PathType Leaf))) {
+  throw 'editor-data-exists'
 }
 
 function Test-EditorInstallation([string]$Editor) {
