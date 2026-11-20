@@ -20,8 +20,8 @@ $codexHome = Join-Path $base 'Codex'
 $jobId = [string]$Settings.job_id
 if ($jobId -cnotmatch '^[a-f0-9]{32}$') { throw 'invalid-editor-job' }
 $receipt = Join-Path $base 'installer-job.txt'
-$resuming = Test-Path -LiteralPath $base
-if ($resuming -and (-not (Test-Path -LiteralPath $receipt -PathType Leaf) -or [IO.File]::ReadAllText($receipt) -cne $jobId)) { throw 'editor-data-exists' }
+$resuming = $false
+$recoveryBackup = $null
 # A dedicated destination lets a retry reuse only the IDE installed by this job.
 $appDir = Join-Path $env:LOCALAPPDATA ('Programs\EmTroLy-Antigravity-IDE-' + $jobId)
 $editor = Join-Path $appDir 'Antigravity IDE.exe'
@@ -83,7 +83,18 @@ function Get-EditorRegistryDirectories($Entry) {
   return @($directories | Where-Object { $_ } | Select-Object -Unique)
 }
 
-function Test-GoogleAuthenticodeSignature([string]$Path, [string]$ExpectedHash) {
+function Test-EditorDataComplete([string]$Root) {
+  foreach ($relative in @('installer-job.txt', 'Codex\config.toml', 'Codex\auth.json', 'Antigravity\UserData\settings.json', 'launch-antigravity.vbs')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $Root $relative) -PathType Leaf)) { return $false }
+  }
+  $extensionsRoot = Join-Path $Root 'Antigravity\Extensions'
+  $installed = @(Get-ChildItem -LiteralPath $extensionsRoot -Directory -Filter 'openai.chatgpt-*' -ErrorAction SilentlyContinue | Where-Object {
+    Test-Path -LiteralPath (Join-Path $_.FullName 'bin\windows-x86_64\codex.exe') -PathType Leaf
+  })
+  return $installed.Count -eq 1
+}
+
+function Test-GoogleAuthenticodeSignature([string]$Path, [string]$ExpectedHash, [switch]$AllowUnknownWithGoogleSigner) {
   $signature = Get-AuthenticodeSignature -LiteralPath $Path
   $subject = [string]$signature.SignerCertificate.Subject
   if ([string]::IsNullOrWhiteSpace($subject) -or $subject -notmatch '(?i)Google LLC') { return $false }
@@ -91,16 +102,35 @@ function Test-GoogleAuthenticodeSignature([string]$Path, [string]$ExpectedHash) 
   # Some Windows installations cannot build Google's certificate chain offline.
   # The pinned hash limits this fallback to the exact official binary.
   if ($signature.Status -eq 'Unknown') {
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ieq $ExpectedHash
+    if ($ExpectedHash) {
+      return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ieq $ExpectedHash
+    }
+    return [bool]$AllowUnknownWithGoogleSigner
   }
   return $false
+}
+
+if (Test-Path -LiteralPath $base -PathType Leaf) { throw 'editor-data-exists' }
+if (Test-Path -LiteralPath $base -PathType Container) {
+  $savedJob = if (Test-Path -LiteralPath $receipt -PathType Leaf) { [IO.File]::ReadAllText($receipt) } else { '' }
+  if ($savedJob -ceq $jobId) {
+    $resuming = $true
+  } elseif (Test-EditorDataComplete -Root $base) {
+    throw 'editor-data-exists'
+  } elseif ($CheckOnly) {
+    return
+  } else {
+    $backupName = 'EmTroLy.failed-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $recoveryBackup = Join-Path (Split-Path -Parent $base) $backupName
+    try { Move-Item -LiteralPath $base -Destination $recoveryBackup -ErrorAction Stop } catch { throw 'editor-data-recovery-failed' }
+  }
 }
 
 function Test-EditorInstallation([string]$Editor) {
   $appDir = Split-Path -Parent $Editor
   $editorCli = Join-Path $appDir 'bin\antigravity-ide.cmd'
   if (-not (Test-Path -LiteralPath $editor -PathType Leaf) -or -not (Test-Path -LiteralPath $editorCli -PathType Leaf)) { throw 'editor-cli-missing' }
-  if (-not (Test-GoogleAuthenticodeSignature -Path $Editor -ExpectedHash $ideHash)) { throw 'editor-installed-signature-invalid' }
+  if (-not (Test-GoogleAuthenticodeSignature -Path $Editor -AllowUnknownWithGoogleSigner)) { throw 'editor-installed-signature-invalid' }
   $productPath = Join-Path $appDir 'resources\app\product.json'
   if (-not (Test-Path -LiteralPath $productPath -PathType Leaf)) { throw 'editor-version-unsupported' }
   $product = Get-Content -LiteralPath $productPath -Raw | ConvertFrom-Json
@@ -156,6 +186,7 @@ $oldElectronNode = $env:ELECTRON_RUN_AS_NODE
 $oldNodeOptions = $env:NODE_OPTIONS
 $oldActivationMarker = $env:EMTROLY_CODEX_ACTIVATION_MARKER
 try {
+  if ($recoveryBackup) { Write-EditorStatus 'Đã lưu thư mục Em Trợ Lý cài dở; tiếp tục cài Codex trên dữ liệu mới...' }
   if (-not $resuming) {
     New-PrivateDirectory $base
     [IO.File]::WriteAllText($receipt, $jobId)

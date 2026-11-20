@@ -101,6 +101,7 @@ if (-not (Test-GoogleAuthenticodeSignature -Path $source -ExpectedHash $hash)) {
 function global:Get-AuthenticodeSignature { param($LiteralPath) return @{ Status = 'Unknown'; SignerCertificate = @{ Subject = 'CN=Google LLC' } } }
 if (-not (Test-GoogleAuthenticodeSignature -Path $source -ExpectedHash $hash)) { throw 'unknown-pinned-signature-rejected' }
 if (Test-GoogleAuthenticodeSignature -Path $source -ExpectedHash ('0' * 64)) { throw 'unknown-wrong-hash-accepted' }
+if (-not (Test-GoogleAuthenticodeSignature -Path $source -AllowUnknownWithGoogleSigner)) { throw 'unknown-installed-signature-rejected' }
 function global:Get-AuthenticodeSignature { param($LiteralPath) return @{ Status = 'NotSigned'; SignerCertificate = $null } }
 if (Test-GoogleAuthenticodeSignature -Path $source -ExpectedHash $hash) { throw 'unsigned-file-accepted' }
 function global:Get-AuthenticodeSignature { param($LiteralPath) return @{ Status = 'Valid'; SignerCertificate = @{ Subject = 'CN=Not Google' } } }
@@ -229,10 +230,15 @@ try {
     if ($_.Exception.Message -ne 'editor-registry-ambiguous') { throw }
   }
   $global:fixtureRegistry = @()
+$partial = Join-Path $env:LOCALAPPDATA 'EmTroLy'
+[void](New-Item -ItemType Directory -Force -Path $partial)
+[IO.File]::WriteAllText((Join-Path $partial 'stale.txt'), 'partial-install')
   $env:TEST_FAIL_CODEX = '1'
   try { & $ModulePath -Settings $settings -StatusFile $status; throw 'codex-failure-ignored' } catch {
     if ($_.Exception.Message -ne 'editor-codex-probe-failed') { throw }
   }
+$backups = @(Get-ChildItem -LiteralPath $env:LOCALAPPDATA -Directory -Filter 'EmTroLy.failed-*')
+if ($backups.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $backups[0].FullName 'stale.txt'))) { throw 'partial-editor-data-not-backed-up' }
   $env:TEST_FAIL_CODEX = ''
   & $ModulePath -Settings $settings -StatusFile $status
   $base = Join-Path $env:LOCALAPPDATA 'EmTroLy'
