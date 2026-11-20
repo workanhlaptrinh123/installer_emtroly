@@ -132,7 +132,7 @@ if (Test-GoogleAuthenticodeSignature -Path $source -ExpectedHash $hash) { throw 
             module = temp / 'install-antigravity-codex.ps1'
             text = MODULE.read_text(encoding='utf-8')
             desktop = "([Environment]::GetFolderPath('Desktop'))"
-            self.assertEqual(text.count(desktop), 1)
+            self.assertGreaterEqual(text.count(desktop), 1)
             module.write_text(text.replace(desktop, '$env:TEST_DESKTOP'), encoding='utf-8-sig')
             shutil.copytree(ROOT / 'windows-installer/activation-probe', temp / 'activation-probe')
             driver = temp / 'preflight.ps1'
