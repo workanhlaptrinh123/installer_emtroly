@@ -83,12 +83,24 @@ function Get-EditorRegistryDirectories($Entry) {
   return @($directories | Where-Object { $_ } | Select-Object -Unique)
 }
 
+function Test-GoogleAuthenticodeSignature([string]$Path, [string]$ExpectedHash) {
+  $signature = Get-AuthenticodeSignature -LiteralPath $Path
+  $subject = [string]$signature.SignerCertificate.Subject
+  if ([string]::IsNullOrWhiteSpace($subject) -or $subject -notmatch '(?i)Google LLC') { return $false }
+  if ($signature.Status -eq 'Valid') { return $true }
+  # Some Windows installations cannot build Google's certificate chain offline.
+  # The pinned hash limits this fallback to the exact official binary.
+  if ($signature.Status -eq 'Unknown') {
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ieq $ExpectedHash
+  }
+  return $false
+}
+
 function Test-EditorInstallation([string]$Editor) {
   $appDir = Split-Path -Parent $Editor
   $editorCli = Join-Path $appDir 'bin\antigravity-ide.cmd'
   if (-not (Test-Path -LiteralPath $editor -PathType Leaf) -or -not (Test-Path -LiteralPath $editorCli -PathType Leaf)) { throw 'editor-cli-missing' }
-  $editorSignature = Get-AuthenticodeSignature -LiteralPath $editor
-  if ($editorSignature.Status -ne 'Valid' -or $editorSignature.SignerCertificate.Subject -notmatch 'Google') { throw 'editor-signature-invalid' }
+  if (-not (Test-GoogleAuthenticodeSignature -Path $Editor -ExpectedHash $ideHash)) { throw 'editor-installed-signature-invalid' }
   $productPath = Join-Path $appDir 'resources\app\product.json'
   if (-not (Test-Path -LiteralPath $productPath -PathType Leaf)) { throw 'editor-version-unsupported' }
   $product = Get-Content -LiteralPath $productPath -Raw | ConvertFrom-Json
@@ -153,8 +165,7 @@ try {
     Write-EditorStatus 'Đang tải Antigravity IDE chính thức (khoảng 190 MB)...'
     $setup = Join-Path $downloadDir 'antigravity-ide-setup.exe'
     Get-VerifiedDownload -Url $ideUrl -Path $setup -Hash $ideHash
-    $signature = Get-AuthenticodeSignature -LiteralPath $setup
-    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Google') { throw 'editor-signature-invalid' }
+    if (-not (Test-GoogleAuthenticodeSignature -Path $setup -ExpectedHash $ideHash)) { throw 'editor-installer-signature-invalid' }
     Write-EditorStatus 'Đang cài Antigravity IDE...'
     $setupArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCLOSEAPPLICATIONS /NORESTARTAPPLICATIONS /SP- /MERGETASKS="!runcode" /DIR=' + (Quote-Cmd $appDir)
     if ((Invoke-HiddenProcess $setup $setupArgs 1200) -ne 0) { throw 'editor-install-failed' }

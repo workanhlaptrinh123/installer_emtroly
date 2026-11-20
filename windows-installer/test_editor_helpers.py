@@ -72,7 +72,7 @@ $ErrorActionPreference = 'Stop'
 $tokens = $null; $parseErrors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($ModulePath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count) { throw 'parse-failed' }
-foreach ($name in @('Quote-Cmd', 'Get-VerifiedDownload', 'Get-EditorRegistryDirectories')) {
+foreach ($name in @('Quote-Cmd', 'Get-VerifiedDownload', 'Get-EditorRegistryDirectories', 'Test-GoogleAuthenticodeSignature')) {
   $node = @($ast.FindAll({ param($item) $item -is [Management.Automation.Language.FunctionDefinitionAst] -and $item.Name -eq $name }, $true))
   if ($node.Count -ne 1) { throw 'function-not-found' }
   Invoke-Expression $node[0].Extent.Text
@@ -96,6 +96,15 @@ $directories = @(Get-EditorRegistryDirectories $entry)
 if ($directories.Count -ne 1 -or $directories[0] -cne $registryDirectory) { throw 'registry-paths-not-deduplicated' }
 $empty = [pscustomobject]@{ InstallLocation = ''; DisplayIcon = ''; UninstallString = '' }
 if (@(Get-EditorRegistryDirectories $empty).Count -ne 0) { throw 'empty-registry-not-ambiguous' }
+function global:Get-AuthenticodeSignature { param($LiteralPath) return @{ Status = 'Valid'; SignerCertificate = @{ Subject = 'CN=Google LLC' } } }
+if (-not (Test-GoogleAuthenticodeSignature -Path $source -ExpectedHash $hash)) { throw 'valid-signature-rejected' }
+function global:Get-AuthenticodeSignature { param($LiteralPath) return @{ Status = 'Unknown'; SignerCertificate = @{ Subject = 'CN=Google LLC' } } }
+if (-not (Test-GoogleAuthenticodeSignature -Path $source -ExpectedHash $hash)) { throw 'unknown-pinned-signature-rejected' }
+if (Test-GoogleAuthenticodeSignature -Path $source -ExpectedHash ('0' * 64)) { throw 'unknown-wrong-hash-accepted' }
+function global:Get-AuthenticodeSignature { param($LiteralPath) return @{ Status = 'NotSigned'; SignerCertificate = $null } }
+if (Test-GoogleAuthenticodeSignature -Path $source -ExpectedHash $hash) { throw 'unsigned-file-accepted' }
+function global:Get-AuthenticodeSignature { param($LiteralPath) return @{ Status = 'Valid'; SignerCertificate = @{ Subject = 'CN=Not Google' } } }
+if (Test-GoogleAuthenticodeSignature -Path $source -ExpectedHash $hash) { throw 'non-google-file-accepted' }
 ''', encoding='utf-8')
             result = subprocess.run([PWSH, '-NoLogo', '-NoProfile', '-File', str(driver),
                                      '-ModulePath', str(MODULE), '-Directory', str(temp)],

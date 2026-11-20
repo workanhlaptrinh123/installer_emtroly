@@ -258,6 +258,8 @@ try {
     'editor-provider-unsupported' = 'Codex hiện chỉ hỗ trợ provider codex.anhlaptrinh.vn/v1 trong bộ cài này.'
     'editor-download-failed' = 'Không tải được Antigravity IDE hoặc Codex Extension. Kiểm tra Internet và dung lượng trống.'
     'editor-download-checksum' = 'Tệp tải về không khớp mã kiểm tra; đã dừng để bảo vệ máy.'
+    'editor-installer-signature-invalid' = 'Không xác minh được chữ ký hoặc mã kiểm tra của bộ cài Antigravity IDE.'
+    'editor-installed-signature-invalid' = 'Antigravity IDE sau khi cài không còn đúng chữ ký Google và mã kiểm tra; bộ cài đã dừng.'
     'editor-signature-invalid' = 'Không xác minh được chữ ký Google của Antigravity IDE.'
     'editor-install-failed' = 'Antigravity IDE chưa cài được.'
     'editor-cli-missing' = 'Không tìm thấy công cụ dòng lệnh Antigravity IDE.'
