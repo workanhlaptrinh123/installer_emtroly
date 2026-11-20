@@ -63,6 +63,34 @@ jobs:
           RELEASE_VERSION="${{ steps.version.outputs.version }}" \
           ./build-windows-installer.sh caidattroly.exe
 
+      - name: Sign installer for official release
+        if: github.ref_type == 'tag'
+        shell: powershell
+        env:
+          WINDOWS_SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
+          WINDOWS_SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+          WINDOWS_SIGNING_TIMESTAMP_URL: ${{ secrets.WINDOWS_SIGNING_TIMESTAMP_URL }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_CERT_PASSWORD)) {
+            throw 'Official Windows releases require WINDOWS_SIGNING_CERT_BASE64 and WINDOWS_SIGNING_CERT_PASSWORD repository secrets.'
+          }
+          $certificate = Join-Path $env:RUNNER_TEMP 'installer-emtroly-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:WINDOWS_SIGNING_CERT_BASE64))
+            $timestamp = if ([string]::IsNullOrWhiteSpace($env:WINDOWS_SIGNING_TIMESTAMP_URL)) {
+              'https://timestamp.digicert.com'
+            } else { $env:WINDOWS_SIGNING_TIMESTAMP_URL }
+            & ./windows-installer/sign-release.ps1 `
+              -FilePath ./caidattroly.exe `
+              -CertificatePath $certificate `
+              -CertificatePassword $env:WINDOWS_SIGNING_CERT_PASSWORD `
+              -TimestampUrl $timestamp
+          } finally {
+            Remove-Item -LiteralPath $certificate -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Scan installer with Microsoft Defender
         shell: powershell
         run: |
@@ -81,7 +109,9 @@ jobs:
             Start-Sleep -Seconds 3
           } while ((Get-Date) -lt $deadline)
           $status | Select-Object AMRunningMode, AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled
-          ./windows-installer/scan-release.ps1 -FilePath ./caidattroly.exe
+          $scanArgs = @{ FilePath = './caidattroly.exe' }
+          if ($env:GITHUB_REF_TYPE -eq 'tag') { $scanArgs.RequireAuthenticodeSignature = $true }
+          ./windows-installer/scan-release.ps1 @scanArgs
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4

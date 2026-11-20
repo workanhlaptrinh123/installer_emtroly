@@ -1,11 +1,18 @@
 param(
   [Parameter(Mandatory = $true)]
-  [string]$FilePath
+  [string]$FilePath,
+  [switch]$RequireAuthenticodeSignature
 )
 
 $ErrorActionPreference = 'Stop'
 $file = (Resolve-Path -LiteralPath $FilePath).Path
 $before = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
+if ($RequireAuthenticodeSignature) {
+  $signature = Get-AuthenticodeSignature -LiteralPath $file
+  if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate) {
+    throw "Release installer must have a valid Authenticode signature; status: $($signature.Status)."
+  }
+}
 $status = Get-MpComputerStatus
 if (-not $status.AntivirusEnabled -or -not $status.AMServiceEnabled -or -not $status.RealTimeProtectionEnabled) {
   throw 'Microsoft Defender Antivirus is unavailable; refusing to publish an unscanned installer.'
