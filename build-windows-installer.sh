@@ -10,8 +10,15 @@ RELEASE_VERSION="${RELEASE_VERSION:-$(sed -n 's/^installer_version=//p' "$BASE/M
 file_version="$RELEASE_VERSION"
 if [[ ! "$file_version" =~ ^([0-9]+\.){3} ]]; then file_version+=".0"; fi
 
+if [[ -n "$NSIS" && ! -x "$NSIS" ]]; then NSIS=""; fi
 if [[ -z "$NSIS" ]]; then
-  for candidate in /tmp/nsis-stage/extract/usr/bin/makensis /usr/bin/makensis; do
+  for candidate in \
+    /tmp/nsis-stage/extract/usr/bin/makensis \
+    /usr/bin/makensis \
+    "/c/Program Files (x86)/NSIS/makensis.exe" \
+    "/c/Program Files (x86)/NSIS/Bin/makensis.exe" \
+    "/c/Program Files/NSIS/makensis.exe" \
+    "/c/Program Files/NSIS/Bin/makensis.exe"; do
     if [[ -x "$candidate" ]]; then
       NSIS="$candidate"
       break
