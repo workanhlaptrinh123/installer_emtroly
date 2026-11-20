@@ -10,6 +10,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / 'windows-installer/install-antigravity-codex.ps1'
+REPAIR = ROOT / 'windows-installer/repair-antigravity-shortcut.ps1'
 PWSH = os.environ.get('PWSH') or shutil.which('pwsh')
 
 
@@ -18,8 +19,11 @@ class EditorContractTests(unittest.TestCase):
         build = (ROOT / 'build-windows-installer.sh').read_text(encoding='utf-8')
         runner = (ROOT / 'windows-installer/run-native-install.ps1').read_text(encoding='utf-8')
         wizard = (ROOT / 'windows-installer/wizard.ps1').read_text(encoding='utf-8')
+        nsi = (ROOT / 'windows-installer/member-vps-installer.nsi').read_text(encoding='utf-8')
         self.assertIn('install-antigravity-codex.ps1', build)
+        self.assertIn('repair-antigravity-shortcut.ps1', build)
         self.assertIn('activation-probe', build)
+        self.assertIn('repair-antigravity-shortcut.ps1', nsi)
         self.assertIn('-EditorOnly', wizard)
         self.assertIn('$editorSettings', runner)
         self.assertIn('skip_editor = [bool]$existingEditorCheck.Checked', wizard)
@@ -43,7 +47,16 @@ class EditorContractTests(unittest.TestCase):
         self.assertIn('shell.CurrentDirectory', script)
         self.assertIn('command = Chr(34)', script)
         self.assertIn('shell.Run command, 1, False', script)
+        self.assertIn('$saved.TargetPath -ieq', script)
+        self.assertIn('$saved.WorkingDirectory -ieq $Root', script)
         self.assertNotIn("throw 'editor-shortcut-exists'", script)
+
+    def test_shortcut_repair_requires_a_complete_install(self):
+        script = REPAIR.read_text(encoding='utf-8')
+        for item in ('installer-codex-pending.json', 'Codex\\config.toml', 'Codex\\auth.json',
+                     'Antigravity\\UserData\\User\\settings.json', 'package.json',
+                     'bin\\windows-x86_64\\codex.exe', 'shell.CurrentDirectory = "$($appRoot.Replace'):
+            self.assertIn(item, script)
 
     @unittest.skipUnless(shutil.which('node'), 'Node.js is unavailable')
     def test_activation_marker_requires_an_active_codex_sidebar(self):
@@ -293,5 +306,53 @@ if (-not (Test-Path -LiteralPath (Join-Path $backups[0].FullName 'Programs\EmTro
             result = subprocess.run([str(shell), '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
                                      '-File', str(driver), '-ModulePath', str(staged_module), '-Directory', str(temp)],
                                     capture_output=True, text=True, timeout=60,
+                                    creationflags=subprocess.CREATE_NO_WINDOW)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_existing_install_repair_recreates_a_working_shortcut(self):
+        with tempfile.TemporaryDirectory(prefix='emtroly-repair ') as temporary:
+            temp = Path(temporary)
+            repair = temp / 'repair-antigravity-shortcut.ps1'
+            repair.write_text(REPAIR.read_text(encoding='utf-8'), encoding='utf-8-sig')
+            driver = temp / 'driver.ps1'
+            driver.write_text(r'''
+param($RepairPath, $Directory)
+$ErrorActionPreference = 'Stop'
+$env:LOCALAPPDATA = Join-Path $Directory 'Local AppData'
+$env:TEMP = Join-Path $Directory 'Temp Files'
+$env:USERPROFILE = Join-Path $Directory 'User Profile'
+[void](New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA, $env:TEMP, $env:USERPROFILE)
+$base = Join-Path $env:LOCALAPPDATA 'EmTroLy'
+$app = Join-Path $env:LOCALAPPDATA 'Programs\EmTroLy-Antigravity-IDE-0123456789abcdef0123456789abcdef'
+$desktop = [Environment]::GetFolderPath('Desktop')
+[void](New-Item -ItemType Directory -Force -Path $desktop)
+$shortcutPath = Join-Path $desktop 'EmTroLy - Antigravity.lnk'
+if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }
+[void](New-Item -ItemType Directory -Force -Path (Join-Path $app 'bin'), (Join-Path $app 'resources\app'),
+  (Join-Path $base 'Codex'), (Join-Path $base 'Antigravity\UserData\User'),
+  (Join-Path $base 'Antigravity\Extensions\openai.chatgpt-fixture\bin\windows-x86_64'))
+[IO.File]::WriteAllText((Join-Path $base 'installer-job.txt'), '0123456789abcdef0123456789abcdef')
+[IO.File]::WriteAllText((Join-Path $base 'Codex\config.toml'), 'base_url = "https://codex.anhlaptrinh.vn/v1"`nrequires_openai_auth = true')
+[IO.File]::WriteAllText((Join-Path $base 'Codex\auth.json'), '{"OPENAI_API_KEY":"fixture-secret-not-real"}')
+[IO.File]::WriteAllText((Join-Path $base 'Antigravity\UserData\User\settings.json'), '{}')
+[IO.File]::WriteAllText((Join-Path $base 'Antigravity\Extensions\openai.chatgpt-fixture\package.json'), '{"publisher":"openai","name":"chatgpt","version":"26.51111.21308"}')
+[IO.File]::WriteAllText((Join-Path $base 'Antigravity\Extensions\openai.chatgpt-fixture\bin\windows-x86_64\codex.exe'), 'fixture')
+[IO.File]::WriteAllText((Join-Path $app 'Antigravity IDE.exe'), 'fixture')
+[IO.File]::WriteAllText((Join-Path $app 'bin\antigravity-ide.cmd'), 'fixture')
+[IO.File]::WriteAllText((Join-Path $app 'resources\app\product.json'), '{"applicationName":"antigravity-ide","version":"1.107.0"}')
+& $RepairPath
+if ($LASTEXITCODE -ne 0) { throw "repair-failed-$LASTEXITCODE" }
+$saved = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+$wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
+if ($saved.TargetPath -ine $wscript -or $saved.Arguments -notmatch 'launch-antigravity\.vbs' -or
+    $saved.WorkingDirectory -ine $base) { throw 'shortcut-not-repaired' }
+$launch = [IO.File]::ReadAllText((Join-Path $base 'launch-antigravity.vbs'), [Text.Encoding]::Unicode)
+if ($launch -notmatch [regex]::Escape((Join-Path $app 'Antigravity IDE.exe')) -or
+    $launch -notmatch [regex]::Escape($app) -or $launch -notmatch 'command = Chr\(34\)') { throw 'launcher-not-repaired' }
+''', encoding='utf-8-sig')
+            shell = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+            result = subprocess.run([str(shell), '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                                     '-File', str(driver), '-RepairPath', str(repair), '-Directory', str(temp)],
+                                    capture_output=True, text=True, timeout=30,
                                     creationflags=subprocess.CREATE_NO_WINDOW)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

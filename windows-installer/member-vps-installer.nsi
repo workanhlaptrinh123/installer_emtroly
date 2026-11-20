@@ -42,6 +42,13 @@ Section
   File /r "${PAYLOAD_DIR}/*"
   !endif
   ClearErrors
+  ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$PLUGINSDIR\windows-installer\repair-antigravity-shortcut.ps1"' $0
+  ${If} $0 == 0
+    MessageBox MB_OK|MB_ICONINFORMATION "Đã sửa shortcut EmTroLy - Antigravity. Bấm OK để mở lại shortcut trên Desktop."
+    SetErrorLevel 0
+    Quit
+  ${EndIf}
+  ClearErrors
   ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$PLUGINSDIR\windows-installer\wizard.ps1" -PayloadRoot "$PLUGINSDIR"' $0
   IfErrors launch_error
   SetErrorLevel $0

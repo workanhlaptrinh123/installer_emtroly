@@ -40,6 +40,7 @@ cp "$BASE/windows-installer/wizard.ps1" "$payload/windows-installer/"
 cp "$BASE/windows-installer/validation.ps1" "$payload/windows-installer/"
 cp "$BASE/windows-installer/verify-openclaw-command.ps1" "$payload/windows-installer/"
 cp "$BASE/windows-installer/install-antigravity-codex.ps1" "$payload/windows-installer/"
+cp "$BASE/windows-installer/repair-antigravity-shortcut.ps1" "$payload/windows-installer/"
 cp -a "$BASE/windows-installer/activation-probe" "$payload/windows-installer/"
 
 find "$payload" -type d -name '__pycache__' -prune -exec rm -rf {} +

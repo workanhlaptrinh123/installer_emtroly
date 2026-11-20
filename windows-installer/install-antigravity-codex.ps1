@@ -115,9 +115,9 @@ function Test-EditorShortcutComplete([string]$Root, [string]$AppRoot) {
         $launch -notmatch '--extensions-dir') { return $false }
     $shell = New-Object -ComObject WScript.Shell
     $saved = $shell.CreateShortcut($shortcutPath)
-    return $saved.TargetPath -ine (Join-Path $env:SystemRoot 'System32\wscript.exe') -and
+    return $saved.TargetPath -ieq (Join-Path $env:SystemRoot 'System32\wscript.exe') -and
       $saved.Arguments -match [regex]::Escape($launchPath) -and
-      $saved.WorkingDirectory -ine $Root
+      $saved.WorkingDirectory -ieq $Root
   } catch {
     return $false
   }
@@ -368,7 +368,7 @@ shell.Environment("PROCESS")("OPENAI_API_KEY") = ""
 shell.Environment("PROCESS")("VSCODE_IPC_HOOK_CLI") = ""
 shell.Environment("PROCESS")("ELECTRON_RUN_AS_NODE") = ""
 shell.Environment("PROCESS")("NODE_OPTIONS") = ""
-shell.CurrentDirectory = "$($base.Replace('"','""'))"
+shell.CurrentDirectory = "$($appDir.Replace('"','""'))"
 command = Chr(34) & "$($editor.Replace('"','""'))" & Chr(34) & _
   " --user-data-dir " & Chr(34) & "$($userData.Replace('"','""'))" & Chr(34) & _
   " --extensions-dir " & Chr(34) & "$($extensions.Replace('"','""'))" & Chr(34) & _
