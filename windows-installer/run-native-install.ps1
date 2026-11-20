@@ -117,10 +117,12 @@ try {
   $root = Join-Path $env:USERPROFILE 'openclaw'
   if (Test-Path -LiteralPath $root) { throw 'instance-exists' }
   if ($env:OS -eq 'Windows_NT' -and (Get-Command openclaw -ErrorAction SilentlyContinue)) { throw 'cli-probe-conflict' }
-  $stage = 'editor-preflight'
-  $editorInstaller = Join-Path $PayloadRoot 'windows-installer\install-antigravity-codex.ps1'
-  if (-not (Test-Path -LiteralPath $editorInstaller -PathType Leaf)) { throw 'editor-module-missing' }
-  & $editorInstaller -Settings $settings -StatusFile $LogFile -CheckOnly *> $null
+  if (-not $settings.skip_editor) {
+    $stage = 'editor-preflight'
+    $editorInstaller = Join-Path $PayloadRoot 'windows-installer\install-antigravity-codex.ps1'
+    if (-not (Test-Path -LiteralPath $editorInstaller -PathType Leaf)) { throw 'editor-module-missing' }
+    & $editorInstaller -Settings $settings -StatusFile $LogFile -CheckOnly *> $null
+  }
 
   $stage = 'provider'
   Write-SafeStatus 'Đang kiểm tra API và model...'
@@ -142,9 +144,11 @@ try {
   } catch { throw 'telegram-unavailable' }
   if (-not $telegram.ok -or -not $telegram.result.is_bot) { throw 'telegram-invalid-bot' }
 
-  $stage = 'editor'
-  Write-SafeStatus 'Đang cài Antigravity IDE và cấu hình Codex...'
-  & $editorInstaller -Settings $settings -StatusFile $LogFile *> $null
+  if (-not $settings.skip_editor) {
+    $stage = 'editor'
+    Write-SafeStatus 'Đang cài Antigravity IDE và cấu hình Codex...'
+    & $editorInstaller -Settings $settings -StatusFile $LogFile *> $null
+  }
 
   $stage = 'install'
   Write-SafeStatus 'Đang cài môi trường, module và Gateway. Vui lòng đợi...'
@@ -205,7 +209,11 @@ try {
   $stage = 'telegram-menu'
   Write-SafeStatus 'Đang đồng bộ menu Telegram: /zaloqr và /zalostatus...'
   Ensure-TelegramCommandMenu -Token ([string]$settings.telegram_token)
-  Write-SafeStatus 'Hoàn tất: OpenClaw, lệnh Zalo, Antigravity IDE và Codex đã qua kiểm tra. Quét QR là bước sau khi cài.'
+  if ($settings.skip_editor) {
+    Write-SafeStatus 'Hoàn tất: OpenClaw, /zaloqr và /zalostatus đã sẵn sàng.'
+  } else {
+    Write-SafeStatus 'Hoàn tất: OpenClaw, /zaloqr và /zalostatus đã sẵn sàng. Mở lối tắt Em Trợ Lý - Antigravity trên Desktop để dùng Codex riêng.'
+  }
   exit 0
 } catch {
   $code = [string]$_.Exception.Message
@@ -223,8 +231,7 @@ try {
     'editor-shortcut-exists' = 'Shortcut Em Trợ Lý - Antigravity đã tồn tại; bộ cài không ghi đè.'
     'editor-desktop-missing' = 'Không tìm thấy Desktop hoặc Windows Script Host để tạo shortcut an toàn.'
     'editor-invalid-path' = 'Đường dẫn Windows chứa ký tự bộ cài chưa hỗ trợ; dữ liệu hiện có không bị ghi đè.'
-    'editor-select-existing' = 'Máy có Antigravity. Hãy tích chọn dùng bản đã cài để bộ cài tìm ứng dụng.'
-    'editor-existing-not-found' = 'Không tìm thấy Antigravity IDE.exe đã chọn. Hãy chọn lại hoặc bỏ chọn để tải bản mới.'
+    'editor-select-existing' = 'Máy có Antigravity. Hãy tích “Máy đã có Antigravity IDE” để chỉ cài OpenClaw và Zalo.'
     'editor-registry-ambiguous' = 'Có thông tin Antigravity cũ trong Windows nhưng không xác định được đường dẫn. Hãy kiểm tra ứng dụng đã cài; bộ cài không tự xóa dữ liệu.'
     'editor-provider-unsupported' = 'Codex hiện chỉ hỗ trợ provider codex.anhlaptrinh.vn/v1 trong bộ cài này.'
     'editor-download-failed' = 'Không tải được Antigravity IDE hoặc Codex Extension. Kiểm tra Internet và dung lượng trống.'

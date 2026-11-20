@@ -8,7 +8,6 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / 'windows-installer/install-antigravity-codex.ps1'
-DISCOVERY = MODULE.with_name('editor-discovery.ps1')
 PWSH = os.environ.get('PWSH') or shutil.which('pwsh')
 
 
@@ -22,7 +21,8 @@ class EditorContractTests(unittest.TestCase):
         self.assertIn('-CheckOnly', runner)
         self.assertLess(runner.index('& $editorInstaller -Settings $settings -StatusFile $LogFile *> $null'),
                         runner.index("Write-SafeStatus 'Hoàn tất:"))
-        self.assertIn('Em Trợ Lý - Antigravity', wizard)
+        self.assertIn('skip_editor = [bool]$existingEditorCheck.Checked', wizard)
+        self.assertNotIn('OpenFileDialog', wizard)
 
     def test_isolation_and_auth_are_explicit(self):
         script = MODULE.read_text(encoding='utf-8')
@@ -34,16 +34,6 @@ class EditorContractTests(unittest.TestCase):
             self.assertIn(item, script)
         self.assertNotIn('SetEnvironmentVariable(', script)
         self.assertNotIn('~/.codex', script)
-
-    def test_existing_editor_choice_is_forwarded(self):
-        wizard = (ROOT / 'windows-installer/wizard.ps1').read_text(encoding='utf-8')
-        script = MODULE.read_text(encoding='utf-8')
-        self.assertIn('use_existing_antigravity = [bool]$existingEditorCheck.Checked', wizard)
-        self.assertIn('antigravity_exe = $existingEditorBox.Text.Trim()', wizard)
-        self.assertIn('Find-InstalledEditor', wizard)
-        self.assertIn(DISCOVERY.name, (ROOT / 'build-windows-installer.sh').read_text())
-        self.assertIn("throw 'editor-select-existing'", script)
-        self.assertIn("throw 'editor-registry-ambiguous'", script)
 
     @unittest.skipUnless(shutil.which('node'), 'Node.js is unavailable')
     def test_activation_marker_requires_an_active_codex_sidebar(self):
@@ -81,8 +71,7 @@ $ErrorActionPreference = 'Stop'
 $tokens = $null; $parseErrors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($ModulePath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count) { throw 'parse-failed' }
-. (Join-Path (Split-Path -Parent $ModulePath) 'editor-discovery.ps1')
-foreach ($name in @('Quote-Cmd', 'Get-VerifiedDownload')) {
+foreach ($name in @('Quote-Cmd', 'Get-VerifiedDownload', 'Get-EditorRegistryDirectories')) {
   $node = @($ast.FindAll({ param($item) $item -is [Management.Automation.Language.FunctionDefinitionAst] -and $item.Name -eq $name }, $true))
   if ($node.Count -ne 1) { throw 'function-not-found' }
   Invoke-Expression $node[0].Extent.Text
@@ -112,7 +101,7 @@ if (@(Get-EditorRegistryDirectories $empty).Count -ne 0) { throw 'empty-registry
                                     capture_output=True, text=True, timeout=30)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_preflight_preserves_stale_data_and_reuses_selected_editor(self):
+    def test_new_editor_preflight_distinguishes_installed_from_stale(self):
         with tempfile.TemporaryDirectory(prefix='emtroly-preflight-') as temporary:
             temp = Path(temporary)
             module = temp / 'install-antigravity-codex.ps1'
@@ -120,7 +109,6 @@ if (@(Get-EditorRegistryDirectories $empty).Count -ne 0) { throw 'empty-registry
             desktop = "([Environment]::GetFolderPath('Desktop'))"
             self.assertEqual(text.count(desktop), 1)
             module.write_text(text.replace(desktop, '$env:TEST_DESKTOP'), encoding='utf-8-sig')
-            shutil.copy2(DISCOVERY, temp / DISCOVERY.name)
             shutil.copytree(ROOT / 'windows-installer/activation-probe', temp / 'activation-probe')
             driver = temp / 'preflight.ps1'
             driver.write_text(r'''
@@ -143,7 +131,7 @@ foreach ($path in @($old, $env:TEST_DESKTOP, (Join-Path $env:SystemRoot 'System3
 [IO.File]::WriteAllText((Join-Path $selected 'resources\app\product.json'), '{"applicationName":"antigravity-ide","version":"1.107.0"}')
 function global:Get-AuthenticodeSignature { param($LiteralPath) return @{ Status = 'Valid'; SignerCertificate = @{ Subject = 'CN=Google LLC' } } }
 function global:Get-ItemProperty { param($Path, $ErrorAction) return $global:fixtureRegistry }
-$settings = [pscustomobject]@{base_url='https://codex.anhlaptrinh.vn/v1'; ai_api_key='fixture'; use_existing_antigravity=$false; antigravity_exe=''}
+$settings = [pscustomobject]@{base_url='https://codex.anhlaptrinh.vn/v1'; ai_api_key='fixture'}
 $status = Join-Path $Directory 'status.txt'
 $global:fixtureRegistry = @([pscustomobject]@{DisplayName='Antigravity IDE'; InstallLocation=$old; DisplayIcon=''; UninstallString=''; PSChildName='fixture'})
 & $ModulePath -Settings $settings -StatusFile $status -CheckOnly
@@ -153,25 +141,6 @@ $global:fixtureRegistry = @([pscustomobject]@{DisplayName='Antigravity IDE'; Ins
 try { & $ModulePath -Settings $settings -StatusFile $status -CheckOnly; throw 'did-not-detect-existing' } catch { if ($_.Exception.Message -ne 'editor-select-existing') { throw } }
 $global:fixtureRegistry = @([pscustomobject]@{DisplayName='Antigravity IDE'; InstallLocation=''; DisplayIcon=''; UninstallString=''; PSChildName='fixture'})
 try { & $ModulePath -Settings $settings -StatusFile $status -CheckOnly; throw 'did-not-detect-ambiguous' } catch { if ($_.Exception.Message -ne 'editor-registry-ambiguous') { throw } }
-$settings.use_existing_antigravity = $true
-$settings.antigravity_exe = Join-Path $old 'Antigravity IDE.exe'
-try { & $ModulePath -Settings $settings -StatusFile $status -CheckOnly; throw 'did-not-detect-missing' } catch { if ($_.Exception.Message -ne 'editor-existing-not-found') { throw } }
-$settings.antigravity_exe = Join-Path $selected 'Antigravity IDE.exe'
-& $ModulePath -Settings $settings -StatusFile $status -CheckOnly
-. (Join-Path $Directory 'editor-discovery.ps1')
-if (@(Find-InstalledEditor).Count) { throw 'stale-entry-selected' }
-$reg = [pscustomobject]@{ DisplayName='Antigravity IDE'; InstallLocation=$selected }
-$global:fixtureRegistry = @($reg, $reg)
-$found = @(Find-InstalledEditor)
-if ($found.Count -ne 1 -or $found[0] -ne $settings.antigravity_exe) { throw 'custom-install-not-found' }
-$env:ProgramFiles = Join-Path $Directory 'Program Files'
-[void](New-Item -ItemType Directory $env:ProgramFiles)
-Copy-Item -LiteralPath $selected -Destination $env:ProgramFiles -Recurse
-if (@(Find-InstalledEditor).Count -ne 2) { throw 'ambiguous-install-not-found' }
-$global:fixtureRegistry = @()
-if (@(Find-InstalledEditor).Count -ne 1) { throw 'system-install-not-found' }
-function global:Get-AuthenticodeSignature { param($LiteralPath) return @{ Status = 'NotSigned' } }
-if (@(Find-InstalledEditor).Count) { throw 'unsigned-app-selected' }
 ''', encoding='utf-8-sig')
             result = subprocess.run([PWSH, '-NoLogo', '-NoProfile', '-File', str(driver),
                                      '-ModulePath', str(module), '-Directory', str(temp)],
@@ -192,7 +161,6 @@ class EditorWindowsFixtureTests(unittest.TestCase):
             self.assertEqual(module_source.count(download), 1)
             module_source = module_source.replace(download, "  [IO.File]::WriteAllText($vsix, 'fixture')")
             staged_module.write_text(module_source, encoding='utf-8-sig')
-            shutil.copy2(DISCOVERY, temp / DISCOVERY.name)
             shutil.copytree(ROOT / 'windows-installer/activation-probe', temp / 'activation-probe')
             driver.write_text(r'''
 param($ModulePath, $Directory)
@@ -212,12 +180,15 @@ $shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Em Trợ L�
 if (Test-Path -LiteralPath $shortcutPath) { throw 'fixture-shortcut-already-exists' }
 function global:Get-AuthenticodeSignature { param($LiteralPath) return @{ Status = 'Valid'; SignerCertificate = @{ Subject = 'CN=Google LLC' } } }
 function global:Invoke-WebRequest { param([switch]$UseBasicParsing, $Uri, $OutFile, $TimeoutSec) [IO.File]::WriteAllText($OutFile, 'fixture') }
-function global:Get-FileHash { param($LiteralPath, $Algorithm) return @{ Hash = '5abdd18242a77e85e60b8b727231924c4cdf048fdf5c39079e5d811390c3fca8' } }
+function global:Get-FileHash { param($LiteralPath, $Algorithm) if ($LiteralPath -match 'setup\.exe$') { return @{ Hash = $ideHash } }; return @{ Hash = '5abdd18242a77e85e60b8b727231924c4cdf048fdf5c39079e5d811390c3fca8' } }
 $global:fixtureRegistry = @()
 function global:Get-ItemProperty { param($Path, $ErrorAction) return $global:fixtureRegistry }
 function global:Start-Process {
   param($FilePath, $ArgumentList, $WindowStyle, [switch]$PassThru)
-  if ($env:CODEX_HOME -ne (Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex')) { throw 'codex-home-not-isolated' }
+  if ($FilePath -match 'antigravity-ide-setup\.exe$') {
+    if ($ArgumentList -notmatch '/DIR="([^"]+)"') { throw 'no-install-directory' }
+    Copy-Item -LiteralPath $editorFolder -Destination $Matches[1] -Recurse
+  } elseif ($env:CODEX_HOME -ne (Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex')) { throw 'codex-home-not-isolated' }
   if ($FilePath -match 'cmd\.exe$') {
     if (-not $ArgumentList.Contains((Join-Path $env:LOCALAPPDATA 'EmTroLy\Antigravity\Extensions'))) { throw 'wrong-extension-directory' }
     $extension = Join-Path $env:LOCALAPPDATA 'EmTroLy\Antigravity\Extensions\openai.chatgpt-fixture'
@@ -230,7 +201,7 @@ function global:Start-Process {
   $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { param($Milliseconds) return $true }
   return $process
 }
-$settings = [pscustomobject]@{ base_url='https://codex.anhlaptrinh.vn/v1'; model='GPT-6.1-sol'; ai_api_key='fixture-secret-not-real'; use_existing_antigravity=$false; antigravity_exe='' }
+$settings = [pscustomobject]@{ base_url='https://codex.anhlaptrinh.vn/v1'; model='GPT-6.1-sol'; ai_api_key='fixture-secret-not-real' }
 $status = Join-Path $Directory 'status.txt'
 try {
   $global:fixtureRegistry = @([pscustomobject]@{ DisplayName='Antigravity IDE'; InstallLocation=$oldFolder; DisplayIcon=''; UninstallString=''; PSChildName='fixture' })
@@ -244,14 +215,7 @@ try {
   try { & $ModulePath -Settings $settings -StatusFile $status -CheckOnly; throw 'ambiguous-not-detected' } catch {
     if ($_.Exception.Message -ne 'editor-registry-ambiguous') { throw }
   }
-  $settings.use_existing_antigravity = $true
-  $settings.antigravity_exe = Join-Path $oldFolder 'Antigravity IDE.exe'
-  try { & $ModulePath -Settings $settings -StatusFile $status -CheckOnly; throw 'missing-not-detected' } catch {
-    if ($_.Exception.Message -ne 'editor-existing-not-found') { throw }
-  }
-  $settings.antigravity_exe = Join-Path $editorFolder 'Antigravity IDE.exe'
-  & $ModulePath -Settings $settings -StatusFile $status -CheckOnly
-  if (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'EmTroLy')) { throw 'preflight-wrote-files' }
+  $global:fixtureRegistry = @()
   & $ModulePath -Settings $settings -StatusFile $status
   $base = Join-Path $env:LOCALAPPDATA 'EmTroLy'
   $auth = Get-Content -LiteralPath (Join-Path $base 'Codex\auth.json') -Raw | ConvertFrom-Json

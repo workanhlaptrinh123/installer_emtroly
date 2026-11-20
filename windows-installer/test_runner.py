@@ -56,7 +56,7 @@ param($Name, $OwnerIds, $GroupId, $AssistantName, $BaseUrl, $Model, $Profile,
       $Audience, $Addressing, $Style, [switch]$UserInstall, $CredentialData)
 if (-not $UserInstall -or $InstallMode -ne 'new' -or $Model -cne 'GPT-6.1-SOL') { throw 'invalid-installer-arguments' }
 if ($OwnerIds -ne $CredentialData.owner_ids) { throw 'invalid-owner-arguments' }
-if (-not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE 'editor-verified'))) { throw 'openclaw-before-editor' }
+if (-not $CredentialData.skip_editor -and -not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE 'editor-verified'))) { throw 'openclaw-before-editor' }
 if ([bool]$CredentialData.configure_zalo) {
     if ($Modules.Count -ne 1 -or $Modules[0] -ne 'zalo-personal' -or $QrOwnerId -ne $CredentialData.qr_owner_id) { throw 'invalid-zalo-arguments' }
 } elseif ($Modules.Count -ne 0) { throw 'unexpected-zalo-module' }
@@ -166,6 +166,8 @@ class RunnerTests(unittest.TestCase):
                 "telegram_token": TOKEN, "ai_api_key": API_KEY,
             }
             settings.update(overrides or {})
+            if settings.get("skip_editor"):
+                (payload / "windows-installer/install-antigravity-codex.ps1").unlink()
             secret_file = root / "settings.json"
             secret_file.write_text(json.dumps(settings), encoding="utf-8")
             log = root / "status.txt"
@@ -196,6 +198,16 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(code, 0, text)
         self.assertTrue(created)
         self.assertIn("Hoàn tất", text)
+
+    def test_skip_editor_requires_no_editor_module_but_still_verifies_openclaw(self):
+        code, text, created = self.execute(overrides={"skip_editor": True})
+        self.assertEqual(code, 0, text)
+        self.assertTrue(created)
+        self.assertIn("/zaloqr", text)
+        self.assertNotIn("Codex", text)
+        code, text, _ = self.execute("missing-zaloqr-command", overrides={"skip_editor": True})
+        self.assertNotEqual(code, 0)
+        self.assertNotIn("Hoàn tất", text)
 
     def test_existing_openclaw_directory_is_never_overwritten(self):
         code, text, created = self.execute("existing-root")

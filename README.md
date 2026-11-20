@@ -100,7 +100,7 @@ The installer runs in user scope and does not require Docker or Administrator
 for a fresh instance. It requires Windows PowerShell 5.1, Windows x64,
 Internet access, and permission to install user dependencies. Before creating
 the instance it checks the provider `/models` endpoint and Telegram `getMe`,
-installs or reuses Antigravity and verifies the configured Codex extension;
+and, unless skipped, installs Antigravity and verifies the Codex extension;
 afterward it checks OpenClaw config, the selected skill catalog, Full Exec
 approval state, Gateway RPC health, and registration of `/zaloqr` and
 `/zalostatus`. Credentials are passed through a
@@ -130,8 +130,7 @@ PATH change; an existing installation is not automatically modified.
 
 The Windows development installer additionally installs Antigravity IDE
 2.7.0 and Codex extension 26.51111.21308 using pinned downloads and SHA-256.
-It verifies Google's Authenticode signature and reuses a compatible existing
-IDE without modifying its existing user data. Antigravity user data, the
+It verifies Google's Authenticode signature before running the IDE installer. Antigravity user data, the
 extension directory, and `CODEX_HOME` are isolated under
 `%LOCALAPPDATA%\EmTroLy`. A dedicated desktop shortcut starts the editor with
 those paths; other Codex, ChatGPT and Antigravity installations are not
@@ -144,12 +143,11 @@ integration requires additional downloads of roughly
 left in place for investigation. Antigravity/Codex Windows end-to-end testing
 is still required before this development version can be distributed.
 
-When users select “Máy đã có Antigravity IDE”, setup checks the standard user
-and system directories and paths recorded by the Windows uninstaller. One
-compatible installation is selected automatically. Only when none or several
-are found does setup ask for the installed application executable (not a setup
-file). Its Google signature, CLI and supported product version are checked before reuse. Codex and the dedicated profile remain isolated. When installing a new
-IDE, a stale uninstall registry entry is not treated as proof of an existing
+Selecting “Máy đã có Antigravity IDE” skips the entire IDE and Codex step.
+Setup does not search for an executable, prompt for a file, change the editor
+or configure a Codex key. OpenClaw, PATH and the Telegram Zalo commands are
+still installed and verified. Leave it unchecked for the complete installation.
+When installing a new IDE, a stale uninstall registry entry is not treated as proof of an existing
 application if its recorded paths no longer contain an Antigravity executable.
 Residual installation folders are preserved and a separate installation path
 is chosen. Ambiguous registry entries still require manual inspection.

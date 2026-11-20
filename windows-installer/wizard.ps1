@@ -75,7 +75,7 @@ Add-Label $secret 'Telegram Bot Token' 24 42
 $tokenBox = Add-TextBox $secret '' 39 $true
 Add-Label $secret 'Provider API Key' 24 92
 $apiKeyBox = Add-TextBox $secret '' 89 $true
-Add-Note $secret 'API key dùng chung cho OpenClaw và Codex; token và key được lưu riêng trên máy. Không chia sẻ thông tin bí mật.' 150
+Add-Note $secret 'Khóa API dùng cho OpenClaw và cho Codex nếu chọn cài; token và key được lưu riêng trên máy. Không chia sẻ thông tin bí mật.' 150
 Add-Note $secret 'Bot phải được tạo bằng BotFather. Nếu dùng trong nhóm, kiểm tra /setprivacy của đúng bot.' 245
 
 $profile = New-Page 'Hồ sơ'
@@ -96,55 +96,12 @@ Add-Note $profile 'Full Exec có thể đọc, sửa, xóa file và chạy lện
 
 $editorPage = New-Page 'Antigravity'
 $existingEditorCheck = New-Object System.Windows.Forms.CheckBox
-$existingEditorCheck.Text = 'Máy đã có Antigravity IDE - dùng bản đang cài'
+$existingEditorCheck.Text = 'Máy đã có Antigravity IDE – chỉ cài OpenClaw và Zalo'
 $existingEditorCheck.Location = New-Object System.Drawing.Point(24, 42)
 $existingEditorCheck.Size = New-Object System.Drawing.Size(650, 30)
 [void]$editorPage.Controls.Add($existingEditorCheck)
-$editorHint = New-Object System.Windows.Forms.Label
-$editorHint.Location = New-Object System.Drawing.Point(24, 90)
-$editorHint.Size = New-Object System.Drawing.Size(680, 38)
-$editorHint.Text = 'Bộ cài sẽ tải Antigravity IDE.'
-[void]$editorPage.Controls.Add($editorHint)
-$existingEditorBox = Add-TextBox $editorPage '' 133
-$existingEditorBox.Location = New-Object System.Drawing.Point(24, 133)
-$existingEditorBox.Size = New-Object System.Drawing.Size(535, 25)
-$existingEditorBox.ReadOnly = $true
-$existingEditorBox.Visible = $false
-$existingEditorBrowse = New-Object System.Windows.Forms.Button
-$existingEditorBrowse.Text = 'Chọn ứng dụng…'
-$existingEditorBrowse.Location = New-Object System.Drawing.Point(570, 131)
-$existingEditorBrowse.Size = New-Object System.Drawing.Size(130, 28)
-$existingEditorBrowse.Visible = $false
-[void]$editorPage.Controls.Add($existingEditorBrowse)
-. (Join-Path $PSScriptRoot 'editor-discovery.ps1')
-$existingEditorCheck.Add_CheckedChanged({
-  $existingEditorBox.Clear()
-  $existingEditorBox.Visible = $existingEditorCheck.Checked
-  $existingEditorBrowse.Visible = $false
-  if (-not $existingEditorCheck.Checked) {
-    $editorHint.Text = 'Bộ cài sẽ tải Antigravity IDE.'
-    return
-  }
-  $form.UseWaitCursor = $true
-  try { $found = @(Find-InstalledEditor) } finally { $form.UseWaitCursor = $false }
-  if ($found.Count -eq 1) {
-    $existingEditorBox.Text = $found[0]
-    $editorHint.Text = 'Đã tìm thấy Antigravity IDE. Bấm Tiếp để dùng bản này.'
-  } else {
-    $existingEditorBrowse.Visible = $true
-    $editorHint.Text = if ($found.Count) { 'Có nhiều bản Antigravity IDE. Chọn ứng dụng muốn dùng.' } else { 'Chưa tìm thấy bản tương thích. Chọn Antigravity IDE.exe trong thư mục đã cài.' }
-  }
-})
-$existingEditorBrowse.Add_Click({
-  $dialog = New-Object System.Windows.Forms.OpenFileDialog
-  $dialog.Title = 'Chọn Antigravity IDE.exe đã cài'
-  $dialog.Filter = 'Antigravity IDE.exe|Antigravity IDE.exe|Tệp EXE|*.exe'
-  try {
-    if ($dialog.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) { $existingEditorBox.Text = $dialog.FileName }
-  } finally { $dialog.Dispose() }
-})
-Add-Note $editorPage 'Nếu chưa có, bỏ chọn để bộ cài tải Antigravity IDE. Codex và cấu hình Em Trợ Lý vẫn được cài riêng.' 195
-Add-Note $editorPage 'Bản đã cài phải là Antigravity IDE tương thích và có chữ ký Google hợp lệ. Bộ cài không xóa dữ liệu ứng dụng cũ.' 245
+Add-Note $editorPage 'Tích chọn: chỉ cài OpenClaw và Zalo. Bộ cài sẽ bỏ qua Antigravity và Codex.' 100
+Add-Note $editorPage 'Bỏ trống: tải và cài Antigravity IDE, cấu hình Codex trong thư mục riêng, sau đó cài OpenClaw và Zalo.' 170
 
 $zalo = New-Page 'Zalo'
 $zaloCheck = New-Object System.Windows.Forms.CheckBox
@@ -166,7 +123,7 @@ $statusLabel.Location = New-Object System.Drawing.Point(24, 42)
 $statusLabel.Size = New-Object System.Drawing.Size(680, 68)
 $statusLabel.Font = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
 [void]$installPage.Controls.Add($statusLabel)
-Add-Note $installPage 'Antigravity và Codex được cài trước, tiếp theo là OpenClaw. Khi Gateway và các lệnh Zalo đã sẵn sàng, bộ cài báo hoàn tất. Không cần quét QR.' 130
+Add-Note $installPage 'Bộ cài sẽ thực hiện các bước đã chọn. Khi Gateway và các lệnh Zalo đã sẵn sàng, bộ cài báo hoàn tất. Không cần quét QR.' 130
 Add-Note $installPage 'Windows x64 cần Internet và PowerShell 5.1. Gateway chạy ẩn trong tài khoản Windows, không dùng Docker.' 215
 
 $backButton = New-Object System.Windows.Forms.Button
@@ -220,10 +177,6 @@ function Test-Page([int]$Index) {
     Show-Error 'Hãy xác nhận bạn hiểu và chấp nhận Full Exec cho owner và nhóm tin cậy.'
     return $false
   }
-  if ($Index -eq 3 -and $existingEditorCheck.Checked -and ([string]::IsNullOrWhiteSpace($existingEditorBox.Text) -or -not (Test-Path -LiteralPath $existingEditorBox.Text.Trim() -PathType Leaf))) {
-    Show-Error 'Hãy chọn tệp Antigravity IDE.exe đã cài trên máy.'
-    return $false
-  }
   if ($Index -eq 4 -and $zaloCheck.Checked) {
     if ([string]::IsNullOrWhiteSpace($qrOwnerBox.Text)) {
       $qrOwnerBox.Text = (($ownersBox.Text -split ',')[0]).Trim()
@@ -258,7 +211,7 @@ function Start-Install {
   }
   $script:installRunning = $true
   Set-Buttons
-  $statusLabel.Text = 'Đang kiểm tra thông tin trước khi cài Antigravity và Codex...'
+  $statusLabel.Text = 'Đang kiểm tra thông tin cài đặt...'
   try {
   $settings = [ordered]@{
     member = 'emtroly'
@@ -273,8 +226,7 @@ function Start-Install {
     style = $styleBox.Text.Trim()
     accept_full_access = [bool]$fullAccessCheck.Checked
     configure_zalo = [bool]$zaloCheck.Checked
-    use_existing_antigravity = [bool]$existingEditorCheck.Checked
-    antigravity_exe = $existingEditorBox.Text.Trim()
+    skip_editor = [bool]$existingEditorCheck.Checked
     qr_owner_id = $qrOwnerBox.Text.Trim()
     telegram_token = $tokenBox.Text
     ai_api_key = $apiKeyBox.Text
@@ -344,7 +296,7 @@ $timer.Add_Tick({
     $script:installRunning = $false
     $script:resultCode = $code
     if ($code -eq 0) {
-      $statusLabel.Text = 'Cài OpenClaw, Antigravity và Codex hoàn tất.'
+      $statusLabel.Text = $detail
       $cliNotice = 'Mở PowerShell mới, sau đó chạy: openclaw status.'
       $cliInfoPath = Join-Path (Join-Path $env:USERPROFILE 'openclaw') 'windows-cli.json'
       if (Test-Path -LiteralPath $cliInfoPath) {
@@ -355,7 +307,7 @@ $timer.Add_Tick({
           }
         } catch { $cliNotice = 'Mở PowerShell mới. Nếu đã có lệnh openclaw, xem windows-cli.json để biết tên lệnh riêng.' }
       }
-      $successMessage = "OpenClaw và Codex đã qua kiểm tra. Mở shortcut Em Trợ Lý - Antigravity trên Desktop để dùng Codex riêng.`n`nNhắn /zaloqr trong Telegram riêng và dùng /zalostatus sau khi quét QR.`n`n$cliNotice`n`nGateway chạy ẩn khi người dùng Windows đăng nhập."
+      $successMessage = "$detail`n`nNhắn /zaloqr trong Telegram riêng để nhận QR hoặc /zalostatus để kiểm tra kết nối.`n`n$cliNotice"
       [System.Windows.Forms.MessageBox]::Show($form, $successMessage, 'Cài đặt hoàn tất', 'OK', 'Information') | Out-Null
       $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
       $form.Close()
