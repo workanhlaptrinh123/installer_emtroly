@@ -99,7 +99,8 @@ directory is never overwritten.
 The installer runs in user scope and does not require Docker or Administrator
 for a fresh instance. It requires Windows PowerShell 5.1, Windows x64,
 Internet access, and permission to install user dependencies. Before creating
-the instance it checks the provider `/models` endpoint and Telegram `getMe`;
+the instance it checks the provider `/models` endpoint and Telegram `getMe`,
+installs or reuses Antigravity and verifies the configured Codex extension;
 afterward it checks OpenClaw config, the selected skill catalog, Full Exec
 approval state, Gateway RPC health, and registration of `/zaloqr` and
 `/zalostatus`. Credentials are passed through a
@@ -152,7 +153,7 @@ Residual installation folders are preserved and a separate installation path
 is chosen. Ambiguous registry entries still require manual inspection.
 
 Every push to `main` runs tests and creates a Windows installer artifact kept
-for seven days. Pushing a `vYYYY.MM.DD` tag runs the checks again and publishes
+for seven days. Pushing a `vYYYY.MM.DD` tag (or `vYYYY.MM.DD.N` for a same-day fix) runs the checks again and publishes
 the installer and checksums as a GitHub Release; a `main` push alone does not
 publish a Release.
 
@@ -168,8 +169,9 @@ installation or verify actual Telegram/Zalo messaging.
 The wizard requires Zalo and a Full Exec confirmation. It installs Zalo Personal,
 the owner-only QR plugin and the version-specific mention patch. Success means
 the Gateway is healthy, both `/zaloqr` and `/zalostatus` are registered and the
-Telegram command menu confirms both commands; it does not require a live Zalo
-login. The installer does not send a QR during installation: a configured
+Telegram command menu confirms both commands. This is the final step: the
+wizard reports success immediately, without waiting for a message or QR scan.
+The installer does not send a QR during installation: a configured
 Telegram owner opens the bot's private chat, sends `/start`, and then requests
 `/zaloqr`; after scanning, `/zalostatus` reports Zalo status. Native skill
 commands are kept out of the limited Telegram menu so the two Zalo commands

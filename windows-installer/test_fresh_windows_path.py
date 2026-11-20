@@ -87,3 +87,37 @@ class FreshWindowsPathTests(unittest.TestCase):
         self.assertEqual(self.run_probe([self.bin]), 13)
         self.write_command(status=1)
         self.assertEqual(self.run_probe([self.bin]), 14)
+
+    def test_native_registration_and_status_in_windows_powershell_51(self):
+        source = PROBE.parents[1] / 'install-native-windows.ps1'
+        runtime = self.root / 'runtime'
+        runtime.mkdir()
+        entry = runtime / 'openclaw.mjs'
+        entry.write_text("if (process.argv[2] === '--version') console.log('2026.11.4'); "
+                         "else if (process.argv[2] !== 'status') process.exit(2);", encoding='ascii')
+        (self.root / 'openclaw.json').write_text('{"gateway":{"port":18789}}', encoding='ascii')
+        local_data = self.root.parent / 'local'
+        local_data.mkdir()
+        driver = self.root.parent / 'register.ps1'
+        driver.write_text(r'''
+param($Source, $Root, $Entry, $LocalData)
+$ErrorActionPreference = 'Stop'
+$env:LOCALAPPDATA = $LocalData
+$runtime = Split-Path $Entry
+$ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
+$definition = $ast.Find({ param($item) $item -is [Management.Automation.Language.FunctionDefinitionAst] -and $item.Name -eq 'Install-UserOpenClawCli' }, $true)
+$functionText = $definition.Extent.Text.Replace('$PSScriptRoot', '$sourceDir')
+$sourceDir = Split-Path $Source
+. ([ScriptBlock]::Create($functionText))
+function Write-NativeInstallStatus([string]$Text) {}
+Install-UserOpenClawCli -Root $Root -CliEntry $Entry -Port 18789 -Profile 'fixture' -ExpectedVersion '2026.11.4'
+''', encoding='ascii')
+        shell = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+        result = subprocess.run([str(shell), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+                                 '-File', str(driver), str(source), str(self.root), str(entry), str(local_data)],
+                                capture_output=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        info = json.loads((self.root / 'windows-cli.json').read_text(encoding='utf-8'))
+        self.assertTrue(info['default'])
+        self.assertEqual(Path(info['path']).parent, local_data / 'OpenClaw/bin')
+        self.assertEqual(self.run_probe([Path(info['path']).parent]), 0)

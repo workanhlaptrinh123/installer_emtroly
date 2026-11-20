@@ -26,12 +26,20 @@ function global:Invoke-RestMethod {
     if ($Uri -match '^https://api\.telegram\.org/bot') {
         if ($Uri -match '/getMe$') { return @{ ok = $true; result = @{ is_bot = $true } } }
         if ($Uri -match '/getMyCommands$') {
+            if (-not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE 'cli-verified'))) { throw 'menu-before-path-check' }
+            if ($env:TEST_MODE -in @('missing-menu','menu-write-error') -and -not $global:menuUpdated) {
+                return @{ ok = $true; result = @(@{command='help'; description='Help'}) }
+            }
             return @{ ok = $true; result = @(
                 @{ command = 'zaloqr'; description = 'Tao QR dang nhap Zalo' },
                 @{ command = 'zalostatus'; description = 'Kiem tra trang thai Zalo' }
             ) }
         }
         if ($Uri -match '/setMyCommands$') {
+            if ($env:TEST_MODE -ne 'missing-menu') { throw 'unexpected-menu-write' }
+            $names = @(($Body | ConvertFrom-Json).commands.command)
+            foreach ($name in @('help','zaloqr','zalostatus')) { if ($name -notin $names) { throw 'incomplete-menu' } }
+            $global:menuUpdated = $true
             return @{ ok = $true; result = $true }
         }
         throw 'unexpected-telegram-method'
@@ -48,6 +56,7 @@ param($Name, $OwnerIds, $GroupId, $AssistantName, $BaseUrl, $Model, $Profile,
       $Audience, $Addressing, $Style, [switch]$UserInstall, $CredentialData)
 if (-not $UserInstall -or $InstallMode -ne 'new' -or $Model -cne 'GPT-6.1-SOL') { throw 'invalid-installer-arguments' }
 if ($OwnerIds -ne $CredentialData.owner_ids) { throw 'invalid-owner-arguments' }
+if (-not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE 'editor-verified'))) { throw 'openclaw-before-editor' }
 if ([bool]$CredentialData.configure_zalo) {
     if ($Modules.Count -ne 1 -or $Modules[0] -ne 'zalo-personal' -or $QrOwnerId -ne $CredentialData.qr_owner_id) { throw 'invalid-zalo-arguments' }
 } elseif ($Modules.Count -ne 0) { throw 'unexpected-zalo-module' }
@@ -136,13 +145,15 @@ class RunnerTests(unittest.TestCase):
                 "if ($env:TEST_MODE -eq 'cli-conflict') { exit 11 }; "
                 "if ($env:TEST_MODE -eq 'cli-path') { exit 12 }; "
                 "if ($env:TEST_MODE -eq 'cli-version') { exit 13 }; "
-                "if ($env:TEST_MODE -eq 'cli-status') { exit 14 }; exit 0", encoding="utf-8")
+                "if ($env:TEST_MODE -eq 'cli-status') { exit 14 }; "
+                "[IO.File]::WriteAllText((Join-Path $env:USERPROFILE 'cli-verified'), 'ok'); exit 0", encoding="utf-8")
             (payload / "windows-installer/install-antigravity-codex.ps1").write_text(
                 "param($Settings, $StatusFile, [switch]$CheckOnly)\n"
                 "if ($Settings.ai_api_key -ne $env:TEST_API_KEY) { throw 'fixture-private-error' }\n"
                 "if ($CheckOnly -and $env:TEST_MODE -eq 'editor-existing') { throw 'editor-data-exists' }\n"
                 "if (-not $CheckOnly -and $env:TEST_MODE -eq 'editor-failure') { throw 'editor-codex-probe-failed' }\n"
-                "if (-not $CheckOnly -and $env:TEST_MODE -eq 'editor-activation-failure') { throw 'editor-activation-failed' }\n",
+                "if (-not $CheckOnly -and $env:TEST_MODE -eq 'editor-activation-failure') { throw 'editor-activation-failed' }\n"
+                "if (-not $CheckOnly) { [IO.File]::WriteAllText((Join-Path $env:USERPROFILE 'editor-verified'), 'ok') }\n",
                 encoding="utf-8")
             (payload / "install-native-windows.ps1").write_text(FAKE_INSTALLER, encoding="utf-8")
             driver = root / "driver.ps1"
@@ -205,9 +216,18 @@ class RunnerTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 code, text, created = self.execute(mode)
                 self.assertNotEqual(code, 0)
-                self.assertTrue(created)
+                self.assertFalse(created)
                 self.assertNotIn("SUCCESS", text)
                 self.assertIn("Codex", text)
+
+    def test_missing_telegram_menu_is_repaired_and_verified(self):
+        code, text, created = self.execute("missing-menu")
+        self.assertEqual(code, 0, text)
+        self.assertTrue(created)
+        code, text, created = self.execute("menu-write-error")
+        self.assertNotEqual(code, 0)
+        self.assertNotIn("SUCCESS", text)
+        self.assertIn("telegram-command-menu-not-registered", text)
 
     def test_editor_conflict_is_detected_before_installation(self):
         code, text, created = self.execute("editor-existing")

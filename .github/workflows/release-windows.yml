@@ -41,7 +41,7 @@ jobs:
           else
             version="$(sed -n 's/^installer_version=//p' MANIFEST.txt | head -n 1)"
           fi
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
             echo "Invalid release version: $version" >&2
             exit 1
           fi
@@ -62,6 +62,16 @@ jobs:
           PYTHON_BIN="$PYTHON_BIN" \
           RELEASE_VERSION="${{ steps.version.outputs.version }}" \
           ./build-windows-installer.sh caidattroly.exe
+
+      - name: Scan installer with Microsoft Defender
+        shell: powershell
+        run: |
+          Set-MpPreference -DisableRealtimeMonitoring $false -DisableArchiveScanning $false -DisableScriptScanning $false -DisableIOAVProtection $false
+          $preferences = Get-MpPreference
+          foreach ($path in $preferences.ExclusionPath) {
+            if ($path) { Remove-MpPreference -ExclusionPath $path -ErrorAction Stop }
+          }
+          ./windows-installer/scan-release.ps1 -FilePath ./caidattroly.exe
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4

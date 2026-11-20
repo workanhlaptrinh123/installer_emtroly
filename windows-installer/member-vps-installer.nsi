@@ -9,7 +9,10 @@ Unicode true
   !error "OUTFILE must point to the executable to build"
 !endif
 !ifndef RELEASE_VERSION
-  !define RELEASE_VERSION "2026.11.20"
+  !error "RELEASE_VERSION must be set by the Windows build script"
+!endif
+!ifndef FILE_VERSION
+  !error "FILE_VERSION must contain four numeric components"
 !endif
 
 Name "installer_emtroly"
@@ -18,10 +21,10 @@ RequestExecutionLevel user
 SilentInstall silent
 SetCompressor /SOLID lzma
 
-VIProductVersion "${RELEASE_VERSION}.0"
+VIProductVersion "${FILE_VERSION}"
 VIAddVersionKey "ProductName" "installer_emtroly"
 VIAddVersionKey "ProductVersion" "${RELEASE_VERSION}"
-VIAddVersionKey "FileVersion" "${RELEASE_VERSION}.0"
+VIAddVersionKey "FileVersion" "${FILE_VERSION}"
 VIAddVersionKey "FileDescription" "installer_emtroly Windows installer"
 VIAddVersionKey "CompanyName" "Anh Lap Trinh"
 

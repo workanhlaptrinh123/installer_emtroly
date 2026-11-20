@@ -152,12 +152,12 @@ function Install-UserOpenClawCli {
   if (-not (Test-Path -LiteralPath $helper)) { throw 'OpenClaw CLI PATH helper is missing.' }
   $python = (Get-Command python.exe -ErrorAction Stop).Source
   $node = (Get-Command node.exe -ErrorAction Stop).Source
-  $home = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
+  $userProfilePath = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
   $previousPath = $env:Path
   $runtimeBin = Join-Path $runtime 'node_modules\.bin'
   try {
     $env:Path = (@($previousPath -split ';' | Where-Object { $_.Trim('"').TrimEnd('\') -ine $runtimeBin.TrimEnd('\') }) -join ';')
-    $resultText = & $python $helper --root $Root --home $home --node $node --cli-entry $CliEntry --port $Port --profile $Profile | Out-String
+    $resultText = & $python $helper --root $Root --home $userProfilePath --node $node --cli-entry $CliEntry --port $Port --profile $Profile | Out-String
     if ($LASTEXITCODE -ne 0) { throw 'OpenClaw CLI PATH installation failed.' }
   } finally { $env:Path = $previousPath }
   try { $result = $resultText | ConvertFrom-Json } catch { throw 'OpenClaw CLI PATH helper returned invalid output.' }
@@ -284,6 +284,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Gateway restart failed.' }
 Invoke-OpenClaw --version
 Invoke-OpenClaw gateway status --require-rpc
 if ($LASTEXITCODE -ne 0) { throw 'Gateway status check failed.' }
+if ($UserInstall) { Install-UserOpenClawCli -Root $root -CliEntry $cliEntry -Port $GatewayPort -Profile $env:OPENCLAW_PROFILE -ExpectedVersion $OpenClawVersion }
 if ($Modules -contains 'zalo-personal') {
   Write-NativeInstallStatus 'Dang kich hoat Zalo Personal, /zaloqr va /zalostatus...'
   $zaloOnboard = Join-Path $PSScriptRoot 'zalo\onboard-zalouser-windows.ps1'
@@ -292,7 +293,6 @@ if ($Modules -contains 'zalo-personal') {
   & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $zaloOnboard -Root $root -TelegramAccount $Name -OwnerId $QrOwnerId -ConfigureScript $zaloConfigure -QrScript $zaloQr
   if ($LASTEXITCODE -ne 0) { throw 'Windows Zalo onboarding failed. Telegram remains installed; inspect the error before retrying.' }
 }
-if ($UserInstall) { Install-UserOpenClawCli -Root $root -CliEntry $cliEntry -Port $GatewayPort -Profile $env:OPENCLAW_PROFILE -ExpectedVersion $OpenClawVersion }
 Write-NativeInstallStatus 'Dang hoan tat cac buoc kiem tra local...'
 Write-Host "NATIVE INSTALL COMPLETE ($InstallMode): $root"
 Write-Host "Dashboard: http://127.0.0.1:$GatewayPort/"

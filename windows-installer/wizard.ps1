@@ -150,7 +150,7 @@ $statusLabel.Location = New-Object System.Drawing.Point(24, 42)
 $statusLabel.Size = New-Object System.Drawing.Size(680, 68)
 $statusLabel.Font = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
 [void]$installPage.Controls.Add($statusLabel)
-Add-Note $installPage 'Bộ cài kiểm tra provider, Telegram, Gateway, plugin Zalo và lệnh QR. Quét QR là bước sau khi cài.' 130
+Add-Note $installPage 'Antigravity và Codex được cài trước, tiếp theo là OpenClaw. Khi Gateway và các lệnh Zalo đã sẵn sàng, bộ cài báo hoàn tất. Không cần quét QR.' 130
 Add-Note $installPage 'Windows x64 cần Internet và PowerShell 5.1. Gateway chạy ẩn trong tài khoản Windows, không dùng Docker.' 215
 
 $backButton = New-Object System.Windows.Forms.Button
@@ -175,7 +175,7 @@ $cancelButton.Size = New-Object System.Drawing.Size(100, 32)
 $form.Controls.Add($cancelButton)
 
 $pages = @($connect, $secret, $profile, $editorPage, $zalo, $installPage)
-$job = $null
+$runnerProcess = $null
 $secretFile = $null
 $statusFile = $null
 $privateDir = $null
@@ -242,7 +242,7 @@ function Start-Install {
   }
   $script:installRunning = $true
   Set-Buttons
-  $statusLabel.Text = 'Đang kiểm tra và cài OpenClaw, có thể mất vài phút...'
+  $statusLabel.Text = 'Đang kiểm tra thông tin trước khi cài Antigravity và Codex...'
   try {
   $settings = [ordered]@{
     member = 'emtroly'
@@ -284,28 +284,15 @@ function Start-Install {
   $rootPath = $PayloadRoot
   $logPath = $script:safeLog
   $shellPath = Join-Path $PSHOME 'powershell.exe'
-  $script:job = Start-Job -ScriptBlock {
-    param($shellPath, $runnerPath, $settingsPath, $payloadPath, $logPath)
-    $code = 1
-    try {
-      $arguments = '-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
-        $runnerPath + '" -SettingsFile "' + $settingsPath +
-        '" -PayloadRoot "' + $payloadPath + '" -LogFile "' + $logPath + '"'
-      $child = Start-Process -FilePath $shellPath -ArgumentList $arguments -WindowStyle Hidden -PassThru
-      $deadline = (Get-Date).AddMinutes(60)
-      while ($true) {
-        $child.Refresh()
-        if ($child.HasExited) { break }
-        if ((Get-Date) -ge $deadline) {
-          Stop-Process -Id $child.Id -Force -ErrorAction SilentlyContinue
-          throw 'Installer runner timed out.'
-        }
-        Start-Sleep -Milliseconds 250
-      }
-      $code = $child.ExitCode
-    } catch { $code = 1 }
-    return $code
-  } -ArgumentList $shellPath, $runner, $settingsPath, $rootPath, $logPath
+  $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+  $startInfo.FileName = $shellPath
+  $startInfo.Arguments = '-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
+    $runner + '" -SettingsFile "' + $settingsPath +
+    '" -PayloadRoot "' + $rootPath + '" -LogFile "' + $logPath + '"'
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
+  $script:runnerProcess = [Diagnostics.Process]::Start($startInfo)
+  $script:runnerDeadline = (Get-Date).AddMinutes(90)
   $tokenBox.Clear()
   $apiKeyBox.Clear()
   $timer.Start()
@@ -324,15 +311,19 @@ $timer.Add_Tick({
   if ($script:safeLog -and (Test-Path -LiteralPath $script:safeLog)) {
     try { $statusLabel.Text = [IO.File]::ReadAllText($script:safeLog, [Text.Encoding]::UTF8) } catch { }
   }
-  if ($script:job.State -in @('Completed', 'Failed', 'Stopped')) {
-    $code = 1
-    try {
-      $returned = @(Receive-Job -Job $script:job -ErrorAction Stop)
-      if ($returned.Count -eq 1) { [int]::TryParse([string]$returned[0], [ref]$code) | Out-Null }
-    } catch { $code = 1 }
+  if (-not $script:runnerProcess.HasExited -and (Get-Date) -ge $script:runnerDeadline) {
+    try { $script:runnerProcess.Kill() } catch [InvalidOperationException] {}
+  }
+  if ($script:runnerProcess.HasExited) {
     $timer.Stop()
-    Remove-Job -Job $script:job -Force -ErrorAction SilentlyContinue
+    $code = $script:runnerProcess.ExitCode
+    $script:runnerProcess.Dispose()
+    $script:runnerProcess = $null
+    if (Test-Path -LiteralPath $script:safeLog) {
+      try { $statusLabel.Text = [IO.File]::ReadAllText($script:safeLog, [Text.Encoding]::UTF8) } catch {}
+    }
     $detail = $statusLabel.Text
+    if ($code -eq 0 -and -not $detail.StartsWith('SUCCESS:')) { $code = 1 }
     Cleanup-Secret
     $script:installRunning = $false
     $script:resultCode = $code

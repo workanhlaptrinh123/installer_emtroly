@@ -5,7 +5,10 @@ BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT="${1:-$BASE/caidattroly.exe}"
 NSIS="${NSIS:-$(command -v makensis || true)}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
-RELEASE_VERSION="${RELEASE_VERSION:-2026.11.20}"
+RELEASE_VERSION="${RELEASE_VERSION:-$(sed -n 's/^installer_version=//p' "$BASE/MANIFEST.txt")}"
+[[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || exit 1
+file_version="$RELEASE_VERSION"
+if [[ ! "$file_version" =~ ^([0-9]+\.){3} ]]; then file_version+=".0"; fi
 
 if [[ -z "$NSIS" ]]; then
   for candidate in /tmp/nsis-stage/extract/usr/bin/makensis /usr/bin/makensis; do
@@ -60,6 +63,7 @@ nsis_args=(
   -D"PAYLOAD_DIR=$payload" \
   -D"OUTFILE=$OUT" \
   -D"RELEASE_VERSION=$RELEASE_VERSION" \
+  -D"FILE_VERSION=$file_version" \
   "$BASE/windows-installer/member-vps-installer.nsi"
 )
 case "$(uname -s)" in

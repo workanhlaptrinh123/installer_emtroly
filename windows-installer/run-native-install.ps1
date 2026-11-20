@@ -44,6 +44,8 @@ function Ensure-TelegramCommandMenu {
   try {
     $currentResponse = Invoke-TelegramApi -Token $Token -Method 'getMyCommands'
     if (-not $currentResponse.ok) { throw 'getMyCommands failed' }
+    $currentNames = @($currentResponse.result | ForEach-Object { $_.command })
+    if ('zaloqr' -in $currentNames -and 'zalostatus' -in $currentNames) { return }
     $merged = New-Object System.Collections.Generic.List[object]
     foreach ($item in $required) { [void]$merged.Add($item) }
     foreach ($item in @($currentResponse.result)) {
@@ -140,6 +142,10 @@ try {
   } catch { throw 'telegram-unavailable' }
   if (-not $telegram.ok -or -not $telegram.result.is_bot) { throw 'telegram-invalid-bot' }
 
+  $stage = 'editor'
+  Write-SafeStatus 'Đang cài Antigravity IDE và cấu hình Codex...'
+  & $editorInstaller -Settings $settings -StatusFile $LogFile *> $null
+
   $stage = 'install'
   Write-SafeStatus 'Đang cài môi trường, module và Gateway. Vui lòng đợi...'
   $installer = Join-Path $PayloadRoot 'install-native-windows.ps1'
@@ -175,6 +181,11 @@ try {
   if ($LASTEXITCODE -ne 0 -or $approvalState.file.agents.main.security -ne 'full' -or $approvalState.file.agents.main.ask -ne 'off') { throw 'approval-check-failed' }
   $config = [IO.File]::ReadAllText((Join-Path $root 'openclaw.json'), [Text.Encoding]::UTF8) | ConvertFrom-Json
   Test-MemberInstallerPermissions -Settings $settings -Config $config -ApprovalState $approvalState
+  $stage = 'command'
+  Write-SafeStatus 'Đang kiểm tra lệnh openclaw trong PowerShell mới...'
+  Test-FreshOpenClawCommand -Root $root -Version $expectedVersion
+  $stage = 'zalo-verify'
+  Write-SafeStatus 'Đang kiểm tra Gateway và lệnh Zalo...'
   $health = (& node $cliEntry gateway health --json | Out-String) | ConvertFrom-Json
   if ($LASTEXITCODE -ne 0 -or -not $health.ok) { throw 'gateway-health-failed' }
   if ('zalouser' -notin @($health.plugins.loaded)) { throw 'zalo-plugin-not-loaded' }
@@ -194,12 +205,6 @@ try {
   $stage = 'telegram-menu'
   Write-SafeStatus 'Đang đồng bộ menu Telegram: /zaloqr và /zalostatus...'
   Ensure-TelegramCommandMenu -Token ([string]$settings.telegram_token)
-  $stage = 'command'
-  Write-SafeStatus 'Đang kiểm tra lệnh openclaw trong PowerShell mới...'
-  Test-FreshOpenClawCommand -Root $root -Version $expectedVersion
-  $stage = 'editor'
-  Write-SafeStatus 'Đang chuẩn bị Antigravity IDE và Codex Extension...'
-  & $editorInstaller -Settings $settings -StatusFile $LogFile *> $null
   Write-SafeStatus 'SUCCESS: OpenClaw, lệnh Zalo, Antigravity IDE và Codex đã qua kiểm tra. Quét QR là bước sau khi cài.'
   exit 0
 } catch {

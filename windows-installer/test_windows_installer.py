@@ -7,6 +7,16 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class WindowsInstallerTests(unittest.TestCase):
+    def test_release_requires_defender_scan_before_artifact_and_publication(self):
+        workflow = (ROOT / ".github/workflows/release-windows.yml").read_text(encoding="utf-8")
+        scanner = (ROOT / "windows-installer/scan-release.ps1").read_text(encoding="utf-8")
+        scan = workflow.index("./windows-installer/scan-release.ps1")
+        self.assertLess(workflow.index("./build-windows-installer.sh caidattroly.exe"), scan)
+        self.assertLess(scan, workflow.index("- name: Upload workflow artifacts"))
+        self.assertLess(scan, workflow.index("- name: Publish GitHub Release"))
+        for required in ("Get-MpComputerStatus", "Update-MpSignature", "Get-MpPreference", "ExclusionPath", "ExclusionExtension", "ExclusionProcess", "-ScanType 3", "Get-MpThreatDetection", "Get-FileHash"):
+            self.assertIn(required, scanner)
+
     def test_wizard_uses_fixed_internal_name_and_windows_user_openclaw_directory(self):
         wizard = (ROOT / "windows-installer/wizard.ps1").read_text(encoding="utf-8")
         runner = (ROOT / "windows-installer/run-native-install.ps1").read_text(encoding="utf-8")
