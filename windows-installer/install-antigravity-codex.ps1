@@ -82,15 +82,82 @@ function Get-EditorRegistryDirectories($Entry) {
   return @($directories | Where-Object { $_ } | Select-Object -Unique)
 }
 
+function Get-PrivateEditorAppDirectories {
+  $programsRoot = Join-Path $env:LOCALAPPDATA 'Programs'
+  if (-not (Test-Path -LiteralPath $programsRoot -PathType Container)) { return @() }
+  return @(Get-ChildItem -LiteralPath $programsRoot -Directory -Filter 'EmTroLy-Antigravity-IDE-*' -ErrorAction SilentlyContinue)
+}
+
+function Test-EditorApplicationComplete([string]$Root) {
+  $editorPath = Join-Path $Root 'Antigravity IDE.exe'
+  $editorCliPath = Join-Path $Root 'bin\antigravity-ide.cmd'
+  $productPath = Join-Path $Root 'resources\app\product.json'
+  if (-not (Test-Path -LiteralPath $editorPath -PathType Leaf) -or
+      -not (Test-Path -LiteralPath $editorCliPath -PathType Leaf) -or
+      -not (Test-Path -LiteralPath $productPath -PathType Leaf)) { return $false }
+  try {
+    $product = Get-Content -LiteralPath $productPath -Raw | ConvertFrom-Json
+    return $product.applicationName -eq 'antigravity-ide' -and $product.version -eq '1.107.0'
+  } catch {
+    return $false
+  }
+}
+
+function Test-EditorShortcutComplete([string]$Root, [string]$AppRoot) {
+  if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { return $false }
+  try {
+    $launchPath = Join-Path $Root 'launch-antigravity.vbs'
+    $launch = [IO.File]::ReadAllText($launchPath, [Text.Encoding]::Unicode)
+    $editorPath = Join-Path $AppRoot 'Antigravity IDE.exe'
+    if ($launch -notmatch [regex]::Escape($editorPath) -or
+        $launch -notmatch 'CODEX_HOME' -or
+        $launch -notmatch '--user-data-dir' -or
+        $launch -notmatch '--extensions-dir') { return $false }
+    $shell = New-Object -ComObject WScript.Shell
+    $saved = $shell.CreateShortcut($shortcutPath)
+    return $saved.TargetPath -ine (Join-Path $env:SystemRoot 'System32\wscript.exe') -and
+      $saved.Arguments -match [regex]::Escape($launchPath) -and
+      $saved.WorkingDirectory -ine $Root
+  } catch {
+    return $false
+  }
+}
+
 function Test-EditorDataComplete([string]$Root) {
-  foreach ($relative in @('installer-job.txt', 'Codex\config.toml', 'Codex\auth.json', 'launch-antigravity.vbs')) {
+  foreach ($relative in @('installer-job.txt', 'Codex\config.toml', 'Codex\auth.json',
+                           'Antigravity\UserData\User\settings.json', 'launch-antigravity.vbs')) {
     if (-not (Test-Path -LiteralPath (Join-Path $Root $relative) -PathType Leaf)) { return $false }
+  }
+  try {
+    $savedJob = [IO.File]::ReadAllText((Join-Path $Root 'installer-job.txt')).Trim()
+    if ($savedJob -notmatch '^[a-f0-9]{32}$') { return $false }
+    $config = [IO.File]::ReadAllText((Join-Path $Root 'Codex\config.toml'))
+    if ($config -notmatch 'base_url = "https://codex\.anhlaptrinh\.vn/v1"' -or
+        $config -notmatch 'requires_openai_auth = true') { return $false }
+    $auth = [IO.File]::ReadAllText((Join-Path $Root 'Codex\auth.json')) | ConvertFrom-Json
+    if ([string]::IsNullOrWhiteSpace([string]$auth.OPENAI_API_KEY)) { return $false }
+    [void]([IO.File]::ReadAllText((Join-Path $Root 'Antigravity\UserData\User\settings.json')) | ConvertFrom-Json)
+  } catch {
+    return $false
   }
   $extensionsRoot = Join-Path $Root 'Antigravity\Extensions'
   $installed = @(Get-ChildItem -LiteralPath $extensionsRoot -Directory -Filter 'openai.chatgpt-*' -ErrorAction SilentlyContinue | Where-Object {
-    Test-Path -LiteralPath (Join-Path $_.FullName 'bin\windows-x86_64\codex.exe') -PathType Leaf
+    $manifest = Join-Path $_.FullName 'package.json'
+    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { return $false }
+    try {
+      $package = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+      return $package.publisher -eq 'openai' -and $package.name -eq 'chatgpt' -and
+        $package.version -eq $extensionVersion -and
+        (Test-Path -LiteralPath (Join-Path $_.FullName 'bin\windows-x86_64\codex.exe') -PathType Leaf)
+    } catch {
+      return $false
+    }
   })
-  return $installed.Count -eq 1
+  if ($installed.Count -ne 1) { return $false }
+  foreach ($app in @(Get-PrivateEditorAppDirectories)) {
+    if (Test-EditorApplicationComplete $app.FullName -and Test-EditorShortcutComplete $Root $app.FullName) { return $true }
+  }
+  return $false
 }
 
 function Test-GoogleAuthenticodeSignature([string]$Path, [string]$ExpectedHash, [switch]$AllowUnknownWithGoogleSigner) {
@@ -109,6 +176,28 @@ function Test-GoogleAuthenticodeSignature([string]$Path, [string]$ExpectedHash, 
   return $false
 }
 
+function Get-EditorRecoveryBackupPath {
+  if ($script:recoveryBackup) { return $script:recoveryBackup }
+  do {
+    $candidate = Join-Path (Split-Path -Parent $base) ('EmTroLy.failed-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+  } while (Test-Path -LiteralPath $candidate)
+  $script:recoveryBackup = $candidate
+  return $candidate
+}
+
+function Move-EditorRecoveryItem([string]$Path, [string]$RelativePath) {
+  if (-not (Test-Path -LiteralPath $Path)) { return }
+  if ($CheckOnly) { return }
+  $backup = Get-EditorRecoveryBackupPath
+  $destination = Join-Path $backup $RelativePath
+  try {
+    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $destination))
+    Move-Item -LiteralPath $Path -Destination $destination -ErrorAction Stop
+  } catch {
+    throw 'editor-data-recovery-failed'
+  }
+}
+
 if (Test-Path -LiteralPath $base -PathType Leaf) { throw 'editor-data-exists' }
 if (Test-Path -LiteralPath $base -PathType Container) {
   $savedJob = if (Test-Path -LiteralPath $receipt -PathType Leaf) { [IO.File]::ReadAllText($receipt) } else { '' }
@@ -119,14 +208,15 @@ if (Test-Path -LiteralPath $base -PathType Container) {
   } elseif ($CheckOnly) {
     return
   } else {
-    $backupName = 'EmTroLy.failed-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
-    $recoveryBackup = Join-Path (Split-Path -Parent $base) $backupName
+    $recoveryBackup = Get-EditorRecoveryBackupPath
     try { Move-Item -LiteralPath $base -Destination $recoveryBackup -ErrorAction Stop } catch { throw 'editor-data-recovery-failed' }
   }
 }
-if (-not $resuming -and (Test-Path -LiteralPath $appDir -PathType Container) -and
-    (-not (Test-Path -LiteralPath $editor -PathType Leaf) -or -not (Test-Path -LiteralPath $editorCli -PathType Leaf))) {
-  throw 'editor-data-exists'
+
+foreach ($privateApp in @(Get-PrivateEditorAppDirectories)) {
+  $isCurrentApp = $privateApp.FullName.TrimEnd('\') -ieq $appDir.TrimEnd('\')
+  if ($resuming -and $isCurrentApp -and (Test-EditorApplicationComplete $privateApp.FullName)) { continue }
+  Move-EditorRecoveryItem -Path $privateApp.FullName -RelativePath ('Programs\' + $privateApp.Name)
 }
 
 function Test-EditorInstallation([string]$Editor) {
@@ -165,7 +255,9 @@ foreach ($entry in $existing) {
   $directories = @(Get-EditorRegistryDirectories $entry)
   if ($directories.Count -eq 0) { throw 'editor-registry-ambiguous' }
   foreach ($directory in $directories) {
-    if ($resuming -and $directory.TrimEnd('\') -ieq $appDir) { continue }
+    $privatePrefix = (Join-Path $env:LOCALAPPDATA 'Programs\EmTroLy-Antigravity-IDE-').TrimEnd('\')
+    if ($directory.TrimEnd('\') -ieq $appDir.TrimEnd('\') -or
+        $directory.TrimEnd('\') -like ($privatePrefix + '*')) { continue }
     foreach ($name in @('Antigravity IDE.exe', 'Antigravity.exe')) {
       if (Test-Path -LiteralPath (Join-Path $directory $name) -PathType Leaf) { throw 'editor-select-existing' }
     }

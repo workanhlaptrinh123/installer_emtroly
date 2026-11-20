@@ -247,12 +247,24 @@ try {
 $partial = Join-Path $env:LOCALAPPDATA 'EmTroLy'
 [void](New-Item -ItemType Directory -Force -Path $partial)
 [IO.File]::WriteAllText((Join-Path $partial 'stale.txt'), 'partial-install')
+[IO.File]::WriteAllText((Join-Path $partial 'installer-job.txt'), 'fedcba9876543210fedcba9876543210')
+[void](New-Item -ItemType Directory -Force -Path (Join-Path $partial 'Codex'), (Join-Path $partial 'Antigravity\UserData\User'), (Join-Path $partial 'Antigravity\Extensions\openai.chatgpt-fixture\bin\windows-x86_64'))
+[IO.File]::WriteAllText((Join-Path $partial 'Codex\config.toml'), 'partial')
+[IO.File]::WriteAllText((Join-Path $partial 'Codex\auth.json'), '{}')
+[IO.File]::WriteAllText((Join-Path $partial 'Antigravity\UserData\User\settings.json'), '{}')
+[IO.File]::WriteAllText((Join-Path $partial 'launch-antigravity.vbs'), 'partial')
+[IO.File]::WriteAllText((Join-Path $partial 'Antigravity\Extensions\openai.chatgpt-fixture\package.json'), '{"publisher":"openai","name":"chatgpt","version":"26.51111.21308"}')
+[IO.File]::WriteAllText((Join-Path $partial 'Antigravity\Extensions\openai.chatgpt-fixture\bin\windows-x86_64\codex.exe'), 'fixture')
+$partialApp = Join-Path $env:LOCALAPPDATA 'Programs\EmTroLy-Antigravity-IDE-0123456789abcdef0123456789abcdef'
+[void](New-Item -ItemType Directory -Force -Path $partialApp)
+[IO.File]::WriteAllText((Join-Path $partialApp 'leftover.txt'), 'partial-app')
   $env:TEST_FAIL_CODEX = '1'
   try { & $ModulePath -Settings $settings -StatusFile $status; throw 'codex-failure-ignored' } catch {
     if ($_.Exception.Message -ne 'editor-codex-probe-failed') { throw }
   }
 $backups = @(Get-ChildItem -LiteralPath $env:LOCALAPPDATA -Directory -Filter 'EmTroLy.failed-*')
 if ($backups.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $backups[0].FullName 'stale.txt'))) { throw 'partial-editor-data-not-backed-up' }
+if (-not (Test-Path -LiteralPath (Join-Path $backups[0].FullName 'Programs\EmTroLy-Antigravity-IDE-0123456789abcdef0123456789abcdef\leftover.txt'))) { throw 'partial-editor-app-not-backed-up' }
   $env:TEST_FAIL_CODEX = ''
   [IO.File]::WriteAllBytes($shortcutPath, [byte[]](0..7))
   & $ModulePath -Settings $settings -StatusFile $status
