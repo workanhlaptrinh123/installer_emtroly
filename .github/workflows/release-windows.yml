@@ -66,11 +66,21 @@ jobs:
       - name: Scan installer with Microsoft Defender
         shell: powershell
         run: |
-          Set-MpPreference -DisableRealtimeMonitoring $false -DisableArchiveScanning $false -DisableScriptScanning $false -DisableIOAVProtection $false
+          $atpPolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Advanced Threat Protection'
+          if (Test-Path $atpPolicy) { Set-ItemProperty -Path $atpPolicy -Name ForceDefenderPassiveMode -Value 0 -ErrorAction Stop }
+          Start-Service WinDefend -ErrorAction Stop
+          Set-MpPreference -DisableRealtimeMonitoring $false -DisableArchiveScanning $false -DisableScriptScanning $false -DisableIOAVProtection $false -DisableBehaviorMonitoring $false
           $preferences = Get-MpPreference
           foreach ($path in $preferences.ExclusionPath) {
             if ($path) { Remove-MpPreference -ExclusionPath $path -ErrorAction Stop }
           }
+          $deadline = (Get-Date).AddSeconds(60)
+          do {
+            $status = Get-MpComputerStatus
+            if ($status.RealTimeProtectionEnabled -and $status.AntivirusEnabled) { break }
+            Start-Sleep -Seconds 3
+          } while ((Get-Date) -lt $deadline)
+          $status | Select-Object AMRunningMode, AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled
           ./windows-installer/scan-release.ps1 -FilePath ./caidattroly.exe
 
       - name: Upload workflow artifacts
