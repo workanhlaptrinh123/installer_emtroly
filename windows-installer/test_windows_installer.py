@@ -99,6 +99,15 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertLess(installer.index("ensure_default_telegram_owner.py"), installer.index("gateway restart"))
         self.assertLess(installer.index("approvals set --stdin"), installer.index("gateway restart"))
         self.assertLess(installer.index("skills check"), installer.index("gateway restart"))
+        self.assertLess(installer.index("-PreGateway"), installer.index("gateway restart"))
+        self.assertIn("chưa đăng nhập Zalo", installer)
+        self.assertNotIn("Đang kích hoạt Zalo Personal", installer)
+
+    def test_zalo_pre_gateway_mode_keeps_legacy_onboarding_available(self):
+        onboarding = (ROOT / "zalo/onboard-zalouser-windows.ps1").read_text(encoding="utf-8")
+        self.assertIn("[switch]$PreGateway", onboarding)
+        self.assertIn("if (-not $PreGateway) {", onboarding)
+        self.assertIn("pre-gateway-complete", onboarding)
 
     def test_requested_skills_are_in_windows_catalog(self):
         catalog = json.loads((ROOT / "native/module-skills.json").read_text(encoding="utf-8"))

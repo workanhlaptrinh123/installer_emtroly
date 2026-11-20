@@ -3,7 +3,9 @@
 Ưu tiên chạy `caidattroly.exe` trong release V6. Bộ cài
 mở wizard để nhập các trường cần thiết, kiểm tra provider/Telegram, cài user-scope
 và mặc định bật Zalo/mention/QR cùng Full Exec cho các Telegram Owner IDs đã nhập.
-QR owner mặc định là Owner ID đầu tiên; Zalo là bắt buộc. Sau khi cài, owner nhắn
+QR owner mặc định là Owner ID đầu tiên; Zalo là bắt buộc. Bộ cài chỉ cài plugin,
+đăng ký lệnh và cấu hình account/binding; không dừng Gateway để chờ đăng nhập Zalo.
+Sau khi cài, owner nhắn
 `/start` rồi `/zaloqr` trong chat riêng, và có thể dùng `/zalostatus`. Bộ cài báo
 thành công khi Gateway khỏe, plugin đã nạp và hai lệnh đã đăng ký; không cần quét
 QR trong lúc cài. Không chạy

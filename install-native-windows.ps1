@@ -251,6 +251,14 @@ if ($UserInstall) {
   Install-UserOpenClawCli -Root $root -CliEntry $cliEntry -Port $GatewayPort -Profile $env:OPENCLAW_PROFILE -ExpectedVersion $OpenClawVersion
   Install-UserGateway -Root $root -CliEntry $cliEntry -Port $GatewayPort
 }
+if ($zaloSelected) {
+  Write-NativeInstallStatus 'Đang cài plugin Zalo và đăng ký /zaloqr, /zalostatus (chưa đăng nhập Zalo)…'
+  $zaloOnboard = Join-Path $PSScriptRoot 'zalo\onboard-zalouser-windows.ps1'
+  $zaloConfigure = Join-Path $PSScriptRoot 'zalo\configure-zalo.py'
+  $zaloQr = Join-Path $workspace 'skills\openclaw-zalo-qr-login\scripts\send_zalo_qr_to_telegram_owner.mjs'
+  & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $zaloOnboard -Root $root -TelegramAccount $Name -OwnerId $QrOwnerId -ConfigureScript $zaloConfigure -QrScript $zaloQr -Quick -PreGateway
+  if ($LASTEXITCODE -ne 0) { throw 'Windows Zalo QR plugin installation failed. Telegram remains installed; inspect the error before retrying.' }
+}
 $status = 'Đang khởi động Gateway và kiểm tra kết nối…'
 Write-NativeInstallStatus $status
 Invoke-OpenClaw gateway install --force --port $GatewayPort
@@ -261,12 +269,6 @@ Invoke-OpenClaw --version
 Invoke-OpenClaw gateway status --require-rpc
 if ($LASTEXITCODE -ne 0) { throw 'Gateway status check failed.' }
 if ($zaloSelected) {
-  Write-NativeInstallStatus 'Đang kích hoạt Zalo Personal, /zaloqr và /zalostatus…'
-  $zaloOnboard = Join-Path $PSScriptRoot 'zalo\onboard-zalouser-windows.ps1'
-  $zaloConfigure = Join-Path $PSScriptRoot 'zalo\configure-zalo.py'
-  $zaloQr = Join-Path $workspace 'skills\openclaw-zalo-qr-login\scripts\send_zalo_qr_to_telegram_owner.mjs'
-  & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $zaloOnboard -Root $root -TelegramAccount $Name -OwnerId $QrOwnerId -ConfigureScript $zaloConfigure -QrScript $zaloQr -Quick
-  if ($LASTEXITCODE -ne 0) { throw 'Windows Zalo onboarding failed. Telegram remains installed; inspect the error before retrying.' }
   Write-NativeInstallStatus 'Trợ lý đã sẵn sàng; /zaloqr và /zalostatus đã hoạt động.'
 }
 Write-NativeInstallStatus 'Đang hoàn tất kiểm tra trên máy…'

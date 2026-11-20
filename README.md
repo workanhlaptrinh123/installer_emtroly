@@ -349,8 +349,9 @@ Các profile có sẵn gồm `social`, `zalo`, `video` và `business`. Zalo vẫ
 QR/onboarding và credential riêng; không đặt secret trong module hoặc image.
 Metadata cho phép `zalo-personal` trên Docker/Linux/Windows. Windows native có
 `zalo/onboard-zalouser-windows.ps1`: cài plugin đúng phiên bản core, cấu hình
-account/binding và cài lệnh `/zaloqr`; owner tự yêu cầu QR qua Telegram sau khi
-cài. Đây là luồng đã triển khai trong source, không
+account/binding và cài lệnh `/zaloqr` trước lần khởi động Gateway đầu tiên; owner
+tự yêu cầu QR qua Telegram sau khi cài. Luồng cài nhanh không dừng hoặc chờ
+Gateway để đăng nhập Zalo. Đây là luồng đã triển khai trong source, không
 phải chứng nhận đã kiểm thử end-to-end trên mọi máy Windows. Phải quét/pairing,
 probe và test nhắn tin thật trước khi báo hoàn tất. Zalo dùng danh sách cho phép;
 không dùng Group ID Telegram làm ID Zalo

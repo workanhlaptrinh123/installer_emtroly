@@ -5,7 +5,8 @@ param(
   [Parameter(Mandatory=$true)][string]$OwnerId,
   [Parameter(Mandatory=$true)][string]$ConfigureScript,
   [Parameter(Mandatory=$true)][string]$QrScript,
-  [switch]$Quick
+  [switch]$Quick,
+  [switch]$PreGateway
 )
 $ErrorActionPreference = 'Stop'
 function Set-ZaloInstallStage([string]$Stage) {
@@ -112,8 +113,10 @@ function Stop-SelectedGateway {
     throw 'Could not stop the selected gateway for Zalo setup.'
   }
 }
-Set-ZaloInstallStage 'gateway-stop'
-Stop-SelectedGateway
+if (-not $PreGateway) {
+  Set-ZaloInstallStage 'gateway-stop'
+  Stop-SelectedGateway
+}
 try {
   Set-ZaloInstallStage 'zalo-config'
   $env:OPENCLAW_CONFIG_PATH = $configPath
@@ -130,8 +133,13 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Zalo reply mention verification failed.' }
   }
 } catch {
-  & openclaw gateway start *> $null
+  if (-not $PreGateway) { & openclaw gateway start *> $null }
   throw
+}
+if ($PreGateway) {
+  Set-ZaloInstallStage 'pre-gateway-complete'
+  Write-Host 'WINDOWS ZALO PRE-GATEWAY INSTALL COMPLETE: owner can request /zaloqr; login remains unverified.'
+  return
 }
 Set-ZaloInstallStage 'gateway-start'
 & openclaw gateway start *> $null
