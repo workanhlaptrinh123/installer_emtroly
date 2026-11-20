@@ -20,9 +20,8 @@ class EditorContractTests(unittest.TestCase):
         wizard = (ROOT / 'windows-installer/wizard.ps1').read_text(encoding='utf-8')
         self.assertIn('install-antigravity-codex.ps1', build)
         self.assertIn('activation-probe', build)
-        self.assertIn('-CheckOnly', runner)
-        self.assertLess(runner.index('& $editorInstaller -Settings $settings -StatusFile $LogFile *> $null'),
-                        runner.index("Write-SafeStatus 'Hoàn tất:"))
+        self.assertIn('-EditorOnly', wizard)
+        self.assertIn('$editorSettings', runner)
         self.assertIn('skip_editor = [bool]$existingEditorCheck.Checked', wizard)
         self.assertNotIn('OpenFileDialog', wizard)
 
@@ -133,7 +132,7 @@ foreach ($path in @($old, $env:TEST_DESKTOP, (Join-Path $env:SystemRoot 'System3
 [IO.File]::WriteAllText((Join-Path $selected 'resources\app\product.json'), '{"applicationName":"antigravity-ide","version":"1.107.0"}')
 function global:Get-AuthenticodeSignature { param($LiteralPath) return @{ Status = 'Valid'; SignerCertificate = @{ Subject = 'CN=Google LLC' } } }
 function global:Get-ItemProperty { param($Path, $ErrorAction) return $global:fixtureRegistry }
-$settings = [pscustomobject]@{base_url='https://codex.anhlaptrinh.vn/v1'; ai_api_key='fixture'}
+$settings = [pscustomobject]@{job_id='0123456789abcdef0123456789abcdef'; base_url='https://codex.anhlaptrinh.vn/v1'; ai_api_key='fixture'}
 $status = Join-Path $Directory 'status.txt'
 $global:fixtureRegistry = @([pscustomobject]@{DisplayName='Antigravity IDE'; InstallLocation=$old; DisplayIcon=''; UninstallString=''; PSChildName='fixture'})
 & $ModulePath -Settings $settings -StatusFile $status -CheckOnly
@@ -201,11 +200,12 @@ function global:Start-Process {
     [IO.File]::WriteAllText((Join-Path $extension 'bin\windows-x86_64\codex.exe'), 'fixture')
   }
   if ($FilePath -match 'Antigravity IDE\.exe$') { [IO.File]::WriteAllText($env:EMTROLY_CODEX_ACTIVATION_MARKER, 'ok') }
-  $process = [pscustomobject]@{ ExitCode = 0 }
+  $exitValue = if ($env:TEST_FAIL_CODEX -and $FilePath -match 'codex\.exe$') { 1 } else { 0 }
+  $process = [pscustomobject]@{ ExitCode = $exitValue }
   $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { param($Milliseconds) return $true }
   return $process
 }
-$settings = [pscustomobject]@{ base_url='https://codex.anhlaptrinh.vn/v1'; model='GPT-6.1-sol'; ai_api_key='fixture-secret-not-real' }
+$settings = [pscustomobject]@{ job_id='0123456789abcdef0123456789abcdef'; base_url='https://codex.anhlaptrinh.vn/v1'; model='GPT-6.1-sol'; ai_api_key='fixture-secret-not-real' }
 $status = Join-Path $Directory 'status.txt'
 try {
   $global:fixtureRegistry = @([pscustomobject]@{ DisplayName='Antigravity IDE'; InstallLocation=$oldFolder; DisplayIcon=''; UninstallString=''; PSChildName='fixture' })
@@ -220,6 +220,11 @@ try {
     if ($_.Exception.Message -ne 'editor-registry-ambiguous') { throw }
   }
   $global:fixtureRegistry = @()
+  $env:TEST_FAIL_CODEX = '1'
+  try { & $ModulePath -Settings $settings -StatusFile $status; throw 'codex-failure-ignored' } catch {
+    if ($_.Exception.Message -ne 'editor-codex-probe-failed') { throw }
+  }
+  $env:TEST_FAIL_CODEX = ''
   & $ModulePath -Settings $settings -StatusFile $status
   $base = Join-Path $env:LOCALAPPDATA 'EmTroLy'
   $auth = Get-Content -LiteralPath (Join-Path $base 'Codex\auth.json') -Raw | ConvertFrom-Json
@@ -227,6 +232,7 @@ try {
   if (-not (Test-Path -LiteralPath $shortcutPath)) { throw 'shortcut-missing' }
   $launch = [IO.File]::ReadAllText((Join-Path $base 'launch-antigravity.vbs'), [Text.Encoding]::Unicode)
   if ($launch -notmatch 'CODEX_HOME' -or $launch -notmatch '--extensions-dir') { throw 'bad-launcher' }
+  $settings.job_id = '11111111111111111111111111111111'
   try { & $ModulePath -Settings $settings -StatusFile $status -CheckOnly; throw 'overwrite-accepted' } catch {
     if ($_.Exception.Message -ne 'editor-data-exists') { throw }
   }

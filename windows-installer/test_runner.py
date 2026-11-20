@@ -56,7 +56,6 @@ param($Name, $OwnerIds, $GroupId, $AssistantName, $BaseUrl, $Model, $Profile,
       $Audience, $Addressing, $Style, [switch]$UserInstall, $CredentialData)
 if (-not $UserInstall -or $InstallMode -ne 'new' -or $Model -cne 'GPT-6.1-SOL') { throw 'invalid-installer-arguments' }
 if ($OwnerIds -ne $CredentialData.owner_ids) { throw 'invalid-owner-arguments' }
-if (-not $CredentialData.skip_editor -and -not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE 'editor-verified'))) { throw 'openclaw-before-editor' }
 if ([bool]$CredentialData.configure_zalo) {
     if ($Modules.Count -ne 1 -or $Modules[0] -ne 'zalo-personal' -or $QrOwnerId -ne $CredentialData.qr_owner_id) { throw 'invalid-zalo-arguments' }
 } elseif ($Modules.Count -ne 0) { throw 'unexpected-zalo-module' }
@@ -135,7 +134,7 @@ $global:LASTEXITCODE = 0
 
 @unittest.skipUnless(PWSH, "PowerShell is unavailable")
 class RunnerTests(unittest.TestCase):
-    def execute(self, mode="success", overrides=None):
+    def execute(self, mode="success", overrides=None, retry=False):
         with tempfile.TemporaryDirectory(prefix="member-wizard-test-") as temporary:
             root = Path(temporary)
             payload = root / "payload"
@@ -150,7 +149,8 @@ class RunnerTests(unittest.TestCase):
             (payload / "windows-installer/install-antigravity-codex.ps1").write_text(
                 "param($Settings, $StatusFile, [switch]$CheckOnly)\n"
                 "if ($Settings.ai_api_key -ne $env:TEST_API_KEY) { throw 'fixture-private-error' }\n"
-                "if ($CheckOnly -and $env:TEST_MODE -eq 'editor-existing') { throw 'editor-data-exists' }\n"
+                "if (-not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE 'openclaw/installer-codex-pending.json'))) { throw 'editor-before-bot' }\n"
+                "if ($env:TEST_MODE -eq 'editor-existing') { throw 'editor-data-exists' }\n"
                 "if (-not $CheckOnly -and $env:TEST_MODE -eq 'editor-failure') { throw 'editor-codex-probe-failed' }\n"
                 "if (-not $CheckOnly -and $env:TEST_MODE -eq 'editor-activation-failure') { throw 'editor-activation-failed' }\n"
                 "if (-not $CheckOnly) { [IO.File]::WriteAllText((Join-Path $env:USERPROFILE 'editor-verified'), 'ok') }\n",
@@ -185,6 +185,17 @@ class RunnerTests(unittest.TestCase):
                  "-Settings", str(secret_file), "-Payload", str(payload), "-Log", str(log)],
                 env=environment, capture_output=True, text=True, timeout=30,
             )
+            if retry:
+                self.assertEqual(process.returncode, 3)
+                pending = user_home / "openclaw/installer-codex-pending.json"
+                self.assertEqual(set(json.loads(pending.read_text())), {"id", "model"})
+                (payload / "install-native-windows.ps1").unlink()
+                secret_file.write_text(json.dumps({"ai_api_key": API_KEY}))
+                proc_args = [PWSH, "-NoProfile", "-File", str(RELEASE / "windows-installer/run-native-install.ps1"),
+                             "-SettingsFile", str(secret_file), "-PayloadRoot", str(payload), "-LogFile", str(log), "-EditorOnly"]
+                process = subprocess.run(proc_args, env={**environment, "TEST_MODE": "success"},
+                                         capture_output=True, text=True, timeout=30)
+                self.assertFalse(pending.exists(), log.read_text(encoding="utf-8"))
             text = (log.read_text(encoding="utf-8") if log.exists() else "") + process.stdout + process.stderr
             self.assertNotIn(TOKEN, text)
             self.assertNotIn(API_KEY, text)
@@ -192,6 +203,12 @@ class RunnerTests(unittest.TestCase):
             if mode == "existing-root":
                 self.assertEqual((user_home / "openclaw" / "user-data.txt").read_text(), "do-not-overwrite")
             return process.returncode, text, (user_home / "openclaw").exists()
+
+    def test_retry_after_editor_failure_does_not_need_bot_token_or_installer(self):
+        code, text, created = self.execute("editor-failure", retry=True)
+        self.assertEqual(code, 0, text)
+        self.assertTrue(created)
+        self.assertIn("Hoàn tất", text)
 
     def test_success_passes_credentials_in_memory_and_verifies_artifacts(self):
         code, text, created = self.execute()
@@ -223,12 +240,13 @@ class RunnerTests(unittest.TestCase):
                 self.assertTrue(created)
                 self.assertNotIn("Hoàn tất", text)
 
-    def test_editor_failure_never_reports_success(self):
+    def test_editor_failure_reports_working_bot(self):
         for mode in ("editor-failure", "editor-activation-failure"):
             with self.subTest(mode=mode):
                 code, text, created = self.execute(mode)
-                self.assertNotEqual(code, 0)
-                self.assertFalse(created)
+                self.assertEqual(code, 3, text)
+                self.assertTrue(created)
+                self.assertIn("Trợ lý đã sẵn sàng", text)
                 self.assertNotIn("Hoàn tất", text)
                 self.assertIn("Codex", text)
 
@@ -241,10 +259,10 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn("Hoàn tất", text)
         self.assertIn("telegram-command-menu-not-registered", text)
 
-    def test_editor_conflict_is_detected_before_installation(self):
+    def test_editor_conflict_preserves_verified_openclaw(self):
         code, text, created = self.execute("editor-existing")
-        self.assertNotEqual(code, 0)
-        self.assertFalse(created)
+        self.assertEqual(code, 3, text)
+        self.assertTrue(created)
         self.assertNotIn("Hoàn tất", text)
 
     def test_reports_only_safe_zalo_stage_on_failure(self):

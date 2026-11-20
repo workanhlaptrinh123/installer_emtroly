@@ -2,7 +2,8 @@
 param(
   [Parameter(Mandatory=$true)][string]$SettingsFile,
   [Parameter(Mandatory=$true)][string]$PayloadRoot,
-  [Parameter(Mandatory=$true)][string]$LogFile
+  [Parameter(Mandatory=$true)][string]$LogFile,
+  [switch]$EditorOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -102,6 +103,9 @@ function Test-FreshOpenClawCommand {
   }
 }
 
+$botReady = $false
+$locked = $false
+$mutex = $null
 $stage = 'input'
 $settings = $null
 $zaloStageFile = "$LogFile.zalo-stage"
@@ -113,111 +117,122 @@ try {
     Remove-Item -LiteralPath $SettingsFile -Force -ErrorAction SilentlyContinue
   }
   if ($env:OS -eq 'Windows_NT' -and ($env:PROCESSOR_ARCHITEW6432 -eq 'ARM64' -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64')) { throw 'unsupported-architecture' }
-  Test-MemberInstallerSettings $settings
   $root = Join-Path $env:USERPROFILE 'openclaw'
-  if (Test-Path -LiteralPath $root) { throw 'instance-exists' }
-  if ($env:OS -eq 'Windows_NT' -and (Get-Command openclaw -ErrorAction SilentlyContinue)) { throw 'cli-probe-conflict' }
-  if (-not $settings.skip_editor) {
-    $stage = 'editor-preflight'
-    $editorInstaller = Join-Path $PayloadRoot 'windows-installer\install-antigravity-codex.ps1'
-    if (-not (Test-Path -LiteralPath $editorInstaller -PathType Leaf)) { throw 'editor-module-missing' }
-    & $editorInstaller -Settings $settings -StatusFile $LogFile -CheckOnly *> $null
-  }
+  $pending = Join-Path $root 'installer-codex-pending.json'
+  if (-not $EditorOnly) {
+    Test-MemberInstallerSettings $settings
+    if (Test-Path -LiteralPath $root) { throw 'instance-exists' }
+    if ($env:OS -eq 'Windows_NT' -and (Get-Command openclaw -ErrorAction SilentlyContinue)) { throw 'cli-probe-conflict' }
+    $stage = 'provider'
+    Write-SafeStatus 'Đang kiểm tra API và model...'
+    $baseUrl = ([string]$settings.base_url).TrimEnd('/')
+    $headers = @{ Authorization = 'Bearer ' + [string]$settings.ai_api_key; Accept = 'application/json' }
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    try {
+      $response = Invoke-RestMethod -UseBasicParsing -Method Get -Uri "$baseUrl/models" -Headers $headers -TimeoutSec 45 -MaximumRedirection 0
+    } catch { throw 'provider-unavailable' }
+    $ids = @($response.data | ForEach-Object { [string]$_.id } | Where-Object { $_ })
+    $matching = @($ids | Where-Object { $_ -ieq [string]$settings.model })
+    if ($matching.Count -eq 0) { throw 'provider-model-unavailable' }
+    $settings.model = $matching[0]
 
-  $stage = 'provider'
-  Write-SafeStatus 'Đang kiểm tra API và model...'
-  $baseUrl = ([string]$settings.base_url).TrimEnd('/')
-  $headers = @{ Authorization = 'Bearer ' + [string]$settings.ai_api_key; Accept = 'application/json' }
-  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-  try {
-    $response = Invoke-RestMethod -UseBasicParsing -Method Get -Uri "$baseUrl/models" -Headers $headers -TimeoutSec 45 -MaximumRedirection 0
-  } catch { throw 'provider-unavailable' }
-  $ids = @($response.data | ForEach-Object { [string]$_.id } | Where-Object { $_ })
-  $matching = @($ids | Where-Object { $_ -ieq [string]$settings.model })
-  if ($matching.Count -eq 0) { throw 'provider-model-unavailable' }
-  $settings.model = $matching[0]
+    $stage = 'telegram'
+    Write-SafeStatus 'Đang kiểm tra bot Telegram...'
+    try {
+      $telegram = Invoke-RestMethod -UseBasicParsing -Method Get -Uri ('https://api.telegram.org/bot' + [string]$settings.telegram_token + '/getMe') -TimeoutSec 45 -MaximumRedirection 0
+    } catch { throw 'telegram-unavailable' }
+    if (-not $telegram.ok -or -not $telegram.result.is_bot) { throw 'telegram-invalid-bot' }
 
-  $stage = 'telegram'
-  Write-SafeStatus 'Đang kiểm tra bot Telegram...'
-  try {
-    $telegram = Invoke-RestMethod -UseBasicParsing -Method Get -Uri ('https://api.telegram.org/bot' + [string]$settings.telegram_token + '/getMe') -TimeoutSec 45 -MaximumRedirection 0
-  } catch { throw 'telegram-unavailable' }
-  if (-not $telegram.ok -or -not $telegram.result.is_bot) { throw 'telegram-invalid-bot' }
-
-  if (-not $settings.skip_editor) {
-    $stage = 'editor'
-    Write-SafeStatus 'Đang cài Antigravity IDE và cấu hình Codex...'
-    & $editorInstaller -Settings $settings -StatusFile $LogFile *> $null
+    $stage = 'install'
+    Write-SafeStatus 'Đang cài môi trường, module và Gateway. Vui lòng đợi...'
+    $installer = Join-Path $PayloadRoot 'install-native-windows.ps1'
+    if (-not (Test-Path -LiteralPath $installer)) { throw 'missing-payload' }
+    $modules = @()
+    if ([bool]$settings.configure_zalo) { $modules = @('zalo-personal') }
+    $arguments = @{
+      Name = [string]$settings.member; OwnerIds = [string]$settings.owner_ids
+      GroupId = [string]$settings.group_id; AssistantName = [string]$settings.assistant_name
+      BaseUrl = $baseUrl; Model = [string]$settings.model; Profile = 'basic-assistant-full'
+      Modules = $modules; QrOwnerId = [string]$settings.qr_owner_id
+      OpenClawVersion = '2026.11.4'; InstallMode = 'new'; InstallRoot = $root; GatewayPort = [int]$settings.gateway_port
+      Audience = [string]$settings.audience; Addressing = [string]$settings.addressing
+      Style = [string]$settings.style; UserInstall = $true; CredentialData = $settings
+    }
+    $global:LASTEXITCODE = 0
+    $env:MEMBER_INSTALL_ZALO_STAGE_FILE = $zaloStageFile
+    $env:MEMBER_INSTALL_STATUS_FILE = $LogFile
+    & $installer @arguments *> $null
+    if ($LASTEXITCODE -ne 0) { throw 'installer-failed' }
+    foreach ($required in @('openclaw.json', 'installer-instance.json', 'openclaw-instance.ps1', 'windows-cli.json', 'workspace\skills\openclaw-zalo-reply-mention\SKILL.md', 'workspace\skills\openclaw-telegram-zalo-qr-delivery\SKILL.md', 'workspace\skills\cap-full-quyen-telegram-openclaw\SKILL.md')) {
+      if (-not (Test-Path -LiteralPath (Join-Path $root $required))) { throw 'incomplete-installation' }
+    }
+    $instance = Get-Content -LiteralPath (Join-Path $root 'installer-instance.json') -Encoding UTF8 -Raw | ConvertFrom-Json
+    $cliEntry = Join-Path $root ("runtime\$expectedVersion\node_modules\openclaw\openclaw.mjs")
+    if (-not (Test-Path -LiteralPath $cliEntry)) { throw 'runtime-version-mismatch' }
+    $env:OPENCLAW_STATE_DIR = $root
+    $env:OPENCLAW_CONFIG_PATH = Join-Path $root 'openclaw.json'
+    $env:OPENCLAW_PROFILE = [string]$instance.profile
+    $versionText = (& node $cliEntry --version | Out-String)
+    if ($LASTEXITCODE -ne 0 -or $versionText -notmatch [regex]::Escape($expectedVersion)) { throw 'runtime-version-mismatch' }
+    $approvalState = (& node $cliEntry approvals get --json | Out-String) | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or $approvalState.file.agents.main.security -ne 'full' -or $approvalState.file.agents.main.ask -ne 'off') { throw 'approval-check-failed' }
+    $config = [IO.File]::ReadAllText((Join-Path $root 'openclaw.json'), [Text.Encoding]::UTF8) | ConvertFrom-Json
+    Test-MemberInstallerPermissions -Settings $settings -Config $config -ApprovalState $approvalState
+    $stage = 'command'
+    Write-SafeStatus 'Đang kiểm tra lệnh openclaw trong PowerShell mới...'
+    Test-FreshOpenClawCommand -Root $root -Version $expectedVersion
+    $stage = 'zalo-verify'
+    Write-SafeStatus 'Đang kiểm tra Gateway và lệnh Zalo...'
+    $health = (& node $cliEntry gateway health --json | Out-String) | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0 -or -not $health.ok) { throw 'gateway-health-failed' }
+    if ('zalouser' -notin @($health.plugins.loaded)) { throw 'zalo-plugin-not-loaded' }
+    if ('telegram-zalo-owner-login' -notin @($health.plugins.loaded)) { throw 'zalo-qr-plugin-not-loaded' }
+    $plugins = (& node $cliEntry plugins list --json | Out-String) | ConvertFrom-Json
+    if ($LASTEXITCODE -ne 0) { throw 'zalo-plugin-not-loaded' }
+    $zaloPlugin = @($plugins.plugins | Where-Object { $_.id -eq 'zalouser' })
+    $qrPlugin = @($plugins.plugins | Where-Object { $_.id -eq 'telegram-zalo-owner-login' })
+    if ($zaloPlugin.Count -ne 1 -or $zaloPlugin[0].status -ne 'loaded') { throw 'zalo-plugin-not-loaded' }
+    if ($qrPlugin.Count -ne 1 -or $qrPlugin[0].status -ne 'loaded' -or $qrPlugin[0].enabled -ne $true) { throw 'zalo-qr-plugin-not-loaded' }
+    $inspection = (& node $cliEntry plugins inspect telegram-zalo-owner-login --runtime --json | Out-String) | ConvertFrom-Json
+    $qrTools = @($inspection.plugin.toolNames)
+    foreach ($tool in @($inspection.tools)) { $qrTools += @($tool.names) }
+    if ($LASTEXITCODE -ne 0 -or $inspection.plugin.status -ne 'loaded' -or $inspection.plugin.enabled -ne $true -or
+        'zaloqr' -notin @($inspection.commands) -or 'zalostatus' -notin @($inspection.commands) -or
+        'telegram_zalo_login_qr' -notin $qrTools) { throw 'zalo-qr-command-not-registered' }
+    $stage = 'telegram-menu'
+    Write-SafeStatus 'Đang đồng bộ menu Telegram: /zaloqr và /zalostatus...'
+    Ensure-TelegramCommandMenu -Token ([string]$settings.telegram_token)
+    if ($settings.skip_editor) {
+      Write-SafeStatus 'Hoàn tất: OpenClaw, /zaloqr và /zalostatus đã sẵn sàng.'
+      exit 0
+    }
+    $botReady = $true
+    $job = @{ id = [guid]::NewGuid().ToString('N'); model = $settings.model }
+    $tmp = "$pending.$($job.id).tmp"
+    [IO.File]::WriteAllText($tmp, ($job | ConvertTo-Json -Compress))
+    [IO.File]::Move($tmp, $pending)
   }
-
-  $stage = 'install'
-  Write-SafeStatus 'Đang cài môi trường, module và Gateway. Vui lòng đợi...'
-  $installer = Join-Path $PayloadRoot 'install-native-windows.ps1'
-  if (-not (Test-Path -LiteralPath $installer)) { throw 'missing-payload' }
-  $modules = @()
-  if ([bool]$settings.configure_zalo) { $modules = @('zalo-personal') }
-  $arguments = @{
-    Name = [string]$settings.member; OwnerIds = [string]$settings.owner_ids
-    GroupId = [string]$settings.group_id; AssistantName = [string]$settings.assistant_name
-    BaseUrl = $baseUrl; Model = [string]$settings.model; Profile = 'basic-assistant-full'
-    Modules = $modules; QrOwnerId = [string]$settings.qr_owner_id
-    OpenClawVersion = '2026.11.4'; InstallMode = 'new'; InstallRoot = $root; GatewayPort = [int]$settings.gateway_port
-    Audience = [string]$settings.audience; Addressing = [string]$settings.addressing
-    Style = [string]$settings.style; UserInstall = $true; CredentialData = $settings
-  }
-  $global:LASTEXITCODE = 0
-  $env:MEMBER_INSTALL_ZALO_STAGE_FILE = $zaloStageFile
-  $env:MEMBER_INSTALL_STATUS_FILE = $LogFile
-  & $installer @arguments *> $null
-  if ($LASTEXITCODE -ne 0) { throw 'installer-failed' }
-  foreach ($required in @('openclaw.json', 'installer-instance.json', 'openclaw-instance.ps1', 'windows-cli.json', 'workspace\skills\openclaw-zalo-reply-mention\SKILL.md', 'workspace\skills\openclaw-telegram-zalo-qr-delivery\SKILL.md', 'workspace\skills\cap-full-quyen-telegram-openclaw\SKILL.md')) {
-    if (-not (Test-Path -LiteralPath (Join-Path $root $required))) { throw 'incomplete-installation' }
-  }
-  $instance = Get-Content -LiteralPath (Join-Path $root 'installer-instance.json') -Encoding UTF8 -Raw | ConvertFrom-Json
-  $cliEntry = Join-Path $root ("runtime\$expectedVersion\node_modules\openclaw\openclaw.mjs")
-  if (-not (Test-Path -LiteralPath $cliEntry)) { throw 'runtime-version-mismatch' }
-  $env:OPENCLAW_STATE_DIR = $root
-  $env:OPENCLAW_CONFIG_PATH = Join-Path $root 'openclaw.json'
-  $env:OPENCLAW_PROFILE = [string]$instance.profile
-  $versionText = (& node $cliEntry --version | Out-String)
-  if ($LASTEXITCODE -ne 0 -or $versionText -notmatch [regex]::Escape($expectedVersion)) { throw 'runtime-version-mismatch' }
-  $approvalState = (& node $cliEntry approvals get --json | Out-String) | ConvertFrom-Json
-  if ($LASTEXITCODE -ne 0 -or $approvalState.file.agents.main.security -ne 'full' -or $approvalState.file.agents.main.ask -ne 'off') { throw 'approval-check-failed' }
-  $config = [IO.File]::ReadAllText((Join-Path $root 'openclaw.json'), [Text.Encoding]::UTF8) | ConvertFrom-Json
-  Test-MemberInstallerPermissions -Settings $settings -Config $config -ApprovalState $approvalState
-  $stage = 'command'
-  Write-SafeStatus 'Đang kiểm tra lệnh openclaw trong PowerShell mới...'
-  Test-FreshOpenClawCommand -Root $root -Version $expectedVersion
-  $stage = 'zalo-verify'
-  Write-SafeStatus 'Đang kiểm tra Gateway và lệnh Zalo...'
-  $health = (& node $cliEntry gateway health --json | Out-String) | ConvertFrom-Json
-  if ($LASTEXITCODE -ne 0 -or -not $health.ok) { throw 'gateway-health-failed' }
-  if ('zalouser' -notin @($health.plugins.loaded)) { throw 'zalo-plugin-not-loaded' }
-  if ('telegram-zalo-owner-login' -notin @($health.plugins.loaded)) { throw 'zalo-qr-plugin-not-loaded' }
-  $plugins = (& node $cliEntry plugins list --json | Out-String) | ConvertFrom-Json
-  if ($LASTEXITCODE -ne 0) { throw 'zalo-plugin-not-loaded' }
-  $zaloPlugin = @($plugins.plugins | Where-Object { $_.id -eq 'zalouser' })
-  $qrPlugin = @($plugins.plugins | Where-Object { $_.id -eq 'telegram-zalo-owner-login' })
-  if ($zaloPlugin.Count -ne 1 -or $zaloPlugin[0].status -ne 'loaded') { throw 'zalo-plugin-not-loaded' }
-  if ($qrPlugin.Count -ne 1 -or $qrPlugin[0].status -ne 'loaded' -or $qrPlugin[0].enabled -ne $true) { throw 'zalo-qr-plugin-not-loaded' }
-  $inspection = (& node $cliEntry plugins inspect telegram-zalo-owner-login --runtime --json | Out-String) | ConvertFrom-Json
-  $qrTools = @($inspection.plugin.toolNames)
-  foreach ($tool in @($inspection.tools)) { $qrTools += @($tool.names) }
-  if ($LASTEXITCODE -ne 0 -or $inspection.plugin.status -ne 'loaded' -or $inspection.plugin.enabled -ne $true -or
-      'zaloqr' -notin @($inspection.commands) -or 'zalostatus' -notin @($inspection.commands) -or
-      'telegram_zalo_login_qr' -notin $qrTools) { throw 'zalo-qr-command-not-registered' }
-  $stage = 'telegram-menu'
-  Write-SafeStatus 'Đang đồng bộ menu Telegram: /zaloqr và /zalostatus...'
-  Ensure-TelegramCommandMenu -Token ([string]$settings.telegram_token)
-  if ($settings.skip_editor) {
-    Write-SafeStatus 'Hoàn tất: OpenClaw, /zaloqr và /zalostatus đã sẵn sàng.'
-  } else {
-    Write-SafeStatus 'Hoàn tất: OpenClaw, /zaloqr và /zalostatus đã sẵn sàng. Mở lối tắt Em Trợ Lý - Antigravity trên Desktop để dùng Codex riêng.'
-  }
+  $stage = 'editor'
+  $job = [IO.File]::ReadAllText($pending) | ConvertFrom-Json
+  if ($job.id -cnotmatch '^[a-f0-9]{32}$' -or $job.model -notin @('gpt-6.1-sol','gpt-6.1-terra','gpt-6-astra')) { throw 'invalid-editor-job' }
+  $botReady = $true
+  $mutex = New-Object Threading.Mutex($false, ('EmTroLy-Codex-' + $job.id))
+  try { $locked = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
+  if (-not $locked) { throw 'editor-busy' }
+  if (-not (Test-Path -LiteralPath $pending)) { throw 'invalid-editor-job' }
+  $editorInstaller = Join-Path $PayloadRoot 'windows-installer\install-antigravity-codex.ps1'
+  if (-not (Test-Path -LiteralPath $editorInstaller -PathType Leaf)) { throw 'editor-module-missing' }
+  $editorSettings = [pscustomobject]@{ model=$job.model; base_url='https://codex.anhlaptrinh.vn/v1'; ai_api_key=$settings.ai_api_key; job_id=$job.id }
+  Write-SafeStatus 'Trợ lý đã sẵn sàng. Đang chuẩn bị Antigravity và Codex...'
+  & $editorInstaller -Settings $editorSettings -StatusFile $LogFile *> $null
+  Remove-Item -LiteralPath $pending -ErrorAction Stop
+  Write-SafeStatus 'Hoàn tất: OpenClaw, /zaloqr và /zalostatus đã sẵn sàng. Mở lối tắt Em Trợ Lý - Antigravity trên Desktop để dùng Codex riêng.'
   exit 0
 } catch {
   $code = [string]$_.Exception.Message
   $safeMessages = @{
+    'invalid-editor-job' = 'Không tìm thấy phiên cài Codex hợp lệ.'
+    'editor-busy' = 'Một cửa sổ khác đang cài Codex. Hãy đợi cửa sổ đó hoàn tất.'
     'invalid-member' = 'Tên trợ lý không hợp lệ.'
     'cli-probe-missing' = 'Thiếu công cụ kiểm tra lệnh OpenClaw.'
     'cli-probe-conflict' = 'Đã có lệnh openclaw khác. Bộ cài giữ nguyên lệnh cũ; cần xử lý xung đột trước khi dùng lệnh mặc định.'
@@ -305,9 +320,15 @@ try {
       }
     }
   }
+  if ($botReady) {
+    Write-SafeStatus ("Trợ lý đã sẵn sàng. Codex chưa cài xong. " + $message)
+    exit 3
+  }
   try { Write-SafeStatus $message } catch { }
   exit 1
 } finally {
+  if ($locked) { $mutex.ReleaseMutex() }
+  if ($mutex) { $mutex.Dispose() }
   Remove-Item -LiteralPath $SettingsFile -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $zaloStageFile -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $zaloDetailFile -Force -ErrorAction SilentlyContinue

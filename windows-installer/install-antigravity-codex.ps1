@@ -17,15 +17,15 @@ $base = Join-Path $env:LOCALAPPDATA 'EmTroLy'
 $userData = Join-Path $base 'Antigravity\UserData'
 $extensions = Join-Path $base 'Antigravity\Extensions'
 $codexHome = Join-Path $base 'Codex'
-$defaultAppDir = Join-Path $env:LOCALAPPDATA 'Programs\Antigravity IDE'
-$appDir = $defaultAppDir
+$jobId = [string]$Settings.job_id
+if ($jobId -cnotmatch '^[a-f0-9]{32}$') { throw 'invalid-editor-job' }
+$receipt = Join-Path $base 'installer-job.txt'
+$resuming = Test-Path -LiteralPath $base
+if ($resuming -and (-not (Test-Path -LiteralPath $receipt -PathType Leaf) -or [IO.File]::ReadAllText($receipt) -cne $jobId)) { throw 'editor-data-exists' }
+# A dedicated destination lets a retry reuse only the IDE installed by this job.
+$appDir = Join-Path $env:LOCALAPPDATA ('Programs\EmTroLy-Antigravity-IDE-' + $jobId)
 $editor = Join-Path $appDir 'Antigravity IDE.exe'
-if (Test-Path -LiteralPath $defaultAppDir) {
-  if ((Test-Path -LiteralPath $editor -PathType Leaf) -or
-      (Test-Path -LiteralPath (Join-Path $defaultAppDir 'Antigravity.exe') -PathType Leaf)) { throw 'editor-select-existing' }
-  $appDir = Join-Path $env:LOCALAPPDATA ('Programs\EmTroLy-Antigravity-IDE-' + [guid]::NewGuid().ToString('N'))
-  $editor = Join-Path $appDir 'Antigravity IDE.exe'
-}
+if (-not $resuming -and (Test-Path -LiteralPath $appDir)) { throw 'editor-data-exists' }
 $editorCli = Join-Path $appDir 'bin\antigravity-ide.cmd'
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Em Trợ Lý - Antigravity.lnk'
 $downloadDir = Join-Path $env:TEMP ('emtroly-editor-' + [guid]::NewGuid().ToString('N'))
@@ -110,9 +110,15 @@ foreach ($path in @($editor, $editorCli, $userData, $extensions, $codexHome, $do
 foreach ($file in @('test.js', 'extension.js', 'package.json')) {
   if (-not (Test-Path -LiteralPath (Join-Path $activationProbe $file) -PathType Leaf)) { throw 'editor-activation-missing' }
 }
-if (Test-Path -LiteralPath $base) { throw 'editor-data-exists' }
-if (Test-Path -LiteralPath $shortcutPath) { throw 'editor-shortcut-exists' }
-foreach ($programDirectory in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+$hasShortcut = Test-Path -LiteralPath $shortcutPath
+if ($hasShortcut) {
+  if (-not $resuming) { throw 'editor-shortcut-exists' }
+  $saved = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+  $launcher = Join-Path $base 'launch-antigravity.vbs'
+  if ($saved.TargetPath -ine (Join-Path $env:SystemRoot 'System32\wscript.exe') -or
+      $saved.Arguments -cne ('//B //Nologo ' + (Quote-Cmd $launcher)) -or $saved.WorkingDirectory -ine $base) { throw 'editor-shortcut-exists' }
+}
+foreach ($programDirectory in @((Join-Path $env:LOCALAPPDATA 'Programs'), $env:ProgramFiles, ${env:ProgramFiles(x86)})) {
   if (-not $programDirectory) { continue }
   foreach ($relativePath in @('Antigravity IDE\Antigravity IDE.exe', 'Antigravity\Antigravity.exe')) {
     if (Test-Path -LiteralPath (Join-Path $programDirectory $relativePath) -PathType Leaf) { throw 'editor-select-existing' }
@@ -123,6 +129,7 @@ foreach ($entry in $existing) {
   $directories = @(Get-EditorRegistryDirectories $entry)
   if ($directories.Count -eq 0) { throw 'editor-registry-ambiguous' }
   foreach ($directory in $directories) {
+    if ($resuming -and $directory.TrimEnd('\') -ieq $appDir) { continue }
     foreach ($name in @('Antigravity IDE.exe', 'Antigravity.exe')) {
       if (Test-Path -LiteralPath (Join-Path $directory $name) -PathType Leaf) { throw 'editor-select-existing' }
     }
@@ -137,7 +144,10 @@ $oldElectronNode = $env:ELECTRON_RUN_AS_NODE
 $oldNodeOptions = $env:NODE_OPTIONS
 $oldActivationMarker = $env:EMTROLY_CODEX_ACTIVATION_MARKER
 try {
-  New-PrivateDirectory $base
+  if (-not $resuming) {
+    New-PrivateDirectory $base
+    [IO.File]::WriteAllText($receipt, $jobId)
+  }
   New-PrivateDirectory $downloadDir
   if (-not (Test-Path -LiteralPath $editor -PathType Leaf)) {
     Write-EditorStatus 'Đang tải Antigravity IDE chính thức (khoảng 190 MB)...'
@@ -181,9 +191,13 @@ requires_openai_auth = true
   } | ConvertTo-Json
   [IO.File]::WriteAllText((Join-Path $editorSettingsDir 'settings.json'), $editorSettings, (New-Object Text.UTF8Encoding($false)))
 
-  Write-EditorStatus 'Đang tải Codex Extension đã xác minh (khoảng 370 MB)...'
-  $vsix = Join-Path $downloadDir 'codex.vsix'
-  Get-VerifiedDownload -Url $extensionUrl -Path $vsix -Hash $extensionHash
+  $vsix = Join-Path $base ('codex-' + $extensionVersion + '.vsix')
+  if (-not (Test-Path -LiteralPath $vsix -PathType Leaf) -or (Get-FileHash -LiteralPath $vsix -Algorithm SHA256).Hash -ine $extensionHash) {
+    Write-EditorStatus 'Đang tải Codex Extension (khoảng 370 MB)...'
+    $part = Join-Path $downloadDir 'codex.vsix'
+    Get-VerifiedDownload -Url $extensionUrl -Path $part -Hash $extensionHash
+    Move-Item -LiteralPath $part -Destination $vsix -Force
+  }
   $env:CODEX_HOME = $codexHome
   $env:OPENAI_API_KEY = $null
   $env:VSCODE_IPC_HOOK_CLI = $null
@@ -238,8 +252,9 @@ shell.Run """$($editor.Replace('"','""'))"" --user-data-dir ""$($userData.Replac
   $shortcut.IconLocation = $editor + ',0'
   $shortcut.Description = 'Em Trợ Lý - Antigravity IDE và Codex riêng'
   $shortcut.Save()
-  [IO.File]::Move($temporaryShortcut, $shortcutPath)
+  if (-not $hasShortcut) { [IO.File]::Move($temporaryShortcut, $shortcutPath) }
   if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { throw 'editor-shortcut-failed' }
+  Remove-Item -LiteralPath $vsix -Force -ErrorAction SilentlyContinue
 } finally {
   $env:CODEX_HOME = $oldCodexHome
   $env:OPENAI_API_KEY = $oldApiKey

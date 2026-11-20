@@ -101,7 +101,7 @@ $existingEditorCheck.Location = New-Object System.Drawing.Point(24, 42)
 $existingEditorCheck.Size = New-Object System.Drawing.Size(650, 30)
 [void]$editorPage.Controls.Add($existingEditorCheck)
 Add-Note $editorPage 'Tích chọn: chỉ cài OpenClaw và Zalo. Bộ cài sẽ bỏ qua Antigravity và Codex.' 100
-Add-Note $editorPage 'Bỏ trống: tải và cài Antigravity IDE, cấu hình Codex trong thư mục riêng, sau đó cài OpenClaw và Zalo.' 170
+Add-Note $editorPage 'Bỏ trống: cài OpenClaw và Zalo trước. Khi trợ lý sẵn sàng, bộ cài mới tải Antigravity IDE và cấu hình Codex trong thư mục riêng.' 170
 
 $zalo = New-Page 'Zalo'
 $zaloCheck = New-Object System.Windows.Forms.CheckBox
@@ -123,8 +123,23 @@ $statusLabel.Location = New-Object System.Drawing.Point(24, 42)
 $statusLabel.Size = New-Object System.Drawing.Size(680, 68)
 $statusLabel.Font = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
 [void]$installPage.Controls.Add($statusLabel)
-Add-Note $installPage 'Bộ cài sẽ thực hiện các bước đã chọn. Khi Gateway và các lệnh Zalo đã sẵn sàng, bộ cài báo hoàn tất. Không cần quét QR.' 130
+Add-Note $installPage 'Khi trợ lý sẵn sàng, bạn có thể dùng /zaloqr trên Telegram ngay. Không cần đợi Codex hay quét QR để hoàn tất bước cài trợ lý.' 130
 Add-Note $installPage 'Windows x64 cần Internet và PowerShell 5.1. Gateway chạy ẩn trong tài khoản Windows, không dùng Docker.' 215
+
+$coreLabel = New-Object System.Windows.Forms.Label
+$coreLabel.Location = New-Object System.Drawing.Point(24, 16)
+$coreLabel.Size = New-Object System.Drawing.Size(680, 24)
+$coreLabel.ForeColor = [Drawing.Color]::DarkGreen
+[void]$installPage.Controls.Add($coreLabel)
+$retryLabel = New-Object System.Windows.Forms.Label
+$retryLabel.Text = 'Khóa API cho Codex:'
+$retryLabel.Location = New-Object System.Drawing.Point(24, 310)
+$retryLabel.Visible = $false
+[void]$installPage.Controls.Add($retryLabel)
+$retryKey = Add-TextBox $installPage '' 306 $true
+$retryKey.Visible = $false
+$pending = Join-Path $env:USERPROFILE 'openclaw\installer-codex-pending.json'
+$retryEditor = $false
 
 $backButton = New-Object System.Windows.Forms.Button
 $backButton.Text = 'Quay lại'
@@ -188,8 +203,11 @@ function Test-Page([int]$Index) {
 }
 
 function Set-Buttons {
+  $installButton.Text = if ($retryEditor) { 'Thử lại bước Codex' } else { 'Cài đặt' }
+  $installButton.Width = if ($retryEditor) { 150 } else { 110 }
+  $cancelButton.Text = if ($retryEditor) { 'Đóng' } else { 'Hủy' }
   $isLast = $tab.SelectedIndex -eq ($tab.TabPages.Count - 1)
-  $backButton.Enabled = (-not $installRunning -and $tab.SelectedIndex -gt 0)
+  $backButton.Enabled = (-not $retryEditor -and -not $installRunning -and $tab.SelectedIndex -gt 0)
   $nextButton.Enabled = (-not $installRunning -and -not $isLast)
   $installButton.Enabled = (-not $installRunning -and $isLast)
   $cancelButton.Enabled = -not $installRunning
@@ -202,18 +220,22 @@ function Cleanup-Secret {
 }
 
 function Start-Install {
-  if (-not (Test-Page 0) -or -not (Test-Page 1) -or -not (Test-Page 2) -or -not (Test-Page 3) -or -not (Test-Page 4)) { return }
-  $answer = [System.Windows.Forms.MessageBox]::Show($form, 'Các Owner IDs và mọi thành viên trong nhóm Telegram đã chọn có thể yêu cầu đọc, sửa, xóa file và chạy lệnh trên máy. Bạn có tin tưởng họ?', 'Xác nhận Full Exec', 'YesNo', 'Warning')
-  if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) { return }
-  if ($zaloCheck.Checked) {
-    $answer = [System.Windows.Forms.MessageBox]::Show($form, 'Zalo dùng danh sách cho phép. Sau khi cài, owner nhắn /zaloqr trong Telegram riêng để nhận QR. Bạn đồng ý?', 'Xác nhận Zalo', 'YesNo', 'Warning')
+  if ($retryEditor) {
+    if ([string]::IsNullOrWhiteSpace($retryKey.Text)) { Show-Error 'Hãy nhập khóa API để tiếp tục cài Codex.'; return }
+  } else {
+    if (-not (Test-Page 0) -or -not (Test-Page 1) -or -not (Test-Page 2) -or -not (Test-Page 3) -or -not (Test-Page 4)) { return }
+    $answer = [System.Windows.Forms.MessageBox]::Show($form, 'Các Owner IDs và mọi thành viên trong nhóm Telegram đã chọn có thể yêu cầu đọc, sửa, xóa file và chạy lệnh trên máy. Bạn có tin tưởng họ?', 'Xác nhận Full Exec', 'YesNo', 'Warning')
     if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+    if ($zaloCheck.Checked) {
+      $answer = [System.Windows.Forms.MessageBox]::Show($form, 'Zalo dùng danh sách cho phép. Sau khi cài, owner nhắn /zaloqr trong Telegram riêng để nhận QR. Bạn đồng ý?', 'Xác nhận Zalo', 'YesNo', 'Warning')
+      if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+    }
   }
   $script:installRunning = $true
   Set-Buttons
   $statusLabel.Text = 'Đang kiểm tra thông tin cài đặt...'
   try {
-  $settings = [ordered]@{
+  $settings = if ($retryEditor) { @{ ai_api_key = $retryKey.Text } } else { [ordered]@{
     member = 'emtroly'
     assistant_name = $assistantBox.Text.Trim()
     base_url = $baseUrlBox.Text.Trim().TrimEnd('/')
@@ -230,7 +252,7 @@ function Start-Install {
     qr_owner_id = $qrOwnerBox.Text.Trim()
     telegram_token = $tokenBox.Text
     ai_api_key = $apiKeyBox.Text
-  }
+  } }
   $script:privateDir = Join-Path $env:TEMP ('openclaw-member-' + [guid]::NewGuid().ToString('N'))
   $acl = New-Object System.Security.AccessControl.DirectorySecurity
   $acl.SetAccessRuleProtection($true, $false)
@@ -257,11 +279,13 @@ function Start-Install {
   $startInfo.Arguments = '-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
     $runner + '" -SettingsFile "' + $settingsPath +
     '" -PayloadRoot "' + $rootPath + '" -LogFile "' + $logPath + '"'
+  if ($retryEditor) { $startInfo.Arguments += ' -EditorOnly' }
   $startInfo.UseShellExecute = $false
   $startInfo.CreateNoWindow = $true
   $script:runnerProcess = [Diagnostics.Process]::Start($startInfo)
   $script:runnerDeadline = (Get-Date).AddMinutes(90)
   $tokenBox.Clear()
+  if (-not $retryEditor -and -not $settings.skip_editor) { $retryKey.Text = $apiKeyBox.Text }
   $apiKeyBox.Clear()
   $timer.Start()
   } catch {
@@ -276,6 +300,9 @@ $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 1000
 $timer.Add_Tick({
   if (-not $script:installRunning) { return }
+  if (-not $coreLabel.Text -and (Test-Path -LiteralPath $pending -PathType Leaf)) {
+    $coreLabel.Text = 'Trợ lý đã sẵn sàng. Bạn có thể dùng /zaloqr và /zalostatus.'
+  }
   if ($script:safeLog -and (Test-Path -LiteralPath $script:safeLog)) {
     try { $statusLabel.Text = [IO.File]::ReadAllText($script:safeLog, [Text.Encoding]::UTF8) } catch { }
   }
@@ -311,6 +338,13 @@ $timer.Add_Tick({
       [System.Windows.Forms.MessageBox]::Show($form, $successMessage, 'Cài đặt hoàn tất', 'OK', 'Information') | Out-Null
       $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
       $form.Close()
+    } elseif ($code -eq 3 -or (Test-Path -LiteralPath $pending -PathType Leaf)) {
+      $script:resultCode = 3
+      $script:retryEditor = $true
+      $coreLabel.Text = 'Trợ lý đã sẵn sàng. Bạn có thể dùng /zaloqr và /zalostatus.'
+      $statusLabel.Text = if ($code -eq 3) { $detail } else { 'Bước cài Codex đã gián đoạn. Bạn có thể thử lại hoặc đóng cửa sổ này.' }
+      $retryKey.Visible = $true
+      $retryLabel.Visible = $true
     } else {
       $statusLabel.Text = 'Cài đặt chưa thành công. Dữ liệu đã tạo được giữ nguyên.'
       Show-Error ("Cài đặt chưa thành công. $detail`n`nNếu thư mục đã được tạo một phần, hãy kiểm tra trước khi thử lại.")
@@ -319,13 +353,25 @@ $timer.Add_Tick({
   }
 })
 
+$tab.Add_Selecting({ param($sender, $eventArgs)
+  if (($script:installRunning -or $script:retryEditor) -and $eventArgs.TabPage -ne $installPage) { $eventArgs.Cancel = $true }
+})
 $tab.Add_SelectedIndexChanged({ Set-Buttons })
 $backButton.Add_Click({ if ($tab.SelectedIndex -gt 0) { $tab.SelectedIndex-- } })
 $nextButton.Add_Click({ if (Test-Page $tab.SelectedIndex) { $tab.SelectedIndex++ } })
 $installButton.Add_Click({ Start-Install })
-$cancelButton.Add_Click({ Cleanup-Secret; $script:resultCode = 2; $form.Close() })
+$cancelButton.Add_Click({ Cleanup-Secret; if (-not $script:retryEditor) { $script:resultCode = 2 }; $form.Close() })
 $form.Add_FormClosing({ if ($script:installRunning) { $_.Cancel = $true; Show-Error 'Cài đặt đang chạy; vui lòng đợi đến khi hoàn tất.' } })
 
+if (Test-Path -LiteralPath $pending -PathType Leaf) {
+  $retryEditor = $true
+  $resultCode = 3
+  $tab.SelectedTab = $installPage
+  $coreLabel.Text = 'OpenClaw và Zalo đã hoàn tất ở lần cài trước.'
+  $statusLabel.Text = 'Nhập khóa API và chọn Thử lại bước Codex để tiếp tục. Bot sẽ không bị cài lại.'
+  $retryLabel.Visible = $true
+  $retryKey.Visible = $true
+}
 Set-Buttons
 [void]$form.ShowDialog()
 Cleanup-Secret

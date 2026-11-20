@@ -100,10 +100,15 @@ The installer runs in user scope and does not require Docker or Administrator
 for a fresh instance. It requires Windows PowerShell 5.1, Windows x64,
 Internet access, and permission to install user dependencies. Before creating
 the instance it checks the provider `/models` endpoint and Telegram `getMe`,
-and, unless skipped, installs Antigravity and verifies the Codex extension;
-afterward it checks OpenClaw config, the selected skill catalog, Full Exec
+then installs OpenClaw and Zalo. It checks OpenClaw config, the selected skill catalog, Full Exec
 approval state, Gateway RPC health, and registration of `/zaloqr` and
-`/zalostatus`. Credentials are passed through a
+`/zalostatus` before showing **Trợ lý đã sẵn sàng**. If selected,
+Antigravity and Codex run afterward. A failure at this stage leaves the bot
+running; choose **Thử lại bước Codex** in the wizard, or reopen the EXE and
+enter the provider API key to retry. No Telegram token or QR scan is needed
+for this retry. Only a completed bot setup can create the pending editor job.
+The pending record contains a job ID and model, no credentials. Existing
+installations from older releases have no such record. Credentials are passed through a
 short-lived ACL-protected file, never as command-line values, and are removed
 after the runner reads them. Runtime credential files remain protected inside
 the user's instance because the bot needs them after installation.
@@ -140,7 +145,7 @@ requires a working real Codex request and an extension-host activation check
 before reporting success; the request may use provider credits. This
 integration requires additional downloads of roughly
 560 MB. Existing EmTroLy data is not overwritten; an interrupted install is
-left in place for investigation. Antigravity/Codex Windows end-to-end testing
+resumed only when its private receipt matches the pending job. A verified VSIX is reused on retry and its download cache is removed after success. Antigravity/Codex Windows end-to-end testing
 is still required before this development version can be distributed.
 
 Selecting “Máy đã có Antigravity IDE” skips the entire IDE and Codex step.
