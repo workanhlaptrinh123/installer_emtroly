@@ -251,7 +251,6 @@ try {
     'editor-module-missing' = 'Bộ cài thiếu mô-đun Antigravity và Codex.'
     'editor-data-exists' = 'Thư mục dữ liệu Em Trợ Lý đã tồn tại; bộ cài không ghi đè dữ liệu cũ.'
     'editor-data-recovery-failed' = 'Không thể tự lưu thư mục Em Trợ Lý cài dở. Hãy đóng Antigravity rồi thử lại.'
-    'editor-shortcut-exists' = 'Shortcut Em Trợ Lý - Antigravity đã tồn tại; bộ cài không ghi đè.'
     'editor-desktop-missing' = 'Không tìm thấy Desktop hoặc Windows Script Host để tạo shortcut an toàn.'
     'editor-invalid-path' = 'Đường dẫn Windows chứa ký tự bộ cài chưa hỗ trợ; dữ liệu hiện có không bị ghi đè.'
     'editor-select-existing' = 'Máy có Antigravity. Hãy tích “Máy đã có Antigravity IDE” để chỉ cài OpenClaw và Zalo.'

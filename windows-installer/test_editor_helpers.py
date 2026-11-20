@@ -36,6 +36,15 @@ class EditorContractTests(unittest.TestCase):
         self.assertNotIn('SetEnvironmentVariable(', script)
         self.assertNotIn('~/.codex', script)
 
+    def test_shortcut_repair_and_launcher_are_explicit(self):
+        script = MODULE.read_text(encoding='utf-8')
+        self.assertIn("GetFolderPath('Programs')", script)
+        self.assertIn("if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }", script)
+        self.assertIn('shell.CurrentDirectory', script)
+        self.assertIn('command = Chr(34)', script)
+        self.assertIn('& _', script)
+        self.assertNotIn("throw 'editor-shortcut-exists'", script)
+
     @unittest.skipUnless(shutil.which('node'), 'Node.js is unavailable')
     def test_activation_marker_requires_an_active_codex_sidebar(self):
         probe = ROOT / 'windows-installer/activation-probe/test.js'
@@ -248,11 +257,24 @@ $partial = Join-Path $env:LOCALAPPDATA 'EmTroLy'
 $backups = @(Get-ChildItem -LiteralPath $env:LOCALAPPDATA -Directory -Filter 'EmTroLy.failed-*')
 if ($backups.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $backups[0].FullName 'stale.txt'))) { throw 'partial-editor-data-not-backed-up' }
   $env:TEST_FAIL_CODEX = ''
+  $startMenuPath = Join-Path ([Environment]::GetFolderPath('Programs')) 'Em Trợ Lý - Antigravity.lnk'
+  foreach ($stalePath in @($shortcutPath, $startMenuPath)) {
+    $staleShell = New-Object -ComObject WScript.Shell
+    $stale = $staleShell.CreateShortcut($stalePath)
+    $stale.Save()
+  }
   & $ModulePath -Settings $settings -StatusFile $status
   $base = Join-Path $env:LOCALAPPDATA 'EmTroLy'
   $auth = Get-Content -LiteralPath (Join-Path $base 'Codex\auth.json') -Raw | ConvertFrom-Json
   if ($auth.OPENAI_API_KEY -cne $settings.ai_api_key) { throw 'wrong-auth' }
   if (-not (Test-Path -LiteralPath $shortcutPath)) { throw 'shortcut-missing' }
+  if (-not (Test-Path -LiteralPath $startMenuPath)) { throw 'start-menu-shortcut-missing' }
+  foreach ($shortcutToCheck in @($shortcutPath, $startMenuPath)) {
+    $savedShortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutToCheck)
+    if ($savedShortcut.TargetPath -ine (Join-Path $env:SystemRoot 'System32\wscript.exe') -or
+        $savedShortcut.Arguments -notmatch [regex]::Escape('launch-antigravity.vbs') -or
+        $savedShortcut.WorkingDirectory -ine (Join-Path $env:LOCALAPPDATA 'EmTroLy')) { throw 'shortcut-not-repaired' }
+  }
   $launch = [IO.File]::ReadAllText((Join-Path $base 'launch-antigravity.vbs'), [Text.Encoding]::Unicode)
   if ($launch -notmatch 'CODEX_HOME' -or $launch -notmatch '--extensions-dir') { throw 'bad-launcher' }
   $settings.job_id = '11111111111111111111111111111111'
@@ -261,6 +283,9 @@ if ($backups.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $backups[0]
   }
 } finally {
   if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }
+  if (Test-Path -LiteralPath (Join-Path ([Environment]::GetFolderPath('Programs')) 'Em Trợ Lý - Antigravity.lnk')) {
+    Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath('Programs')) 'Em Trợ Lý - Antigravity.lnk') -Force
+  }
 }
 ''', encoding='utf-8-sig')
             shell = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
