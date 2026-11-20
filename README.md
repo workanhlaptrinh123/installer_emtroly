@@ -26,7 +26,7 @@ selected. This provider check is not proof of image generation or delivery.
 An explicitly authorized live test uses `openclaw infer image generate` directly;
 it may incur image-generation charges. No Python/curl image helper is installed.
 
-## Current installation flow — 2026-11-16
+## Current installation flow — 2026-11-20
 
 ### Public Zalo chat default — 2026-10-16
 
@@ -57,7 +57,7 @@ publishing this installer update.
 - `openclaw-zalo-text-delivery-guard` has passed offline tests against the `2026.11.4` Docker plugin. A real Zalo account has not been tested; the Docker/Supervisor installer is not a native Windows/macOS installer.
 - The rebuilt native bundle and standalone `.exe` are release artifacts. Other historical web snapshots and bootstrap references must not be assumed to be updated.
 - The Telegram module includes `cap-full-quyen-telegram-openclaw` and its three skill dependencies. The bundled orchestration helper targets a host-managed Docker member, not a native local install; use it only for explicitly verified owners and targets.
-- The Zalo module includes `openclaw-zalo-reply-mention` and `openclaw-telegram-zalo-qr-delivery`. The mention patch passes offline against the unmodified plugin but conflicts with the V6 text-delivery guard; do not apply it when the guard is active. Live mention rendering is unverified.
+- The Zalo module includes `openclaw-telegram-zalo-qr-delivery`; the optional mention patch and other advanced Zalo checks are deferred so the core install reaches `/zaloqr` faster. Live mention rendering remains a separate follow-up test.
 - Local prompts require a per-instance background launcher with restart backoff and login autostart. User-scope Windows starts after the user signs in; it cannot answer while the computer is shut down or asleep. Verify the launcher and RPC before claiming background operation.
 - Zalo QR delivery requires the customer's bot, an authorized owner DM, allowed media tools and a real message receipt. If Telegram blocks the DM, ask the owner to send `/start` to that exact bot; bot admin rights do not override Telegram's DM restrictions.
 - New VPS installs with Zalo register the member watchdog and enable the Zalo 70k context-rotation job after a verified gateway/database preflight. Long-text delivery and compaction remain receipt- and schema-checked; native Windows/macOS never runs the Linux/Docker rotation installer.
@@ -141,12 +141,10 @@ extension directory, and `CODEX_HOME` are isolated under
 those paths; other Codex, ChatGPT and Antigravity installations are not
 configured. The same provider API key is stored in the private Codex home and
 used by OpenClaw; the Telegram bot token remains separate. The installer
-requires a working real Codex request and an extension-host activation check
-before reporting success; the request may use provider credits. This
-integration requires additional downloads of roughly
-560 MB. Existing EmTroLy data is not overwritten; an interrupted install is
-resumed only when its private receipt matches the pending job. A verified VSIX is reused on retry and its download cache is removed after success. Antigravity/Codex Windows end-to-end testing
-is still required before this development version can be distributed.
+reports the assistant ready after OpenClaw, Zalo, `/zaloqr`, `/zalostatus`,
+image generation and the basic DOCX/Excel/PowerPoint document skills are
+installed and checked. Antigravity/Codex is an optional later step and does
+not block the basic assistant result.
 
 Selecting “Máy đã có Antigravity IDE” skips the entire IDE and Codex step.
 Setup does not search for an executable, prompt for a file, change the editor
@@ -172,10 +170,13 @@ overwrite the instance or print credentials. The diagnostic does not resume
 installation or verify actual Telegram/Zalo messaging.
 
 The wizard requires Zalo and a Full Exec confirmation. It installs Zalo Personal,
-the owner-only QR plugin and the version-specific mention patch. Success means
-the Gateway is healthy, both `/zaloqr` and `/zalostatus` are registered and the
-Telegram command menu confirms both commands. This is the final step: the
-wizard reports success immediately, without waiting for a message or QR scan.
+the owner-only QR plugin, image generation and the basic Office document skills
+for DOCX, Excel and PowerPoint workflows. Success means the Gateway is healthy,
+both `/zaloqr` and `/zalostatus` are registered and the Telegram command menu
+confirms both commands. Advanced Zalo checks and mention handling are deferred
+to a later maintenance step so they do not slow the core installation. This is
+the final step: the wizard reports success immediately, without waiting for a
+message or QR scan.
 The installer does not send a QR during installation: a configured
 Telegram owner opens the bot's private chat, sends `/start`, and then requests
 `/zaloqr`; after scanning, `/zalostatus` reports Zalo status. Native skill

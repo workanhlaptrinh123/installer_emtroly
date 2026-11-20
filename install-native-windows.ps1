@@ -264,8 +264,9 @@ if ($Modules -contains 'zalo-personal') {
   $zaloOnboard = Join-Path $PSScriptRoot 'zalo\onboard-zalouser-windows.ps1'
   $zaloConfigure = Join-Path $PSScriptRoot 'zalo\configure-zalo.py'
   $zaloQr = Join-Path $workspace 'skills\openclaw-zalo-qr-login\scripts\send_zalo_qr_to_telegram_owner.mjs'
-  & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $zaloOnboard -Root $root -TelegramAccount $Name -OwnerId $QrOwnerId -ConfigureScript $zaloConfigure -QrScript $zaloQr
+  & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $zaloOnboard -Root $root -TelegramAccount $Name -OwnerId $QrOwnerId -ConfigureScript $zaloConfigure -QrScript $zaloQr -Quick
   if ($LASTEXITCODE -ne 0) { throw 'Windows Zalo onboarding failed. Telegram remains installed; inspect the error before retrying.' }
+  Write-NativeInstallStatus 'Trợ lý đã sẵn sàng; /zaloqr và /zalostatus đã hoạt động.'
 }
 Write-NativeInstallStatus 'Đang hoàn tất kiểm tra trên máy…'
 Write-Host "NATIVE INSTALL COMPLETE ($InstallMode): $root"

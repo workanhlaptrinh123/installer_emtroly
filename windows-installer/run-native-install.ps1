@@ -163,7 +163,16 @@ try {
     $env:MEMBER_INSTALL_STATUS_FILE = $LogFile
     & $installer @arguments *> $null
     if ($LASTEXITCODE -ne 0) { throw 'installer-failed' }
-    foreach ($required in @('openclaw.json', 'installer-instance.json', 'openclaw-instance.ps1', 'windows-cli.json', 'workspace\skills\openclaw-zalo-reply-mention\SKILL.md', 'workspace\skills\openclaw-telegram-zalo-qr-delivery\SKILL.md', 'workspace\skills\cap-full-quyen-telegram-openclaw\SKILL.md')) {
+    foreach ($required in @(
+      'openclaw.json', 'installer-instance.json', 'openclaw-instance.ps1', 'windows-cli.json',
+      'workspace\skills\openclaw-telegram-zalo-qr-delivery\SKILL.md',
+      'workspace\skills\telegram-zalo-owner-login\SKILL.md',
+      'workspace\skills\cap-full-quyen-telegram-openclaw\SKILL.md',
+      'workspace\skills\imagegen\SKILL.md',
+      'workspace\skills\core-openclaw-media\SKILL.md',
+      'workspace\skills\openclaw-docx-reader\SKILL.md',
+      'workspace\skills\openclaw-python-docx-telegram\SKILL.md'
+    )) {
       if (-not (Test-Path -LiteralPath (Join-Path $root $required))) { throw 'incomplete-installation' }
     }
     $instance = Get-Content -LiteralPath (Join-Path $root 'installer-instance.json') -Encoding UTF8 -Raw | ConvertFrom-Json
@@ -187,12 +196,6 @@ try {
     if ($LASTEXITCODE -ne 0 -or -not $health.ok) { throw 'gateway-health-failed' }
     if ('zalouser' -notin @($health.plugins.loaded)) { throw 'zalo-plugin-not-loaded' }
     if ('telegram-zalo-owner-login' -notin @($health.plugins.loaded)) { throw 'zalo-qr-plugin-not-loaded' }
-    $plugins = (& node $cliEntry plugins list --json | Out-String) | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0) { throw 'zalo-plugin-not-loaded' }
-    $zaloPlugin = @($plugins.plugins | Where-Object { $_.id -eq 'zalouser' })
-    $qrPlugin = @($plugins.plugins | Where-Object { $_.id -eq 'telegram-zalo-owner-login' })
-    if ($zaloPlugin.Count -ne 1 -or $zaloPlugin[0].status -ne 'loaded') { throw 'zalo-plugin-not-loaded' }
-    if ($qrPlugin.Count -ne 1 -or $qrPlugin[0].status -ne 'loaded' -or $qrPlugin[0].enabled -ne $true) { throw 'zalo-qr-plugin-not-loaded' }
     $inspection = (& node $cliEntry plugins inspect telegram-zalo-owner-login --runtime --json | Out-String) | ConvertFrom-Json
     $qrTools = @($inspection.plugin.toolNames)
     foreach ($tool in @($inspection.tools)) { $qrTools += @($tool.names) }
@@ -203,7 +206,7 @@ try {
     Write-SafeStatus 'Đang đồng bộ menu Telegram: /zaloqr và /zalostatus...'
     Ensure-TelegramCommandMenu -Token ([string]$settings.telegram_token)
     if ($settings.skip_editor) {
-      Write-SafeStatus 'Hoàn tất: OpenClaw, /zaloqr và /zalostatus đã sẵn sàng.'
+      Write-SafeStatus 'Hoàn tất: OpenClaw, /zaloqr, /zalostatus, tạo ảnh và kỹ năng DOCX/Excel/PowerPoint cơ bản đã sẵn sàng.'
       exit 0
     }
     $botReady = $true
@@ -226,7 +229,7 @@ try {
   Write-SafeStatus 'Trợ lý đã sẵn sàng. Đang chuẩn bị Antigravity và Codex...'
   & $editorInstaller -Settings $editorSettings -StatusFile $LogFile *> $null
   Remove-Item -LiteralPath $pending -ErrorAction Stop
-  Write-SafeStatus 'Hoàn tất: OpenClaw, /zaloqr và /zalostatus đã sẵn sàng. Mở lối tắt Em Trợ Lý - Antigravity trên Desktop để dùng Codex riêng.'
+  Write-SafeStatus 'Hoàn tất: OpenClaw, /zaloqr, /zalostatus, tạo ảnh và kỹ năng DOCX/Excel/PowerPoint cơ bản đã sẵn sàng. Mở lối tắt Em Trợ Lý - Antigravity để dùng Codex riêng.'
   exit 0
 } catch {
   $code = [string]$_.Exception.Message

@@ -123,7 +123,7 @@ $statusLabel.Location = New-Object System.Drawing.Point(24, 42)
 $statusLabel.Size = New-Object System.Drawing.Size(680, 68)
 $statusLabel.Font = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
 [void]$installPage.Controls.Add($statusLabel)
-Add-Note $installPage 'Khi trợ lý sẵn sàng, bạn có thể dùng /zaloqr trên Telegram ngay. Không cần đợi Codex hay quét QR để hoàn tất bước cài trợ lý.' 130
+Add-Note $installPage 'Bộ cài chỉ chờ OpenClaw, Zalo, /zaloqr, /zalostatus, tạo ảnh và thao tác DOCX/Excel/PowerPoint cơ bản. Không cần đợi Codex hay quét QR.' 130
 Add-Note $installPage 'Windows x64 cần Internet và PowerShell 5.1. Gateway chạy ẩn trong tài khoản Windows, không dùng Docker.' 215
 
 $coreLabel = New-Object System.Windows.Forms.Label

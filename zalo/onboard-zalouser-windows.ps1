@@ -4,7 +4,8 @@ param(
   [Parameter(Mandatory=$true)][string]$TelegramAccount,
   [Parameter(Mandatory=$true)][string]$OwnerId,
   [Parameter(Mandatory=$true)][string]$ConfigureScript,
-  [Parameter(Mandatory=$true)][string]$QrScript
+  [Parameter(Mandatory=$true)][string]$QrScript,
+  [switch]$Quick
 )
 $ErrorActionPreference = 'Stop'
 function Set-ZaloInstallStage([string]$Stage) {
@@ -71,11 +72,13 @@ if (-not $pluginInfo -or $pluginInfo.plugin.enabled -ne $true -or $pluginInfo.pl
   Set-ZaloFailureDetail 'plugin-not-loaded'
   throw 'Zalo plugin is not enabled and loaded.'
 }
-Set-ZaloInstallStage 'plugin-doctor'
-$doctorResult = Invoke-ZaloPluginCli -Node $node -CliEntry $env:OPENCLAW_CLI_ENTRY -Arguments @('plugins', 'doctor')
-if ($doctorResult.ExitCode -ne 0) { Set-ZaloCliFailureDetail $doctorResult; throw 'Zalo plugin doctor failed.' }
-Set-ZaloInstallStage 'plugin-source'
-if (-not $pluginInfo.plugin.source) { Set-ZaloFailureDetail 'invalid-response'; throw 'Could not locate the enabled Zalo plugin.' }
+if (-not $Quick) {
+  Set-ZaloInstallStage 'plugin-doctor'
+  $doctorResult = Invoke-ZaloPluginCli -Node $node -CliEntry $env:OPENCLAW_CLI_ENTRY -Arguments @('plugins', 'doctor')
+  if ($doctorResult.ExitCode -ne 0) { Set-ZaloCliFailureDetail $doctorResult; throw 'Zalo plugin doctor failed.' }
+  Set-ZaloInstallStage 'plugin-source'
+  if (-not $pluginInfo.plugin.source) { Set-ZaloFailureDetail 'invalid-response'; throw 'Could not locate the enabled Zalo plugin.' }
+}
 function Stop-SelectedGateway {
   $stopSucceeded = $false
   try {
@@ -120,10 +123,12 @@ try {
   Set-ZaloInstallStage 'qr-install'
   & python $ownerQrInstaller --root $Root --home $env:USERPROFILE --node $node --cli-entry $env:OPENCLAW_CLI_ENTRY --telegram-account $TelegramAccount --zalo-account default --agent main --ensure
   if ($LASTEXITCODE -ne 0) { throw 'Owner-only Zalo QR tool installation failed.' }
-  $mentionInstaller = Join-Path $PSScriptRoot 'install-windows-reply-mention.py'
-  Set-ZaloInstallStage 'mention-patch'
-  & python $mentionInstaller --plugin-source $pluginInfo.plugin.source --root $Root --node $node --cli-entry $env:OPENCLAW_CLI_ENTRY
-  if ($LASTEXITCODE -ne 0) { throw 'Zalo reply mention verification failed.' }
+  if (-not $Quick) {
+    $mentionInstaller = Join-Path $PSScriptRoot 'install-windows-reply-mention.py'
+    Set-ZaloInstallStage 'mention-patch'
+    & python $mentionInstaller --plugin-source $pluginInfo.plugin.source --root $Root --node $node --cli-entry $env:OPENCLAW_CLI_ENTRY
+    if ($LASTEXITCODE -ne 0) { throw 'Zalo reply mention verification failed.' }
+  }
 } catch {
   & openclaw gateway start *> $null
   throw
@@ -138,14 +143,21 @@ if ($LASTEXITCODE -ne 0) { throw 'OpenClaw configuration is invalid after Zalo s
 $health = (& node $env:OPENCLAW_CLI_ENTRY gateway health --json | Out-String) | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0 -or -not $health.ok) { throw 'Gateway health check failed after Zalo setup.' }
 if ('zalouser' -notin @($health.plugins.loaded) -or 'telegram-zalo-owner-login' -notin @($health.plugins.loaded)) { throw 'Zalo or owner QR plugin is not loaded by the gateway.' }
+$qrInspection = (& openclaw plugins inspect telegram-zalo-owner-login --runtime --json | Out-String) | ConvertFrom-Json
+$qrTools = @($qrInspection.plugin.toolNames)
+foreach ($tool in @($qrInspection.tools)) { $qrTools += @($tool.names) }
+if ($LASTEXITCODE -ne 0 -or $qrInspection.plugin.status -ne 'loaded' -or $qrInspection.plugin.enabled -ne $true -or
+    'zaloqr' -notin @($qrInspection.commands) -or 'zalostatus' -notin @($qrInspection.commands) -or
+    'telegram_zalo_login_qr' -notin $qrTools) { throw 'Owner QR plugin did not register /zaloqr.' }
+if ($Quick) {
+  Set-ZaloInstallStage 'quick-complete'
+  Write-Host 'WINDOWS ZALO QUICK INSTALL COMPLETE: owner can request /zaloqr; advanced skills are deferred.'
+  return
+}
 $plugins = (& openclaw plugins list --json | Out-String) | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0) { throw 'Could not inspect installed plugins.' }
 $zaloPlugin = @($plugins.plugins | Where-Object { $_.id -eq 'zalouser' })
 $qrPlugin = @($plugins.plugins | Where-Object { $_.id -eq 'telegram-zalo-owner-login' })
 if ($zaloPlugin.Count -ne 1 -or $zaloPlugin[0].status -ne 'loaded' -or $qrPlugin.Count -ne 1 -or $qrPlugin[0].status -ne 'loaded' -or $qrPlugin[0].enabled -ne $true) { throw 'Zalo or owner QR plugin is not loaded by the gateway.' }
-$qrInspection = (& openclaw plugins inspect telegram-zalo-owner-login --runtime --json | Out-String) | ConvertFrom-Json
-$qrTools = @($qrInspection.plugin.toolNames)
-foreach ($tool in @($qrInspection.tools)) { $qrTools += @($tool.names) }
-if ($LASTEXITCODE -ne 0 -or 'zaloqr' -notin @($qrInspection.commands) -or 'telegram_zalo_login_qr' -notin $qrTools) { throw 'Owner QR plugin did not register /zaloqr.' }
 Set-ZaloInstallStage 'complete'
 Write-Host 'WINDOWS ZALO INSTALL COMPLETE: owner can request /zaloqr in a private Telegram chat; login remains unverified.'

@@ -77,9 +77,13 @@ if ($env:TEST_MODE -eq 'zalo-unsafe-detail') {
 $root = Join-Path $env:USERPROFILE 'openclaw'
 if ($InstallRoot -ne $root) { throw 'invalid-install-root' }
 foreach ($item in @('openclaw.json', 'installer-instance.json', 'openclaw-instance.ps1', 'windows-cli.json',
-    'workspace\skills\openclaw-zalo-reply-mention\SKILL.md',
     'workspace\skills\openclaw-telegram-zalo-qr-delivery\SKILL.md',
-    'workspace\skills\cap-full-quyen-telegram-openclaw\SKILL.md')) {
+    'workspace\skills\telegram-zalo-owner-login\SKILL.md',
+    'workspace\skills\cap-full-quyen-telegram-openclaw\SKILL.md',
+    'workspace\skills\imagegen\SKILL.md',
+    'workspace\skills\core-openclaw-media\SKILL.md',
+    'workspace\skills\openclaw-docx-reader\SKILL.md',
+    'workspace\skills\openclaw-python-docx-telegram\SKILL.md')) {
     $path = Join-Path $root $item
     New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
     [IO.File]::WriteAllText($path, 'fixture')
@@ -116,7 +120,7 @@ const args = process.argv.slice(2);
 if (args[0] === '--version') console.log('OpenClaw 2026.11.4 (fixture)');
 else if (args[0] === 'approvals') console.log(JSON.stringify({file:{agents:{main:{security:'full',ask:'off',askFallback:process.env.TEST_MODE === 'bad-fallback' ? 'deny' : 'full'}}}}));
 else if (args[0] === 'gateway' && args[1] === 'health') console.log(JSON.stringify({ok:true,plugins:{loaded:[
-  ...(process.env.TEST_MODE === 'gateway-missing-zalouser' ? [] : ['zalouser']),
+  ...(process.env.TEST_MODE === 'gateway-missing-zalouser' || process.env.TEST_MODE === 'missing-zalouser' || process.env.TEST_MODE === 'missing-zalo-plugin' ? [] : ['zalouser']),
   ...(process.env.TEST_MODE === 'gateway-missing-zaloqr' ? [] : ['telegram-zalo-owner-login'])
 ]}}));
 else if (args[0] === 'plugins' && args[1] === 'list') console.log(JSON.stringify({plugins:[
@@ -288,7 +292,8 @@ class RunnerTests(unittest.TestCase):
         code, text, created = self.execute("missing-zalo-plugin")
         self.assertNotEqual(code, 0)
         self.assertTrue(created)
-        self.assertIn("/zaloqr", text)
+        self.assertIn("Zalo Personal", text)
+        self.assertIn("zalo-plugin-not-loaded", text)
 
     def test_missing_channel_or_command_never_reports_success(self):
         for mode in ("missing-zalouser", "missing-zaloqr-command", "missing-zalostatus-command", "gateway-missing-zalouser", "gateway-missing-zaloqr"):
