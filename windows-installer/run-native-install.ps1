@@ -260,7 +260,7 @@ try {
     'editor-download-failed' = 'Không tải được Antigravity IDE hoặc Codex Extension. Kiểm tra Internet và dung lượng trống.'
     'editor-download-checksum' = 'Tệp tải về không khớp mã kiểm tra; đã dừng để bảo vệ máy.'
     'editor-installer-signature-invalid' = 'Không xác minh được chữ ký hoặc mã kiểm tra của bộ cài Antigravity IDE.'
-    'editor-installed-signature-invalid' = 'Không xác minh được chữ ký Google của Antigravity IDE sau khi cài.'
+    'editor-installed-signature-invalid' = 'Antigravity IDE sau khi cài không đúng cấu trúc hoặc phiên bản được hỗ trợ.'
     'editor-signature-invalid' = 'Không xác minh được chữ ký Google của Antigravity IDE.'
     'editor-install-failed' = 'Antigravity IDE chưa cài được.'
     'editor-cli-missing' = 'Không tìm thấy công cụ dòng lệnh Antigravity IDE.'

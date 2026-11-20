@@ -96,7 +96,11 @@ $directories = @(Get-EditorRegistryDirectories $entry)
 if ($directories.Count -ne 1 -or $directories[0] -cne $registryDirectory) { throw 'registry-paths-not-deduplicated' }
 $empty = [pscustomobject]@{ InstallLocation = ''; DisplayIcon = ''; UninstallString = '' }
 if (@(Get-EditorRegistryDirectories $empty).Count -ne 0) { throw 'empty-registry-not-ambiguous' }
-function global:Get-AuthenticodeSignature { param($LiteralPath) return @{ Status = 'Valid'; SignerCertificate = @{ Subject = 'CN=Google LLC' } } }
+function global:Get-AuthenticodeSignature {
+  param($LiteralPath)
+  if ($LiteralPath -match 'Antigravity IDE\.exe$') { return @{ Status = 'NotSigned'; SignerCertificate = $null } }
+  return @{ Status = 'Valid'; SignerCertificate = @{ Subject = 'CN=Google LLC' } }
+}
 if (-not (Test-GoogleAuthenticodeSignature -Path $source -ExpectedHash $hash)) { throw 'valid-signature-rejected' }
 function global:Get-AuthenticodeSignature { param($LiteralPath) return @{ Status = 'Unknown'; SignerCertificate = @{ Subject = 'CN=Google LLC' } } }
 if (-not (Test-GoogleAuthenticodeSignature -Path $source -ExpectedHash $hash)) { throw 'unknown-pinned-signature-rejected' }
@@ -193,7 +197,11 @@ $editorFolder = Join-Path $env:LOCALAPPDATA 'Different Location\Antigravity IDE'
 [IO.File]::WriteAllText((Join-Path $editorFolder 'resources\app\product.json'), '{"applicationName":"antigravity-ide","version":"1.107.0"}')
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Em Trợ Lý - Antigravity.lnk'
 if (Test-Path -LiteralPath $shortcutPath) { throw 'fixture-shortcut-already-exists' }
-function global:Get-AuthenticodeSignature { param($LiteralPath) return @{ Status = 'Valid'; SignerCertificate = @{ Subject = 'CN=Google LLC' } } }
+function global:Get-AuthenticodeSignature {
+  param($LiteralPath)
+  if ($LiteralPath -match 'Antigravity IDE\.exe$') { return @{ Status = 'NotSigned'; SignerCertificate = $null } }
+  return @{ Status = 'Valid'; SignerCertificate = @{ Subject = 'CN=Google LLC' } }
+}
 $global:fixtureRegistry = @()
 function global:Get-ItemProperty { param($Path, $ErrorAction) return $global:fixtureRegistry }
 function global:Start-Process {

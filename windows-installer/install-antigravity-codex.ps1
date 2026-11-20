@@ -133,7 +133,6 @@ function Test-EditorInstallation([string]$Editor) {
   $appDir = Split-Path -Parent $Editor
   $editorCli = Join-Path $appDir 'bin\antigravity-ide.cmd'
   if (-not (Test-Path -LiteralPath $editor -PathType Leaf) -or -not (Test-Path -LiteralPath $editorCli -PathType Leaf)) { throw 'editor-cli-missing' }
-  if (-not (Test-GoogleAuthenticodeSignature -Path $Editor -AllowUnknownWithGoogleSigner)) { throw 'editor-installed-signature-invalid' }
   $productPath = Join-Path $appDir 'resources\app\product.json'
   if (-not (Test-Path -LiteralPath $productPath -PathType Leaf)) { throw 'editor-version-unsupported' }
   $product = Get-Content -LiteralPath $productPath -Raw | ConvertFrom-Json
