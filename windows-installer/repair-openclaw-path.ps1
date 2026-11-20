@@ -1,4 +1,4 @@
-param([string]$AccountDirectory = [Environment]::GetFolderPath('UserProfile'))
+﻿param([string]$AccountDirectory = [Environment]::GetFolderPath('UserProfile'))
 
 $ErrorActionPreference = 'Stop'
 $root = Join-Path $AccountDirectory 'openclaw'
