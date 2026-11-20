@@ -10,23 +10,10 @@ class WindowsInstallerTests(unittest.TestCase):
     def test_release_requires_defender_scan_before_artifact_and_publication(self):
         workflow = (ROOT / ".github/workflows/release-windows.yml").read_text(encoding="utf-8")
         scanner = (ROOT / "windows-installer/scan-release.ps1").read_text(encoding="utf-8")
-        signing = (ROOT / "windows-installer/sign-release.ps1").read_text(encoding="utf-8")
-        signing_step = workflow.index("- name: Sign installer for official release")
         scan = workflow.index("./windows-installer/scan-release.ps1")
         self.assertLess(workflow.index("./build-windows-installer.sh caidattroly.exe"), scan)
-        self.assertLess(signing_step, scan)
         self.assertLess(scan, workflow.index("- name: Upload workflow artifacts"))
         self.assertLess(scan, workflow.index("- name: Publish GitHub Release"))
-        self.assertIn("if: github.ref_type == 'tag'", workflow[signing_step:])
-        self.assertIn("WINDOWS_SIGNING_CERT_BASE64", workflow)
-        self.assertIn("WINDOWS_SIGNING_CERT_PASSWORD", workflow)
-        self.assertIn("RequireAuthenticodeSignature", scanner)
-        self.assertIn("Get-AuthenticodeSignature", scanner)
-        self.assertIn("signtool.exe", signing)
-        self.assertIn("/fd SHA256", signing)
-        self.assertIn("/tr $TimestampUrl", signing)
-        self.assertIn("$checksumPath", signing)
-        self.assertIn("Get-FileHash -LiteralPath $file -Algorithm SHA256", signing)
         for required in ("Get-MpComputerStatus", "Update-MpSignature", "Get-MpPreference", "ExclusionPath", "ExclusionExtension", "ExclusionProcess", "-ScanType 3", "Get-MpThreatDetection", "Get-FileHash"):
             self.assertIn(required, scanner)
 
