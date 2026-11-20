@@ -40,6 +40,9 @@ class EditorContractTests(unittest.TestCase):
         script = MODULE.read_text(encoding='utf-8')
         self.assertIn("'EmTroLy - Antigravity.lnk'", script)
         self.assertIn("if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }", script)
+        self.assertIn('shell.CurrentDirectory', script)
+        self.assertIn('command = Chr(34)', script)
+        self.assertIn('shell.Run command, 1, False', script)
         self.assertNotIn("throw 'editor-shortcut-exists'", script)
 
     @unittest.skipUnless(shutil.which('node'), 'Node.js is unavailable')

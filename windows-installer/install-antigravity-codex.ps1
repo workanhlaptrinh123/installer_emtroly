@@ -361,14 +361,20 @@ requires_openai_auth = true
   $launchPath = Join-Path $base 'launch-antigravity.vbs'
   $script = @"
 Option Explicit
-Dim shell
+Dim shell, command
 Set shell = CreateObject("WScript.Shell")
 shell.Environment("PROCESS")("CODEX_HOME") = "$($codexHome.Replace('"','""'))"
 shell.Environment("PROCESS")("OPENAI_API_KEY") = ""
 shell.Environment("PROCESS")("VSCODE_IPC_HOOK_CLI") = ""
 shell.Environment("PROCESS")("ELECTRON_RUN_AS_NODE") = ""
 shell.Environment("PROCESS")("NODE_OPTIONS") = ""
-shell.Run """$($editor.Replace('"','""'))"" --user-data-dir ""$($userData.Replace('"','""'))"" --extensions-dir ""$($extensions.Replace('"','""'))"" --new-window", 1, False
+shell.CurrentDirectory = "$($base.Replace('"','""'))"
+command = Chr(34) & "$($editor.Replace('"','""'))" & Chr(34) & _
+  " --user-data-dir " & Chr(34) & "$($userData.Replace('"','""'))" & Chr(34) & _
+  " --extensions-dir " & Chr(34) & "$($extensions.Replace('"','""'))" & Chr(34) & _
+  " --new-window"
+shell.Run command, 1, False
+Set shell = Nothing
 "@
   [IO.File]::WriteAllText($launchPath, $script, [Text.Encoding]::Unicode)
   $shell = New-Object -ComObject WScript.Shell
