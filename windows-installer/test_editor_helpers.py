@@ -339,15 +339,19 @@ if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPa
 [IO.File]::WriteAllText((Join-Path $app 'Antigravity IDE.exe'), 'fixture')
 [IO.File]::WriteAllText((Join-Path $app 'bin\antigravity-ide.cmd'), 'fixture')
 [IO.File]::WriteAllText((Join-Path $app 'resources\app\product.json'), '{"applicationName":"antigravity-ide","version":"1.107.0"}')
-& $RepairPath
-if ($LASTEXITCODE -ne 0) { throw "repair-failed-$LASTEXITCODE" }
-$saved = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
-$wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
-if ($saved.TargetPath -ine $wscript -or $saved.Arguments -notmatch 'launch-antigravity\.vbs' -or
-    $saved.WorkingDirectory -ine $base) { throw 'shortcut-not-repaired' }
-$launch = [IO.File]::ReadAllText((Join-Path $base 'launch-antigravity.vbs'), [Text.Encoding]::Unicode)
-if ($launch -notmatch [regex]::Escape((Join-Path $app 'Antigravity IDE.exe')) -or
-    $launch -notmatch [regex]::Escape($app) -or $launch -notmatch 'command = Chr\(34\)') { throw 'launcher-not-repaired' }
+try {
+  & $RepairPath
+  if ($LASTEXITCODE -ne 0) { throw "repair-failed-$LASTEXITCODE" }
+  $saved = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+  $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
+  if ($saved.TargetPath -ine $wscript -or $saved.Arguments -notmatch 'launch-antigravity\.vbs' -or
+      $saved.WorkingDirectory -ine $base) { throw 'shortcut-not-repaired' }
+  $launch = [IO.File]::ReadAllText((Join-Path $base 'launch-antigravity.vbs'), [Text.Encoding]::Unicode)
+  if ($launch -notmatch [regex]::Escape((Join-Path $app 'Antigravity IDE.exe')) -or
+      $launch -notmatch [regex]::Escape($app) -or $launch -notmatch 'command = Chr\(34\)') { throw 'launcher-not-repaired' }
+} finally {
+  if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }
+}
 ''', encoding='utf-8-sig')
             shell = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
             result = subprocess.run([str(shell), '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass',
