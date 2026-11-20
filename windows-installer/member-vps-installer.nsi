@@ -30,7 +30,7 @@ VIAddVersionKey "CompanyName" "Anh Lap Trinh"
 
 Section
   ${IfNot} ${RunningX64}
-    MessageBox MB_ICONSTOP "Windows 64-bit is required."
+    MessageBox MB_ICONSTOP "Bộ cài yêu cầu Windows 64 bit."
     SetErrorLevel 1
     Quit
   ${EndIf}
@@ -47,7 +47,7 @@ Section
   SetErrorLevel $0
   Goto done
   launch_error:
-    MessageBox MB_ICONSTOP "Windows PowerShell is required to run the installer."
+    MessageBox MB_ICONSTOP "Không thể mở Windows PowerShell để khởi động bộ cài."
     SetErrorLevel 1
   done:
 SectionEnd

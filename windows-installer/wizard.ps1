@@ -70,6 +70,28 @@ $groupBox = Add-TextBox $connect '' 245
 Add-Label $connect 'Gateway port (0 = tự động)' 24 292
 $portBox = Add-TextBox $connect '0' 289
 Add-Note $connect 'Owner IDs là số Telegram dương, ngăn cách bằng dấu phẩy. Group ID phải là số âm.' 342
+if (Test-Path -LiteralPath (Join-Path $env:USERPROFILE 'openclaw\installer-instance.json') -PathType Leaf) {
+  $repairButton = New-Object System.Windows.Forms.Button
+  $repairButton.Text = 'Sửa PATH cho OpenClaw đã cài'
+  $repairButton.Location = New-Object System.Drawing.Point(24, 400)
+  $repairButton.Size = New-Object System.Drawing.Size(290, 32)
+  $connect.Controls.Add($repairButton)
+  $repairButton.Add_Click({
+    $repairButton.Enabled = $false
+    $form.UseWaitCursor = $true
+    try {
+      & (Join-Path $PayloadRoot 'windows-installer\repair-openclaw-path.ps1')
+      [void][System.Windows.Forms.MessageBox]::Show($form, 'Đã sửa PATH và kiểm tra openclaw status. Mở lại PowerShell để dùng lệnh. Bot vẫn giữ nguyên.', 'Sửa PATH hoàn tất', 'OK', 'Information')
+      $script:resultCode = 0
+      $form.Close()
+    } catch {
+      Show-Error 'Chưa xác minh được PATH của trợ lý. Kiểm tra đúng tài khoản Windows, Node.js, Python và xung đột với lệnh openclaw có sẵn. Bot không bị cài lại.'
+    } finally {
+      $form.UseWaitCursor = $false
+      $repairButton.Enabled = $true
+    }
+  })
+}
 
 $secret = New-Page 'Bảo mật'
 Add-Label $secret 'Telegram Bot Token' 24 42
@@ -323,7 +345,7 @@ $timer.Add_Tick({
       try { $statusLabel.Text = [IO.File]::ReadAllText($script:safeLog, [Text.Encoding]::UTF8) } catch {}
     }
     $detail = $statusLabel.Text
-    if ($code -eq 0 -and -not $detail.StartsWith('SUCCESS:')) { $code = 1 }
+    if ($code -eq 0 -and -not $detail.StartsWith('Hoàn tất:')) { $code = 1 }
     Cleanup-Secret
     $script:installRunning = $false
     $script:resultCode = $code

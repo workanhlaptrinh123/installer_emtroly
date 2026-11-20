@@ -158,6 +158,7 @@ try {
   }
   Test-EditorInstallation
 
+  Write-EditorStatus 'Đang cấu hình khóa API cho Codex trong thư mục riêng của Em Trợ Lý…'
   foreach ($folder in @($userData, $extensions, $codexHome)) { [void][IO.Directory]::CreateDirectory($folder) }
   $model = [string]$Settings.model
   if ($model -notmatch '^[A-Za-z0-9._-]+$') { throw 'editor-invalid-model' }

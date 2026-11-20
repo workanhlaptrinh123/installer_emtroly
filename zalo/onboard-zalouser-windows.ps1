@@ -16,7 +16,7 @@ Set-ZaloInstallStage 'preflight'
 $env:OPENCLAW_STATE_DIR = $Root
 $env:OPENCLAW_CONFIG_PATH = Join-Path $Root 'openclaw.json'
 if (Test-Path -LiteralPath (Join-Path $Root 'installer-instance.json')) {
-  $instance = Get-Content -LiteralPath (Join-Path $Root 'installer-instance.json') -Raw | ConvertFrom-Json
+  $instance = Get-Content -LiteralPath (Join-Path $Root 'installer-instance.json') -Encoding UTF8 -Raw | ConvertFrom-Json
   . (Join-Path $Root 'windows-instance.ps1')
   Set-OpenClawInstanceEnvironment -Root $Root -InstanceProfile $instance.profile -CliEntry $instance.cli_entry
 }

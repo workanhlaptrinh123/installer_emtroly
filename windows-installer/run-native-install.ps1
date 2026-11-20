@@ -29,7 +29,7 @@ function Invoke-TelegramApi {
     MaximumRedirection = 0
   }
   if ($null -ne $Body) {
-    $parameters.ContentType = 'application/json'
+    $parameters.ContentType = 'application/json; charset=utf-8'
     $parameters.Body = ($Body | ConvertTo-Json -Depth 8 -Compress)
   }
   return Invoke-RestMethod @parameters
@@ -38,8 +38,8 @@ function Invoke-TelegramApi {
 function Ensure-TelegramCommandMenu {
   param([Parameter(Mandatory=$true)][string]$Token)
   $required = @(
-    @{ command = 'zaloqr'; description = 'Tao QR dang nhap Zalo' },
-    @{ command = 'zalostatus'; description = 'Kiem tra trang thai Zalo' }
+    @{ command = 'zaloqr'; description = 'Tạo mã QR đăng nhập Zalo' },
+    @{ command = 'zalostatus'; description = 'Kiểm tra trạng thái Zalo' }
   )
   try {
     $currentResponse = Invoke-TelegramApi -Token $Token -Method 'getMyCommands'
@@ -169,7 +169,7 @@ try {
   foreach ($required in @('openclaw.json', 'installer-instance.json', 'openclaw-instance.ps1', 'windows-cli.json', 'workspace\skills\openclaw-zalo-reply-mention\SKILL.md', 'workspace\skills\openclaw-telegram-zalo-qr-delivery\SKILL.md', 'workspace\skills\cap-full-quyen-telegram-openclaw\SKILL.md')) {
     if (-not (Test-Path -LiteralPath (Join-Path $root $required))) { throw 'incomplete-installation' }
   }
-  $instance = Get-Content -LiteralPath (Join-Path $root 'installer-instance.json') -Raw | ConvertFrom-Json
+  $instance = Get-Content -LiteralPath (Join-Path $root 'installer-instance.json') -Encoding UTF8 -Raw | ConvertFrom-Json
   $cliEntry = Join-Path $root ("runtime\$expectedVersion\node_modules\openclaw\openclaw.mjs")
   if (-not (Test-Path -LiteralPath $cliEntry)) { throw 'runtime-version-mismatch' }
   $env:OPENCLAW_STATE_DIR = $root
@@ -205,12 +205,12 @@ try {
   $stage = 'telegram-menu'
   Write-SafeStatus 'Đang đồng bộ menu Telegram: /zaloqr và /zalostatus...'
   Ensure-TelegramCommandMenu -Token ([string]$settings.telegram_token)
-  Write-SafeStatus 'SUCCESS: OpenClaw, lệnh Zalo, Antigravity IDE và Codex đã qua kiểm tra. Quét QR là bước sau khi cài.'
+  Write-SafeStatus 'Hoàn tất: OpenClaw, lệnh Zalo, Antigravity IDE và Codex đã qua kiểm tra. Quét QR là bước sau khi cài.'
   exit 0
 } catch {
   $code = [string]$_.Exception.Message
   $safeMessages = @{
-    'invalid-member' = 'Ten member khong hop le.'
+    'invalid-member' = 'Tên trợ lý không hợp lệ.'
     'cli-probe-missing' = 'Thiếu công cụ kiểm tra lệnh OpenClaw.'
     'cli-probe-conflict' = 'Đã có lệnh openclaw khác. Bộ cài giữ nguyên lệnh cũ; cần xử lý xung đột trước khi dùng lệnh mặc định.'
     'cli-probe-path' = 'PowerShell mới không nhận đúng lệnh openclaw trong PATH.'
@@ -241,59 +241,59 @@ try {
     'editor-activation-failed' = 'Antigravity chưa kích hoạt được Codex Extension. Cài đặt chưa hoàn tất.'
     'editor-process-timeout' = 'Hết thời gian cài hoặc kiểm tra Antigravity/Codex.'
     'editor-shortcut-failed' = 'Không tạo được shortcut Antigravity riêng trên Desktop.'
-    'unsupported-architecture' = 'Bo cai nay chi ho tro Windows x64, khong ho tro ARM64 hoac 32-bit.'
-    'missing-assistant-name' = 'Thieu ten tro ly.'
-    'invalid-owners' = 'Telegram Owner IDs khong hop le.'
-    'invalid-group' = 'Telegram Group ID phai la so am.'
-    'invalid-telegram-token' = 'Dinh dang Telegram bot token khong hop le.'
-    'missing-api-key' = 'Thieu provider API key.'
-    'invalid-model' = 'Model khong thuoc danh sach duoc ho tro.'
-    'invalid-base-url' = 'Provider URL phai la HTTPS va khong chua tai khoan, query hay fragment.'
-    'invalid-port' = 'Gateway port phai la 0 hoac tu 1024 den 65000.'
-    'full-access-consent-required' = 'Can xac nhan da hieu canh bao Full Exec.'
-    'invalid-qr-owner' = 'QR owner phai nam trong Owner IDs.'
-    'zalo-required' = 'Bo cai nay yeu cau cai plugin Zalo.'
-    'instance-exists' = 'Instance cung ten da ton tai; khong ghi de.'
-    'provider-unavailable' = 'Khong kiem tra duoc API. Hay kiem tra URL, API key va Internet.'
-    'provider-model-unavailable' = 'Provider khong cong bo model da chon tai /models.'
-    'telegram-unavailable' = 'Khong kiem tra duoc Telegram bot. Hay kiem tra token va Internet.'
-    'telegram-invalid-bot' = 'Telegram khong xac nhan day la bot hop le.'
-    'Node.js/npm dependency verification failed.' = 'Node.js hoac npm chua san sang. Bo cai da thu tai Node portable nhung khong xac minh duoc.'
-    'Node.js download failed.' = 'Khong tai duoc Node.js tu nodejs.org. Hay kiem tra Internet va quyen tai file.'
-    'Python download failed.' = 'Khong tai duoc Python tu python.org. Hay kiem tra Internet va quyen tai file.'
-    'FFmpeg download failed.' = 'Khong tai duoc FFmpeg. Hay kiem tra Internet va quyen tai file.'
-    'Python dependency verification failed.' = 'Python chua san sang sau khi bo cai thu tai va cai dat.'
-    'FFmpeg dependency verification failed.' = 'FFmpeg chua san sang sau khi bo cai thu cai dat.'
-    'OpenClaw CLI PATH helper is missing.' = 'Bo cai thieu cong cu dang ky lenh openclaw.'
-    'OpenClaw CLI PATH installation failed.' = 'Khong the dang ky lenh openclaw vao PATH cua tai khoan Windows.'
-    'OpenClaw CLI shim was not created.' = 'Khong tim thay lenh OpenClaw vua dang ky.'
-    'OpenClaw CLI shim verification failed.' = 'Lenh OpenClaw da tao nhung khong xac minh duoc phien ban.'
-    'FFmpeg checksum verification failed.' = 'Khong xac minh duoc goi FFmpeg da tai. Hay thu lai voi Internet on dinh.'
-    'Portable Node checksum verification failed.' = 'Khong xac minh duoc goi Node portable da tai. Hay thu lai voi Internet on dinh.'
-    'Python installer signature verification failed.' = 'Khong xac minh duoc chu ky bo cai Python da tai.'
-    'Private OpenClaw installation failed.' = 'Khong cai duoc goi OpenClaw qua npm. Hay kiem tra Internet va quyen ghi.'
-    'missing-payload' = 'Bo cai thieu file runtime.'
-    'installer-failed' = 'OpenClaw installer tra ve loi.'
-    'incomplete-installation' = 'InstalIer chua tao du file can thiet.'
-    'runtime-version-mismatch' = 'Runtime OpenClaw cai dat khong dung phien ban 2026.11.4.'
-    'approval-check-failed' = 'Khong xac minh duoc Full Exec approval cua agent main.'
-    'owner-permissions-check-failed' = 'Khong xac minh duoc quyen cua tat ca Telegram Owner IDs. Cai dat chua hoan tat.'
-    'gateway-health-failed' = 'Gateway da cai nhung chua tra ve health/RPC thanh cong.'
-    'zalo-qr-plugin-not-loaded' = 'Gateway chua tai plugin /zaloqr; cai dat Zalo chua hoan tat.'
-    'zalo-plugin-not-loaded' = 'Gateway chua tai plugin Zalo Personal; cai dat chua hoan tat.'
-    'zalo-qr-command-not-registered' = 'Plugin QR chua dang ky day du /zaloqr va /zalostatus; cai dat chua hoan tat.'
-    'telegram-command-menu-not-registered' = 'Telegram chua hien menu /zaloqr va /zalostatus. Hay kiem tra Internet/Telegram API va cai lai; instance dang do duoc giu nguyen.'
+    'unsupported-architecture' = 'Bộ cài yêu cầu Windows x64, không hỗ trợ ARM64 hoặc Windows 32 bit.'
+    'missing-assistant-name' = 'Chưa nhập tên trợ lý.'
+    'invalid-owners' = 'Danh sách Telegram Owner IDs không hợp lệ.'
+    'invalid-group' = 'ID nhóm Telegram phải là số âm.'
+    'invalid-telegram-token' = 'Token bot Telegram không đúng định dạng.'
+    'missing-api-key' = 'Chưa nhập khóa API của nhà cung cấp.'
+    'invalid-model' = 'Mô hình đã chọn không được hỗ trợ.'
+    'invalid-base-url' = 'URL nhà cung cấp phải dùng HTTPS, không chứa tài khoản, truy vấn hoặc phần neo.'
+    'invalid-port' = 'Cổng Gateway phải là 0 hoặc từ 1024 đến 65000.'
+    'full-access-consent-required' = 'Cần xác nhận đã hiểu cảnh báo Full Exec.'
+    'invalid-qr-owner' = 'QR owner phải thuộc danh sách Telegram Owner IDs.'
+    'zalo-required' = 'Bộ cài yêu cầu bật plugin Zalo.'
+    'instance-exists' = 'Thư mục OpenClaw đã tồn tại; dữ liệu cũ được giữ nguyên.'
+    'provider-unavailable' = 'Không kết nối được API. Hãy kiểm tra URL, khóa API và kết nối Internet.'
+    'provider-model-unavailable' = 'Nhà cung cấp không công bố mô hình đã chọn tại /models.'
+    'telegram-unavailable' = 'Không kết nối được bot Telegram. Hãy kiểm tra token và kết nối Internet.'
+    'telegram-invalid-bot' = 'Telegram không xác nhận đây là bot hợp lệ.'
+    'Node.js/npm dependency verification failed.' = 'Không xác minh được Node.js và npm sau khi chuẩn bị môi trường.'
+    'Node.js download failed.' = 'Không tải được Node.js từ nodejs.org. Hãy kiểm tra kết nối Internet và quyền tải tệp.'
+    'Python download failed.' = 'Không tải được Python từ python.org. Hãy kiểm tra kết nối Internet và quyền tải tệp.'
+    'FFmpeg download failed.' = 'Không tải được FFmpeg. Hãy kiểm tra kết nối Internet và quyền tải tệp.'
+    'Python dependency verification failed.' = 'Python chưa sẵn sàng sau khi cài đặt.'
+    'FFmpeg dependency verification failed.' = 'FFmpeg chưa sẵn sàng sau khi cài đặt.'
+    'OpenClaw CLI PATH helper is missing.' = 'Bộ cài thiếu công cụ đăng ký lệnh openclaw.'
+    'OpenClaw CLI PATH installation failed.' = 'Không đăng ký được lệnh openclaw vào PATH của tài khoản Windows.'
+    'OpenClaw CLI shim was not created.' = 'Không tìm thấy lệnh openclaw vừa đăng ký.'
+    'OpenClaw CLI shim verification failed.' = 'Đã tạo lệnh openclaw nhưng không xác minh được phiên bản.'
+    'FFmpeg checksum verification failed.' = 'Mã kiểm tra của gói FFmpeg không khớp. Bộ cài đã dừng.'
+    'Portable Node checksum verification failed.' = 'Mã kiểm tra của gói Node.js không khớp. Bộ cài đã dừng.'
+    'Python installer signature verification failed.' = 'Không xác minh được chữ ký số của bộ cài Python.'
+    'Private OpenClaw installation failed.' = 'Không cài được OpenClaw qua npm. Hãy kiểm tra kết nối Internet và quyền ghi tệp.'
+    'missing-payload' = 'Bộ cài thiếu thành phần OpenClaw.'
+    'installer-failed' = 'Bước cài OpenClaw trả về lỗi.'
+    'incomplete-installation' = 'Bộ cài chưa tạo đủ các tệp cần thiết.'
+    'runtime-version-mismatch' = 'Phiên bản OpenClaw đã cài không phải 2026.11.4.'
+    'approval-check-failed' = 'Không xác minh được quyền Full Exec của trợ lý chính.'
+    'owner-permissions-check-failed' = 'Không xác minh được quyền của tất cả Telegram Owner IDs đã nhập.'
+    'gateway-health-failed' = 'Gateway đã cài nhưng chưa phản hồi khi kiểm tra kết nối.'
+    'zalo-qr-plugin-not-loaded' = 'Gateway chưa nạp plugin cung cấp lệnh /zaloqr.'
+    'zalo-plugin-not-loaded' = 'Gateway chưa nạp plugin Zalo Personal.'
+    'zalo-qr-command-not-registered' = 'Plugin Zalo chưa đăng ký đủ lệnh /zaloqr và /zalostatus.'
+    'telegram-command-menu-not-registered' = 'Chưa xác nhận được /zaloqr và /zalostatus trong menu Telegram. Hãy kiểm tra kết nối Telegram; dữ liệu đã tạo được giữ nguyên.'
   }
-  $message = if ($safeMessages.ContainsKey($code)) { $safeMessages[$code] } else { "That bai tai buoc $stage; lien he ho tro, khong ghi de instance dang do." }
+  $message = if ($safeMessages.ContainsKey($code)) { $safeMessages[$code] } else { "Chưa hoàn tất bước $stage. Dữ liệu đã tạo được giữ nguyên." }
   if ($safeMessages.ContainsKey($code) -and $code -cmatch '^[a-z0-9-]+$') { $message += " Mã chẩn đoán: $code." }
   if ($stage -eq 'install' -and (Test-Path -LiteralPath $zaloStageFile)) {
     $zaloStep = [IO.File]::ReadAllText($zaloStageFile, [Text.Encoding]::ASCII).Trim()
     if ($zaloStep -in @('preflight','version','plugin-inspect','plugin-install','plugin-enable','plugin-doctor','plugin-source','gateway-stop','zalo-config','qr-install','mention-patch','gateway-start','verify')) {
-      $message = "Cai dat Zalo chua hoan tat tai buoc $zaloStep. Khong ghi de instance; gui ma buoc nay cho ho tro."
+      $message = "Chưa hoàn tất cài đặt Zalo (bước: $zaloStep). Dữ liệu đã tạo được giữ nguyên."
       if (Test-Path -LiteralPath $zaloDetailFile) {
         $zaloDetail = [IO.File]::ReadAllText($zaloDetailFile, [Text.Encoding]::ASCII).Trim()
         if ($zaloDetail -in @('cli-error','permission-denied','gateway-unavailable','plugin-busy','approval-required','plugin-not-found','plugin-version-mismatch','plugin-not-loaded','invalid-response')) {
-          $message += " Ma chan doan: $zaloDetail."
+          $message += " Mã chẩn đoán: $zaloDetail."
         }
       }
     }

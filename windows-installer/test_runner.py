@@ -195,13 +195,13 @@ class RunnerTests(unittest.TestCase):
         code, text, created = self.execute()
         self.assertEqual(code, 0, text)
         self.assertTrue(created)
-        self.assertIn("SUCCESS", text)
+        self.assertIn("Hoàn tất", text)
 
     def test_existing_openclaw_directory_is_never_overwritten(self):
         code, text, created = self.execute("existing-root")
         self.assertNotEqual(code, 0)
         self.assertTrue(created)
-        self.assertNotIn("SUCCESS", text)
+        self.assertNotIn("Hoàn tất", text)
 
     def test_command_probe_failures_never_report_success(self):
         for mode in ("cli-conflict", "cli-path", "cli-version", "cli-status"):
@@ -209,7 +209,7 @@ class RunnerTests(unittest.TestCase):
                 code, text, created = self.execute(mode)
                 self.assertNotEqual(code, 0)
                 self.assertTrue(created)
-                self.assertNotIn("SUCCESS", text)
+                self.assertNotIn("Hoàn tất", text)
 
     def test_editor_failure_never_reports_success(self):
         for mode in ("editor-failure", "editor-activation-failure"):
@@ -217,7 +217,7 @@ class RunnerTests(unittest.TestCase):
                 code, text, created = self.execute(mode)
                 self.assertNotEqual(code, 0)
                 self.assertFalse(created)
-                self.assertNotIn("SUCCESS", text)
+                self.assertNotIn("Hoàn tất", text)
                 self.assertIn("Codex", text)
 
     def test_missing_telegram_menu_is_repaired_and_verified(self):
@@ -226,14 +226,14 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue(created)
         code, text, created = self.execute("menu-write-error")
         self.assertNotEqual(code, 0)
-        self.assertNotIn("SUCCESS", text)
+        self.assertNotIn("Hoàn tất", text)
         self.assertIn("telegram-command-menu-not-registered", text)
 
     def test_editor_conflict_is_detected_before_installation(self):
         code, text, created = self.execute("editor-existing")
         self.assertNotEqual(code, 0)
         self.assertFalse(created)
-        self.assertNotIn("SUCCESS", text)
+        self.assertNotIn("Hoàn tất", text)
 
     def test_reports_only_safe_zalo_stage_on_failure(self):
         code, text, created = self.execute("zalo-stage-error")
@@ -266,7 +266,7 @@ class RunnerTests(unittest.TestCase):
                 code, text, created = self.execute(mode)
                 self.assertNotEqual(code, 0)
                 self.assertTrue(created)
-                self.assertNotIn("SUCCESS", text)
+                self.assertNotIn("Hoàn tất", text)
 
     def test_native_dry_run_preserves_provider_model_case(self):
         with tempfile.TemporaryDirectory(prefix="member-native-test-") as temporary:
@@ -285,7 +285,7 @@ class RunnerTests(unittest.TestCase):
         code, text, created = self.execute("missing-model")
         self.assertNotEqual(code, 0)
         self.assertFalse(created)
-        self.assertIn("khong cong bo model", text.lower())
+        self.assertIn("không công bố mô hình", text.lower())
 
     def test_invalid_owner_rejected_before_network_and_install(self):
         code, text, created = self.execute(overrides={"owner_ids": "not-a-telegram-id"})
@@ -330,7 +330,7 @@ class RunnerTests(unittest.TestCase):
                 code, text, created = self.execute(mode)
                 self.assertNotEqual(code, 0)
                 self.assertTrue(created)
-                self.assertNotIn("SUCCESS", text)
+                self.assertNotIn("Hoàn tất", text)
                 self.assertIn("owner ids", text.lower())
 
     def test_incomplete_full_exec_never_reports_success(self):
@@ -339,7 +339,7 @@ class RunnerTests(unittest.TestCase):
                 code, text, created = self.execute(mode)
                 self.assertNotEqual(code, 0)
                 self.assertTrue(created)
-                self.assertNotIn("SUCCESS", text)
+                self.assertNotIn("Hoàn tất", text)
                 self.assertIn("full exec", text.lower())
 
     def test_verifier_accepts_real_owner_and_permissions_helpers(self):

@@ -1,7 +1,7 @@
 function Install-UserGateway {
   param([string]$Root, [string]$CliEntry, [int]$Port)
   $manifestPath = Join-Path $Root 'installer-instance.json'
-  $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+  $manifest = Get-Content -LiteralPath $manifestPath -Encoding UTF8 -Raw | ConvertFrom-Json
   $manifest | Add-Member -NotePropertyName mode -NotePropertyValue 'user' -Force
   $manifest | Add-Member -NotePropertyName node -NotePropertyValue (Get-Command node).Source -Force
   $manifest | Add-Member -NotePropertyName home -NotePropertyValue $env:USERPROFILE -Force
@@ -11,7 +11,7 @@ function Install-UserGateway {
   Copy-Item (Join-Path $PSScriptRoot 'user-gateway.cjs') (Join-Path $Root 'user-gateway.cjs') -Force
   $launcher = @'
 $ErrorActionPreference = 'Stop'
-$instance = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'installer-instance.json') -Raw | ConvertFrom-Json
+$instance = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'installer-instance.json') -Encoding UTF8 -Raw | ConvertFrom-Json
 . (Join-Path $PSScriptRoot 'windows-instance.ps1')
 . (Join-Path $PSScriptRoot 'user-gateway.ps1')
 Set-OpenClawInstanceEnvironment -Root $instance.root -InstanceProfile $instance.profile -CliEntry $instance.cli_entry

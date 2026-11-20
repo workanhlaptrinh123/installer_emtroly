@@ -127,6 +127,10 @@ preserves it and reports a conflict instead of claiming full success.
 The selected command and path are also recorded in the instance's
 `windows-cli.json`. Existing terminals must be reopened to pick up the User
 PATH change; an existing installation is not automatically modified.
+If an older installation already answers on Telegram but the command is
+missing, open the revised EXE as the same Windows user and select **Sửa PATH
+cho OpenClaw đã cài** on the first page. This repairs only the command for the
+existing instance and checks it in a fresh PowerShell without restarting the bot.
 
 The Windows development installer additionally installs Antigravity IDE
 2.7.0 and Codex extension 26.51111.21308 using pinned downloads and SHA-256.

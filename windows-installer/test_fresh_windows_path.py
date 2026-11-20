@@ -90,38 +90,30 @@ class FreshWindowsPathTests(unittest.TestCase):
         self.assertEqual(self.run_probe([self.bin]), 14)
 
     def test_native_registration_and_status_in_windows_powershell_51(self):
-        source = PROBE.parents[1] / 'install-native-windows.ps1'
-        runtime = self.root / 'runtime'
-        runtime.mkdir()
+        source = PROBE.parent / 'repair-openclaw-path.ps1'
+        runtime = self.root / 'runtime/2026.11.4/node_modules/openclaw'
+        runtime.mkdir(parents=True)
         entry = runtime / 'openclaw.mjs'
         entry.write_text("if (process.argv[2] === '--version') console.log('2026.11.4'); "
                          "else if (process.argv[2] !== 'status') process.exit(2);", encoding='ascii')
         (self.root / 'openclaw.json').write_text('{"gateway":{"port":18789}}', encoding='ascii')
         local_data = self.root.parent / 'local'
         local_data.mkdir()
+        import shutil
+        manifest = {'mode': 'user', 'profile': 'member-emtroly', 'root': str(self.root),
+                    'cli_entry': str(entry), 'port': 18789, 'node': shutil.which('node.exe')}
+        (self.root / 'installer-instance.json').write_text(json.dumps(manifest), encoding='utf-8')
+        (self.root / 'windows-cli.json').unlink()
         driver = self.root.parent / 'register.ps1'
         driver.write_text(r'''
-param($Source, $Root, $Entry, $LocalData)
+param($Source, $AccountDirectory, $LocalData)
 $ErrorActionPreference = 'Stop'
 $env:LOCALAPPDATA = $LocalData
-$runtime = Split-Path $Entry
-$ast = [Management.Automation.Language.Parser]::ParseFile($Source, [ref]$null, [ref]$null)
-$definition = $ast.Find({ param($item) $item -is [Management.Automation.Language.FunctionDefinitionAst] -and $item.Name -eq 'Install-UserOpenClawCli' }, $true)
-$functionText = $definition.Extent.Text.Replace('$PSScriptRoot', '$sourceDir')
-$sourceDir = Split-Path $Source
-. ([ScriptBlock]::Create($functionText))
-function Write-NativeInstallStatus([string]$Text) {}
-try {
-  Install-UserOpenClawCli -Root $Root -CliEntry $Entry -Port 18789 -Profile 'fixture' -ExpectedVersion '2026.11.4'
-} catch {
-  $helperDir = Join-Path $sourceDir 'native\skills\tao-tro-ly-openclaw-windows-macos-linux\scripts'
-  & python.exe -c 'import sys; sys.path.insert(0,sys.argv[1]); from install_windows_cli import install; install(*sys.argv[2:6],18789)' $helperDir $Root ([Environment]::GetFolderPath('UserProfile')) (Get-Command node.exe).Source $Entry
-  throw
-}
+& $Source -AccountDirectory $AccountDirectory
 ''', encoding='ascii')
         shell = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
         result = subprocess.run([str(shell), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-                                 '-File', str(driver), str(source), str(self.root), str(entry), str(local_data)],
+                                 '-File', str(driver), str(source), str(self.root.parent), str(local_data)],
                                 capture_output=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         info = json.loads((self.root / 'windows-cli.json').read_text(encoding='utf-8'))

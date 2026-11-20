@@ -96,7 +96,7 @@ if ($CredentialData) {
 }
 if ([string]::IsNullOrWhiteSpace($tg) -or [string]::IsNullOrWhiteSpace($key)) { throw 'Telegram token and API key must not be empty.' }
 New-Item -ItemType Directory -Force -Path $root,$workspace,(Join-Path $workspace 'skills') | Out-Null
-$status = 'Dang kiem tra va cai Node.js, Python, FFmpeg neu may con thieu...'
+$status = 'Đang kiểm tra và cài Node.js, Python, FFmpeg nếu máy còn thiếu…'
 Write-NativeInstallStatus $status
 $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 & icacls $root /inheritance:r /grant:r "${currentUser}:(OI)(CI)(F)" '*S-1-5-18:(OI)(CI)(F)' *> $null
@@ -122,7 +122,7 @@ if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { throw 'npm is un
 if (-not (Get-Command python.exe -ErrorAction SilentlyContinue)) { throw 'Python is unavailable. Reopen PowerShell as Administrator and retry.' }
 $runtime = Join-Path $root ('runtime\' + $OpenClawVersion)
 New-Item -ItemType Directory -Force -Path $runtime | Out-Null
-$status = 'Dang tai va cai OpenClaw ' + $OpenClawVersion + '. Buoc nay co the mat vai phut...'
+$status = 'Đang tải và cài OpenClaw ' + $OpenClawVersion + '. Bước này có thể mất vài phút…'
 Write-NativeInstallStatus $status
 $runtimePackage = @{ name='member-openclaw-runtime'; version='1.0.0'; private=$true; allowScripts=@{ '@google/genai'=$true; esbuild=$true; koffi=$true; openclaw=$true; protobufjs=$true; 'tree-sitter-bash'=$true } }
 [IO.File]::WriteAllText((Join-Path $runtime 'package.json'), ($runtimePackage | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
@@ -146,34 +146,7 @@ if ($UserInstall) {
   . (Join-Path $PSScriptRoot 'native\user-gateway.ps1')
   function Invoke-OpenClaw { Invoke-InstanceCli -Root $root -CliEntry $cliEntry @args; $global:LASTEXITCODE = $LASTEXITCODE }
 }
-function Install-UserOpenClawCli {
-  param([string]$Root, [string]$CliEntry, [int]$Port, [string]$Profile, [string]$ExpectedVersion)
-  $helper = Join-Path $PSScriptRoot 'native\skills\tao-tro-ly-openclaw-windows-macos-linux\scripts\install_windows_cli.py'
-  if (-not (Test-Path -LiteralPath $helper)) { throw 'OpenClaw CLI PATH helper is missing.' }
-  $python = (Get-Command python.exe -ErrorAction Stop).Source
-  $node = (Get-Command node.exe -ErrorAction Stop).Source
-  $userProfilePath = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
-  $previousPath = $env:Path
-  $runtimeBin = Join-Path $runtime 'node_modules\.bin'
-  try {
-    $env:Path = (@($previousPath -split ';' | Where-Object { $_.Trim('"').TrimEnd('\') -ine $runtimeBin.TrimEnd('\') }) -join ';')
-    $resultText = & $python $helper --root $Root --home $userProfilePath --node $node --cli-entry $CliEntry --port $Port --profile $Profile | Out-String
-    if ($LASTEXITCODE -ne 0) { throw 'OpenClaw CLI PATH installation failed.' }
-  } finally { $env:Path = $previousPath }
-  try { $result = $resultText | ConvertFrom-Json } catch { throw 'OpenClaw CLI PATH helper returned invalid output.' }
-  $cliPath = [string]$result.cli_path
-  $userBin = [string]$result.user_bin
-  if ([string]::IsNullOrWhiteSpace($cliPath) -or -not (Test-Path -LiteralPath $cliPath) -or
-      [string]::IsNullOrWhiteSpace($userBin) -or -not (Test-Path -LiteralPath $userBin)) {
-    throw 'OpenClaw CLI shim was not created.'
-  }
-  $commandName = if ([bool]$result.default_cli) { 'openclaw' } else { [string]$result.cli_alias }
-  $cliVersion = (& $cliPath --version | Out-String).Trim()
-  if ($LASTEXITCODE -ne 0 -or $cliVersion -notmatch [regex]::Escape($ExpectedVersion)) { throw 'OpenClaw CLI shim verification failed.' }
-  $cliInfo = @{ command = $commandName; path = $cliPath; default = [bool]$result.default_cli }
-  [IO.File]::WriteAllText((Join-Path $Root 'windows-cli.json'), ($cliInfo | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
-  Write-NativeInstallStatus ("Da dang ky lenh {0}. Mo PowerShell moi roi chay: {0} status" -f $commandName)
-}
+. (Join-Path $PSScriptRoot 'native\windows-cli.ps1')
 $tokenPath = Join-Path $root 'telegram.token'
 [IO.File]::WriteAllText($tokenPath, "$tg`n", [Text.UTF8Encoding]::new($false))
 $secretPath = Join-Path $root 'member-provider.secret'
@@ -218,7 +191,7 @@ $env:OPENCLAW_WORKSPACE_DIR = $workspace
 if ($LASTEXITCODE -ne 0) { throw 'Unable to protect config.' }
 Invoke-OpenClaw config validate --json
 if ($LASTEXITCODE -ne 0) { throw 'Generated OpenClaw config is invalid. Check the preceding validator output.' }
-$status = 'Dang cai cac module, skill Zalo va plugin QR...'
+$status = 'Đang cài các kỹ năng Zalo và tiện ích QR…'
 Write-NativeInstallStatus $status
 $managerInstaller = Join-Path $PSScriptRoot 'native\install-module-manager-windows.ps1'
 & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $managerInstaller -OpenClawRoot $root
@@ -251,7 +224,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Owner configuration failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Owner training configuration failed.' }
 & python (Join-Path $PSScriptRoot 'native\finalize_permissions.py') --config $configPath --owners ($owners -join ',')
 if ($LASTEXITCODE -ne 0) { throw 'Permission configuration failed.' }
-$status = 'Dang cau hinh Full Exec va owner Telegram...'
+$status = 'Đang cấu hình quyền Full Exec cho chủ bot Telegram…'
 Write-NativeInstallStatus $status
 $approvals = @{
   version = 1
@@ -273,9 +246,11 @@ Invoke-OpenClaw skills check
 if ($LASTEXITCODE -ne 0) { throw 'OpenClaw skills check failed.' }
 Save-OpenClawInstanceLauncher -Root $root -InstanceProfile $env:OPENCLAW_PROFILE -CliEntry $cliEntry -Port $GatewayPort
 if ($UserInstall) {
+  Write-NativeInstallStatus 'Đang đăng ký lệnh openclaw vào PATH của tài khoản Windows…'
+  Install-UserOpenClawCli -Root $root -CliEntry $cliEntry -Port $GatewayPort -Profile $env:OPENCLAW_PROFILE -ExpectedVersion $OpenClawVersion
   Install-UserGateway -Root $root -CliEntry $cliEntry -Port $GatewayPort
 }
-$status = 'Dang khoi dong Gateway an va kiem tra ket noi...'
+$status = 'Đang khởi động Gateway và kiểm tra kết nối…'
 Write-NativeInstallStatus $status
 Invoke-OpenClaw gateway install --force --port $GatewayPort
 if ($LASTEXITCODE -ne 0) { throw 'Isolated gateway service installation failed.' }
@@ -284,16 +259,15 @@ if ($LASTEXITCODE -ne 0) { throw 'Gateway restart failed.' }
 Invoke-OpenClaw --version
 Invoke-OpenClaw gateway status --require-rpc
 if ($LASTEXITCODE -ne 0) { throw 'Gateway status check failed.' }
-if ($UserInstall) { Install-UserOpenClawCli -Root $root -CliEntry $cliEntry -Port $GatewayPort -Profile $env:OPENCLAW_PROFILE -ExpectedVersion $OpenClawVersion }
 if ($Modules -contains 'zalo-personal') {
-  Write-NativeInstallStatus 'Dang kich hoat Zalo Personal, /zaloqr va /zalostatus...'
+  Write-NativeInstallStatus 'Đang kích hoạt Zalo Personal, /zaloqr và /zalostatus…'
   $zaloOnboard = Join-Path $PSScriptRoot 'zalo\onboard-zalouser-windows.ps1'
   $zaloConfigure = Join-Path $PSScriptRoot 'zalo\configure-zalo.py'
   $zaloQr = Join-Path $workspace 'skills\openclaw-zalo-qr-login\scripts\send_zalo_qr_to_telegram_owner.mjs'
   & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $zaloOnboard -Root $root -TelegramAccount $Name -OwnerId $QrOwnerId -ConfigureScript $zaloConfigure -QrScript $zaloQr
   if ($LASTEXITCODE -ne 0) { throw 'Windows Zalo onboarding failed. Telegram remains installed; inspect the error before retrying.' }
 }
-Write-NativeInstallStatus 'Dang hoan tat cac buoc kiem tra local...'
+Write-NativeInstallStatus 'Đang hoàn tất kiểm tra trên máy…'
 Write-Host "NATIVE INSTALL COMPLETE ($InstallMode): $root"
 Write-Host "Dashboard: http://127.0.0.1:$GatewayPort/"
 Write-Host "Manage this assistant: & '$root\openclaw-instance.ps1' gateway status"

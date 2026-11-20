@@ -20,7 +20,7 @@ class EditorContractTests(unittest.TestCase):
         self.assertIn('activation-probe', build)
         self.assertIn('-CheckOnly', runner)
         self.assertLess(runner.index('& $editorInstaller -Settings $settings -StatusFile $LogFile *> $null'),
-                        runner.index("Write-SafeStatus 'SUCCESS:"))
+                        runner.index("Write-SafeStatus 'Hoàn tất:"))
         self.assertIn('Em Trợ Lý - Antigravity', wizard)
 
     def test_isolation_and_auth_are_explicit(self):
@@ -198,7 +198,9 @@ $global:fixtureRegistry = @()
 function global:Get-ItemProperty { param($Path, $ErrorAction) return $global:fixtureRegistry }
 function global:Start-Process {
   param($FilePath, $ArgumentList, $WindowStyle, [switch]$PassThru)
+  if ($env:CODEX_HOME -ne (Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex')) { throw 'codex-home-not-isolated' }
   if ($FilePath -match 'cmd\.exe$') {
+    if (-not $ArgumentList.Contains((Join-Path $env:LOCALAPPDATA 'EmTroLy\Antigravity\Extensions'))) { throw 'wrong-extension-directory' }
     $extension = Join-Path $env:LOCALAPPDATA 'EmTroLy\Antigravity\Extensions\openai.chatgpt-fixture'
     [void](New-Item -ItemType Directory -Force -Path (Join-Path $extension 'bin\windows-x86_64'))
     [IO.File]::WriteAllText((Join-Path $extension 'package.json'), '{"publisher":"openai","name":"chatgpt","version":"26.51111.21308"}')

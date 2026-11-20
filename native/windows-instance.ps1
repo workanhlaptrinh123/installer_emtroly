@@ -110,7 +110,7 @@ function Save-OpenClawInstanceLauncher {
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows-instance.ps1') -Destination (Join-Path $Root 'windows-instance.ps1') -Force
   $launcher = @'
 $ErrorActionPreference = 'Stop'
-$instance = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'installer-instance.json') -Raw | ConvertFrom-Json
+$instance = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'installer-instance.json') -Encoding UTF8 -Raw | ConvertFrom-Json
 . (Join-Path $PSScriptRoot 'windows-instance.ps1')
 Set-OpenClawInstanceEnvironment -Root $instance.root -InstanceProfile $instance.profile -CliEntry $instance.cli_entry
 & node $instance.cli_entry @args
