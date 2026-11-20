@@ -54,10 +54,10 @@ FAKE_INSTALLER = r"""
 param($Name, $OwnerIds, $GroupId, $AssistantName, $BaseUrl, $Model, $Profile,
       $Modules, $QrOwnerId, $OpenClawVersion, $InstallMode, $InstallRoot, $GatewayPort,
       $Audience, $Addressing, $Style, [switch]$UserInstall, $CredentialData)
-if (-not $UserInstall -or $InstallMode -ne 'new' -or $Model -cne 'GPT-6.1-SOL') { throw 'invalid-installer-arguments' }
+if (-not $UserInstall -or $InstallMode -ne 'new' -or $Model -cne 'GPT-6.1-SOL' -or $Profile -cne 'installer-basic') { throw 'invalid-installer-arguments' }
 if ($OwnerIds -ne $CredentialData.owner_ids) { throw 'invalid-owner-arguments' }
 if ([bool]$CredentialData.configure_zalo) {
-    if ($Modules.Count -ne 1 -or $Modules[0] -ne 'zalo-personal' -or $QrOwnerId -ne $CredentialData.qr_owner_id) { throw 'invalid-zalo-arguments' }
+    if ($Modules.Count -ne 1 -or $Modules[0] -ne 'zalo-qr-basic' -or $QrOwnerId -ne $CredentialData.qr_owner_id) { throw 'invalid-zalo-arguments' }
 } elseif ($Modules.Count -ne 0) { throw 'unexpected-zalo-module' }
 if ($CredentialData.telegram_token -ne $env:TEST_TOKEN -or $CredentialData.ai_api_key -ne $env:TEST_API_KEY) { throw 'invalid-credential-handoff' }
 if ($env:TEST_MODE -eq 'zalo-stage-error') {
@@ -79,7 +79,11 @@ if ($InstallRoot -ne $root) { throw 'invalid-install-root' }
 foreach ($item in @('openclaw.json', 'installer-instance.json', 'openclaw-instance.ps1', 'windows-cli.json',
     'workspace\skills\openclaw-telegram-zalo-qr-delivery\SKILL.md',
     'workspace\skills\telegram-zalo-owner-login\SKILL.md',
+    'workspace\skills\core-openclaw-zalo\SKILL.md',
+    'workspace\skills\openclaw-zalo-qr-login\SKILL.md',
+    'workspace\skills\core-openclaw-telegram\SKILL.md',
     'workspace\skills\cap-full-quyen-telegram-openclaw\SKILL.md',
+    'workspace\skills\reliable-media-delivery\SKILL.md',
     'workspace\skills\imagegen\SKILL.md',
     'workspace\skills\core-openclaw-media\SKILL.md',
     'workspace\skills\openclaw-docx-reader\SKILL.md',

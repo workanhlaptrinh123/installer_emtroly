@@ -50,7 +50,8 @@ $owners = @($OwnerIds -split ',' | ForEach-Object { $_.Trim() } | Where-Object {
 if ($owners.Count -eq 0) { throw 'At least one positive Telegram owner ID is required.' }
 $GroupId = $GroupId.Trim()
 if ($GroupId -notmatch '^-[1-9][0-9]*$') { throw 'GroupId must be an explicit negative Telegram group ID for the group allowlist.' }
-if ($Modules -contains 'zalo-personal' -and ($QrOwnerId -notin $owners)) { throw 'QrOwnerId must be one of the Telegram owner IDs.' }
+$zaloSelected = ($Profile -eq 'installer-basic') -or ($Modules -contains 'zalo-personal') -or ($Modules -contains 'zalo-qr-basic')
+if ($zaloSelected -and ($QrOwnerId -notin $owners)) { throw 'QrOwnerId must be one of the Telegram owner IDs.' }
 if ($DryRun) { Write-Host "DRY-RUN: native OpenClaw $OpenClawVersion for $Name (model: $Model); no files or services changed."; exit 0 }
 $root = Join-Path $env:USERPROFILE ('.openclaw-member-' + $Name)
 if ($InstallRoot) {
@@ -259,7 +260,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Gateway restart failed.' }
 Invoke-OpenClaw --version
 Invoke-OpenClaw gateway status --require-rpc
 if ($LASTEXITCODE -ne 0) { throw 'Gateway status check failed.' }
-if ($Modules -contains 'zalo-personal') {
+if ($zaloSelected) {
   Write-NativeInstallStatus 'Đang kích hoạt Zalo Personal, /zaloqr và /zalostatus…'
   $zaloOnboard = Join-Path $PSScriptRoot 'zalo\onboard-zalouser-windows.ps1'
   $zaloConfigure = Join-Path $PSScriptRoot 'zalo\configure-zalo.py'

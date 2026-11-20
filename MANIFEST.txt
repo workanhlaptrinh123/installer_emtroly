@@ -1,10 +1,12 @@
 release=member-vps-golden-20261116
 product=installer_emtroly
-installer_version=2026.11.20.3
+installer_version=2026.11.20.4
 image=member-vps-golden:20261116
 base_image=vps-user-env:latest
 openclaw=2026.11.4
 core_profile=basic-assistant-full
+windows_profile=installer-basic
+windows_modules=basic-assistant,telegram-basic-lite,image-generation-basic,document-office-basic,zalo-qr-basic
 modules=image-generation,web-research-basic,audio-media-basic,telegram-basic,member-health-recovery,wordpress-chatbot,scheduler-watchdog,document-office-ocr,google-drive-sync,zalo-personal,video-factory-member,workspace-memory,basic-assistant,facebook-fanpage-auto-reply
 secrets=customer-injected-at-install-time
 customer_state=excluded

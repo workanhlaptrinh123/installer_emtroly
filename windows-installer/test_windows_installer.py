@@ -25,6 +25,7 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertIn("member = 'emtroly'", wizard)
         self.assertIn("Join-Path $env:USERPROFILE 'openclaw'", runner)
         self.assertIn("InstallRoot = $root", runner)
+        self.assertIn("Profile = 'installer-basic'", runner)
         self.assertIn("Invalid install root; no files were changed.", installer)
         self.assertIn("$fullAccessCheck.Checked = $false", wizard)
 
@@ -104,6 +105,22 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertIn("openclaw-zalo-reply-mention", catalog["zalo-personal"])
         self.assertIn("openclaw-telegram-zalo-qr-delivery", catalog["zalo-personal"])
         self.assertIn("cap-full-quyen-telegram-openclaw", catalog["telegram-basic"])
+
+    def test_windows_fast_profile_keeps_only_core_media_office_and_zalo_qr(self):
+        profile = json.loads((ROOT / "profiles/installer-basic.json").read_text(encoding="utf-8"))
+        selected = set(profile["modules"])
+        self.assertEqual(selected, {
+            "basic-assistant",
+            "telegram-basic-lite",
+            "image-generation-basic",
+            "document-office-basic",
+            "zalo-qr-basic",
+        })
+        self.assertNotIn("zalo-personal", selected)
+        self.assertNotIn("member-health-recovery", selected)
+        self.assertIn("telegram-zalo-owner-login", json.loads((ROOT / "native/module-skills.json").read_text())["zalo-qr-basic"])
+        self.assertIn("imagegen", json.loads((ROOT / "native/module-skills.json").read_text())["image-generation-basic"])
+        self.assertIn("openclaw-docx-reader", json.loads((ROOT / "native/module-skills.json").read_text())["document-office-basic"])
 
     def test_zalo_onboarding_installs_verified_native_integrations(self):
         onboarding = (ROOT / "zalo/onboard-zalouser-windows.ps1").read_text(encoding="utf-8")

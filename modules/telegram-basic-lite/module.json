@@ -1,0 +1,11 @@
+{
+  "id": "telegram-basic-lite",
+  "version": "1.0.0",
+  "description": "Telegram core, Full Exec, media allowlist and file delivery",
+  "tier": "core",
+  "requires": ["basic-assistant"],
+  "conflicts": [],
+  "platforms": ["docker", "linux", "macos", "windows"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin"
+}

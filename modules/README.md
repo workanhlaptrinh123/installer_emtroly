@@ -8,6 +8,12 @@ installed from the image without downloading dependencies during member
 provisioning. Optional modules are selected per member through the member
 settings file or a profile.
 
+The standalone Windows EXE uses `profiles/installer-basic.json`: it installs
+only the OpenClaw core, Telegram Full Exec/media delivery, Zalo QR, image
+generation and basic Office document skills. Antigravity and the private Codex
+Extension remain a separate installer step; advanced OpenClaw modules can be
+added later through the local module manager.
+
 Zalo Personal (`zalo-personal`) is selectable in both new-install and member
 module-update forms. Selecting it on a new VPS install also enables Zalo
 onboarding. For an existing VPS, select the member and this module; the updater

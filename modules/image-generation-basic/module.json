@@ -1,0 +1,11 @@
+{
+  "id": "image-generation-basic",
+  "version": "1.0.0",
+  "description": "Native image generation and safe media delivery",
+  "tier": "core",
+  "requires": ["basic-assistant", "telegram-basic-lite"],
+  "conflicts": [],
+  "platforms": ["docker", "linux", "macos", "windows"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin"
+}

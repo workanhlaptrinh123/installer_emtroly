@@ -25,12 +25,29 @@
     "openclaw-telegram-task-delivery",
     "reliable-media-delivery"
   ],
+  "telegram-basic-lite": [
+    "openclaw-member-media-allowlist",
+    "core-openclaw-telegram",
+    "cap-full-quyen-telegram-openclaw",
+    "core-openclaw-telegram-permissions",
+    "openclaw-telegram-task-delivery",
+    "reliable-media-delivery"
+  ],
   "document-office-ocr": [
     "openclaw-docx-reader",
     "openclaw-large-pdf-recovery",
     "openclaw-long-document-pipeline",
     "core-openclaw-media",
     "openclaw-python-docx-telegram"
+  ],
+  "document-office-basic": [
+    "core-openclaw-media",
+    "openclaw-docx-reader",
+    "openclaw-python-docx-telegram"
+  ],
+  "image-generation-basic": [
+    "imagegen",
+    "reliable-media-delivery"
   ],
   "audio-media-basic": [
     "core-audio-voice",
@@ -82,6 +99,12 @@
     "zalo-buffer-file-send",
     "zalo-reliable-task-delivery",
     "openclaw-zalo-text-delivery-guard"
+  ],
+  "zalo-qr-basic": [
+    "telegram-zalo-owner-login",
+    "core-openclaw-zalo",
+    "openclaw-telegram-zalo-qr-delivery",
+    "openclaw-zalo-qr-login"
   ],
   "facebook-fanpage-auto-reply": [
     "core-social-messaging",

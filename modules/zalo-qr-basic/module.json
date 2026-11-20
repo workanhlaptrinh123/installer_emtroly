@@ -1,0 +1,12 @@
+{
+  "id": "zalo-qr-basic",
+  "version": "1.0.0",
+  "description": "Zalo Personal plugin, owner QR login and Telegram QR commands",
+  "tier": "core",
+  "requires": ["basic-assistant", "telegram-basic-lite"],
+  "conflicts": [],
+  "platforms": ["docker", "linux", "windows"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin",
+  "requires_external_credentials": true
+}

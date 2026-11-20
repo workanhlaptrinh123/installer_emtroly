@@ -133,7 +133,14 @@ The selected command and path are also recorded in the instance's
 `windows-cli.json`. Existing terminals must be reopened to pick up the User
 PATH change; an existing installation is not automatically modified.
 
-The Windows development installer additionally installs Antigravity IDE
+The Windows installer uses the smaller `installer-basic` OpenClaw profile:
+Telegram Full Exec, Zalo QR, image generation and basic Word/Excel/PowerPoint
+document workflows. Advanced Zalo, watchdog, research, video, Drive and website
+modules are left out of this first local install and can be added later from the
+module catalog. Antigravity IDE and the private Codex Extension remain part of
+the installer flow described below.
+
+The Windows installer additionally installs Antigravity IDE
 2.7.0 and Codex extension 26.51111.21308 using pinned downloads and SHA-256.
 It verifies Google's Authenticode signature before running the IDE installer. Antigravity user data, the
 extension directory, and `CODEX_HOME` are isolated under

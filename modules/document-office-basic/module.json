@@ -1,0 +1,11 @@
+{
+  "id": "document-office-basic",
+  "version": "1.0.0",
+  "description": "Basic Word, Excel, PowerPoint reading and DOCX generation",
+  "tier": "core",
+  "requires": ["basic-assistant", "telegram-basic-lite"],
+  "conflicts": [],
+  "platforms": ["docker", "linux", "macos", "windows"],
+  "restart": ["openclaw-gateway"],
+  "healthcheck": "builtin"
+}

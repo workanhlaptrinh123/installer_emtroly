@@ -148,11 +148,11 @@ try {
     $installer = Join-Path $PayloadRoot 'install-native-windows.ps1'
     if (-not (Test-Path -LiteralPath $installer)) { throw 'missing-payload' }
     $modules = @()
-    if ([bool]$settings.configure_zalo) { $modules = @('zalo-personal') }
+    if ([bool]$settings.configure_zalo) { $modules = @('zalo-qr-basic') }
     $arguments = @{
       Name = [string]$settings.member; OwnerIds = [string]$settings.owner_ids
       GroupId = [string]$settings.group_id; AssistantName = [string]$settings.assistant_name
-      BaseUrl = $baseUrl; Model = [string]$settings.model; Profile = 'basic-assistant-full'
+      BaseUrl = $baseUrl; Model = [string]$settings.model; Profile = 'installer-basic'
       Modules = $modules; QrOwnerId = [string]$settings.qr_owner_id
       OpenClawVersion = '2026.11.4'; InstallMode = 'new'; InstallRoot = $root; GatewayPort = [int]$settings.gateway_port
       Audience = [string]$settings.audience; Addressing = [string]$settings.addressing
@@ -167,7 +167,11 @@ try {
       'openclaw.json', 'installer-instance.json', 'openclaw-instance.ps1', 'windows-cli.json',
       'workspace\skills\openclaw-telegram-zalo-qr-delivery\SKILL.md',
       'workspace\skills\telegram-zalo-owner-login\SKILL.md',
+      'workspace\skills\core-openclaw-zalo\SKILL.md',
+      'workspace\skills\openclaw-zalo-qr-login\SKILL.md',
+      'workspace\skills\core-openclaw-telegram\SKILL.md',
       'workspace\skills\cap-full-quyen-telegram-openclaw\SKILL.md',
+      'workspace\skills\reliable-media-delivery\SKILL.md',
       'workspace\skills\imagegen\SKILL.md',
       'workspace\skills\core-openclaw-media\SKILL.md',
       'workspace\skills\openclaw-docx-reader\SKILL.md',

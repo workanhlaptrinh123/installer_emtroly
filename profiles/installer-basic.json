@@ -1,0 +1,12 @@
+{
+  "id": "installer-basic",
+  "version": "1.0.0",
+  "description": "Fast Windows installer baseline with Zalo QR, media and Office basics",
+  "modules": [
+    "basic-assistant",
+    "telegram-basic-lite",
+    "image-generation-basic",
+    "document-office-basic",
+    "zalo-qr-basic"
+  ]
+}
