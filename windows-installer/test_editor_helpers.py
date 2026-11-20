@@ -1,4 +1,6 @@
+import hashlib
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -157,9 +159,13 @@ class EditorWindowsFixtureTests(unittest.TestCase):
             driver = temp / 'driver.ps1'
             staged_module = temp / 'install-antigravity-codex.ps1'
             module_source = MODULE.read_text(encoding='utf-8')
-            download = '  Get-VerifiedDownload -Url $extensionUrl -Path $vsix -Hash $extensionHash'
-            self.assertEqual(module_source.count(download), 1)
-            module_source = module_source.replace(download, "  [IO.File]::WriteAllText($vsix, 'fixture')")
+            transport = 'Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Path -TimeoutSec 900'
+            self.assertEqual(module_source.count(transport), 1)
+            module_source = module_source.replace(transport, "[IO.File]::WriteAllText($Path, 'fixture')")
+            fixture_digest = hashlib.sha256(b'fixture').hexdigest()
+            module_source, count = re.subn(r"(?m)^(\$(?:ide|extension)Hash = ')[0-9a-f]{64}'$",
+                                           lambda match: match[1] + fixture_digest + "'", module_source)
+            self.assertEqual(count, 2)
             staged_module.write_text(module_source, encoding='utf-8-sig')
             shutil.copytree(ROOT / 'windows-installer/activation-probe', temp / 'activation-probe')
             driver.write_text(r'''
@@ -179,15 +185,13 @@ $editorFolder = Join-Path $env:LOCALAPPDATA 'Different Location\Antigravity IDE'
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Em Trợ Lý - Antigravity.lnk'
 if (Test-Path -LiteralPath $shortcutPath) { throw 'fixture-shortcut-already-exists' }
 function global:Get-AuthenticodeSignature { param($LiteralPath) return @{ Status = 'Valid'; SignerCertificate = @{ Subject = 'CN=Google LLC' } } }
-function global:Invoke-WebRequest { param([switch]$UseBasicParsing, $Uri, $OutFile, $TimeoutSec) [IO.File]::WriteAllText($OutFile, 'fixture') }
-function global:Get-FileHash { param($LiteralPath, $Algorithm) if ($LiteralPath -match 'setup\.exe$') { return @{ Hash = $ideHash } }; return @{ Hash = '5abdd18242a77e85e60b8b727231924c4cdf048fdf5c39079e5d811390c3fca8' } }
 $global:fixtureRegistry = @()
 function global:Get-ItemProperty { param($Path, $ErrorAction) return $global:fixtureRegistry }
 function global:Start-Process {
   param($FilePath, $ArgumentList, $WindowStyle, [switch]$PassThru)
   if ($FilePath -match 'antigravity-ide-setup\.exe$') {
     if ($ArgumentList -notmatch '/DIR="([^"]+)"') { throw 'no-install-directory' }
-    Copy-Item -LiteralPath $editorFolder -Destination $Matches[1] -Recurse
+    Copy-Item -LiteralPath (Join-Path $env:LOCALAPPDATA 'Different Location\Antigravity IDE') -Destination $Matches[1] -Recurse
   } elseif ($env:CODEX_HOME -ne (Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex')) { throw 'codex-home-not-isolated' }
   if ($FilePath -match 'cmd\.exe$') {
     if (-not $ArgumentList.Contains((Join-Path $env:LOCALAPPDATA 'EmTroLy\Antigravity\Extensions'))) { throw 'wrong-extension-directory' }
