@@ -26,16 +26,7 @@ $recoveryBackup = $null
 $appDir = Join-Path $env:LOCALAPPDATA ('Programs\EmTroLy-Antigravity-IDE-' + $jobId)
 $editor = Join-Path $appDir 'Antigravity IDE.exe'
 $editorCli = Join-Path $appDir 'bin\antigravity-ide.cmd'
-$shortcutName = 'EmTroLy - Antigravity.lnk'
-$legacyShortcutName = 'Em Trợ Lý - Antigravity.lnk'
-$shortcutPaths = @(
-  (Join-Path ([Environment]::GetFolderPath('Desktop')) $shortcutName),
-  (Join-Path ([Environment]::GetFolderPath('Programs')) $shortcutName)
-)
-$legacyShortcutPaths = @(
-  (Join-Path ([Environment]::GetFolderPath('Desktop')) $legacyShortcutName),
-  (Join-Path ([Environment]::GetFolderPath('Programs')) $legacyShortcutName)
-)
+$shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'EmTroLy - Antigravity.lnk'
 $downloadDir = Join-Path $env:TEMP ('emtroly-editor-' + [guid]::NewGuid().ToString('N'))
 $activationProbe = Join-Path $PSScriptRoot 'activation-probe'
 $activationTest = Join-Path $activationProbe 'test.js'
@@ -157,7 +148,7 @@ function Get-EditorRegistryEntries {
 if ($env:OS -ne 'Windows_NT') { throw 'editor-windows-required' }
 if (([string]$Settings.base_url).TrimEnd('/') -cne 'https://codex.anhlaptrinh.vn/v1') { throw 'editor-provider-unsupported' }
 if ([string]::IsNullOrWhiteSpace([string]$Settings.ai_api_key)) { throw 'editor-api-key-missing' }
-if (@($shortcutPaths | Where-Object { -not (Test-Path -LiteralPath (Split-Path -Parent $_) -PathType Container) }).Count -gt 0 -or
+if (-not (Test-Path -LiteralPath (Split-Path -Parent $shortcutPath) -PathType Container) -or
     -not (Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\wscript.exe') -PathType Leaf)) { throw 'editor-desktop-missing' }
 foreach ($path in @($editor, $editorCli, $userData, $extensions, $codexHome, $downloadDir, $base, $activationProbe, $activationTest)) { [void](Quote-Cmd $path) }
 foreach ($file in @('test.js', 'extension.js', 'package.json')) {
@@ -278,51 +269,31 @@ requires_openai_auth = true
   $launchPath = Join-Path $base 'launch-antigravity.vbs'
   $script = @"
 Option Explicit
-Dim shell, command
+Dim shell
 Set shell = CreateObject("WScript.Shell")
 shell.Environment("PROCESS")("CODEX_HOME") = "$($codexHome.Replace('"','""'))"
 shell.Environment("PROCESS")("OPENAI_API_KEY") = ""
 shell.Environment("PROCESS")("VSCODE_IPC_HOOK_CLI") = ""
 shell.Environment("PROCESS")("ELECTRON_RUN_AS_NODE") = ""
 shell.Environment("PROCESS")("NODE_OPTIONS") = ""
-shell.CurrentDirectory = "$($base.Replace('"','""'))"
-command = Chr(34) & "$($editor.Replace('"','""'))" & Chr(34) & _
-  " --user-data-dir " & Chr(34) & "$($userData.Replace('"','""'))" & Chr(34) & _
-  " --extensions-dir " & Chr(34) & "$($extensions.Replace('"','""'))" & Chr(34) & _
-  " --new-window"
-shell.Run command, 1, False
-Set shell = Nothing
+shell.Run """$($editor.Replace('"','""'))"" --user-data-dir ""$($userData.Replace('"','""'))"" --extensions-dir ""$($extensions.Replace('"','""'))"" --new-window", 1, False
 "@
   [IO.File]::WriteAllText($launchPath, $script, [Text.Encoding]::Unicode)
   $shell = New-Object -ComObject WScript.Shell
-  foreach ($legacyPath in $legacyShortcutPaths) {
-    if (-not (Test-Path -LiteralPath $legacyPath -PathType Leaf)) { continue }
-    try {
-      $legacy = $shell.CreateShortcut($legacyPath)
-      $legacyOwned = ([string]::IsNullOrWhiteSpace([string]$legacy.TargetPath) -and
-        [string]::IsNullOrWhiteSpace([string]$legacy.Arguments)) -or
-        ($legacy.TargetPath -ieq (Join-Path $env:SystemRoot 'System32\wscript.exe') -and
-          $legacy.Arguments -match '(?i)launch-antigravity\.vbs')
-      if ($legacyOwned) { Remove-Item -LiteralPath $legacyPath -Force }
-    } catch { }
-  }
-  foreach ($shortcutPath in $shortcutPaths) {
-    $temporaryShortcut = Join-Path $downloadDir ('antigravity-' + [guid]::NewGuid().ToString('N') + '.lnk')
-    $shortcut = $shell.CreateShortcut($temporaryShortcut)
-    $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
-    $shortcut.Arguments = '//B //Nologo ' + (Quote-Cmd $launchPath)
-    $shortcut.WorkingDirectory = $base
-    $shortcut.IconLocation = $editor + ',0'
-    $shortcut.Description = 'Em Trợ Lý - Antigravity IDE và Codex riêng'
-    $shortcut.Save()
-    if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }
-    [IO.File]::Move($temporaryShortcut, $shortcutPath)
-    $saved = $shell.CreateShortcut($shortcutPath)
-    $shortcutValid = $saved.TargetPath -ieq (Join-Path $env:SystemRoot 'System32\wscript.exe') -and
-      $saved.Arguments -ceq ('//B //Nologo ' + (Quote-Cmd $launchPath)) -and
-      $saved.WorkingDirectory -ieq $base
-    if (-not $shortcutValid) { throw 'editor-shortcut-failed' }
-  }
+  $temporaryShortcut = Join-Path $downloadDir 'antigravity.lnk'
+  $shortcut = $shell.CreateShortcut($temporaryShortcut)
+  $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
+  $shortcut.Arguments = '//B //Nologo ' + (Quote-Cmd $launchPath)
+  $shortcut.WorkingDirectory = $base
+  $shortcut.IconLocation = $editor + ',0'
+  $shortcut.Description = 'Em Trợ Lý - Antigravity IDE và Codex riêng'
+  $shortcut.Save()
+  if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }
+  [IO.File]::Move($temporaryShortcut, $shortcutPath)
+  $saved = $shell.CreateShortcut($shortcutPath)
+  if ($saved.TargetPath -ine (Join-Path $env:SystemRoot 'System32\wscript.exe') -or
+      $saved.Arguments -cne ('//B //Nologo ' + (Quote-Cmd $launchPath)) -or
+      $saved.WorkingDirectory -ine $base) { throw 'editor-shortcut-failed' }
   Remove-Item -LiteralPath $vsix -Force -ErrorAction SilentlyContinue
 } finally {
   $env:CODEX_HOME = $oldCodexHome
