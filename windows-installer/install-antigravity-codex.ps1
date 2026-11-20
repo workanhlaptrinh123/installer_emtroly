@@ -26,9 +26,15 @@ $recoveryBackup = $null
 $appDir = Join-Path $env:LOCALAPPDATA ('Programs\EmTroLy-Antigravity-IDE-' + $jobId)
 $editor = Join-Path $appDir 'Antigravity IDE.exe'
 $editorCli = Join-Path $appDir 'bin\antigravity-ide.cmd'
+$shortcutName = 'EmTroLy - Antigravity.lnk'
+$legacyShortcutName = 'Em Trợ Lý - Antigravity.lnk'
 $shortcutPaths = @(
-  (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Em Trợ Lý - Antigravity.lnk'),
-  (Join-Path ([Environment]::GetFolderPath('Programs')) 'Em Trợ Lý - Antigravity.lnk')
+  (Join-Path ([Environment]::GetFolderPath('Desktop')) $shortcutName),
+  (Join-Path ([Environment]::GetFolderPath('Programs')) $shortcutName)
+)
+$legacyShortcutPaths = @(
+  (Join-Path ([Environment]::GetFolderPath('Desktop')) $legacyShortcutName),
+  (Join-Path ([Environment]::GetFolderPath('Programs')) $legacyShortcutName)
 )
 $downloadDir = Join-Path $env:TEMP ('emtroly-editor-' + [guid]::NewGuid().ToString('N'))
 $activationProbe = Join-Path $PSScriptRoot 'activation-probe'
@@ -289,6 +295,17 @@ Set shell = Nothing
 "@
   [IO.File]::WriteAllText($launchPath, $script, [Text.Encoding]::Unicode)
   $shell = New-Object -ComObject WScript.Shell
+  foreach ($legacyPath in $legacyShortcutPaths) {
+    if (-not (Test-Path -LiteralPath $legacyPath -PathType Leaf)) { continue }
+    try {
+      $legacy = $shell.CreateShortcut($legacyPath)
+      $legacyOwned = ([string]::IsNullOrWhiteSpace([string]$legacy.TargetPath) -and
+        [string]::IsNullOrWhiteSpace([string]$legacy.Arguments)) -or
+        ($legacy.TargetPath -ieq (Join-Path $env:SystemRoot 'System32\wscript.exe') -and
+          $legacy.Arguments -match '(?i)launch-antigravity\.vbs')
+      if ($legacyOwned) { Remove-Item -LiteralPath $legacyPath -Force }
+    } catch { }
+  }
   foreach ($shortcutPath in $shortcutPaths) {
     $temporaryShortcut = Join-Path $downloadDir ('antigravity-' + [guid]::NewGuid().ToString('N') + '.lnk')
     $shortcut = $shell.CreateShortcut($temporaryShortcut)

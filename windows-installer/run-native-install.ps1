@@ -233,7 +233,7 @@ try {
   Write-SafeStatus 'Trợ lý đã sẵn sàng. Đang chuẩn bị Antigravity và Codex...'
   & $editorInstaller -Settings $editorSettings -StatusFile $LogFile *> $null
   Remove-Item -LiteralPath $pending -ErrorAction Stop
-  Write-SafeStatus 'Hoàn tất: OpenClaw, /zaloqr, /zalostatus, tạo ảnh và kỹ năng DOCX/Excel/PowerPoint cơ bản đã sẵn sàng. Mở lối tắt Em Trợ Lý - Antigravity để dùng Codex riêng.'
+  Write-SafeStatus 'Hoàn tất: OpenClaw, /zaloqr, /zalostatus, tạo ảnh và kỹ năng DOCX/Excel/PowerPoint cơ bản đã sẵn sàng. Mở lối tắt EmTroLy - Antigravity trên Desktop hoặc Start Menu để dùng Codex riêng.'
   exit 0
 } catch {
   $code = [string]$_.Exception.Message

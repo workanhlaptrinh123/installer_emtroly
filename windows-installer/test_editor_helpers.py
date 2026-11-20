@@ -39,6 +39,7 @@ class EditorContractTests(unittest.TestCase):
     def test_shortcut_repair_and_launcher_are_explicit(self):
         script = MODULE.read_text(encoding='utf-8')
         self.assertIn("GetFolderPath('Programs')", script)
+        self.assertIn("$shortcutName = 'EmTroLy - Antigravity.lnk'", script)
         self.assertIn("if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }", script)
         self.assertIn('shell.CurrentDirectory', script)
         self.assertIn('command = Chr(34)', script)
@@ -204,7 +205,7 @@ $editorFolder = Join-Path $env:LOCALAPPDATA 'Different Location\Antigravity IDE'
 [IO.File]::WriteAllText((Join-Path $editorFolder 'Antigravity IDE.exe'), 'fixture')
 [IO.File]::WriteAllText((Join-Path $editorFolder 'bin\antigravity-ide.cmd'), 'fixture')
 [IO.File]::WriteAllText((Join-Path $editorFolder 'resources\app\product.json'), '{"applicationName":"antigravity-ide","version":"1.107.0"}')
-$shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Em Trợ Lý - Antigravity.lnk'
+$shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'EmTroLy - Antigravity.lnk'
 if (Test-Path -LiteralPath $shortcutPath) { throw 'fixture-shortcut-already-exists' }
 function global:Get-AuthenticodeSignature {
   param($LiteralPath)
@@ -257,7 +258,7 @@ $partial = Join-Path $env:LOCALAPPDATA 'EmTroLy'
 $backups = @(Get-ChildItem -LiteralPath $env:LOCALAPPDATA -Directory -Filter 'EmTroLy.failed-*')
 if ($backups.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $backups[0].FullName 'stale.txt'))) { throw 'partial-editor-data-not-backed-up' }
   $env:TEST_FAIL_CODEX = ''
-  $startMenuPath = Join-Path ([Environment]::GetFolderPath('Programs')) 'Em Trợ Lý - Antigravity.lnk'
+  $startMenuPath = Join-Path ([Environment]::GetFolderPath('Programs')) 'EmTroLy - Antigravity.lnk'
   foreach ($stalePath in @($shortcutPath, $startMenuPath)) {
     [IO.File]::WriteAllBytes($stalePath, [byte[]](0..7))
   }
@@ -281,8 +282,8 @@ if ($backups.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $backups[0]
   }
 } finally {
   if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }
-  if (Test-Path -LiteralPath (Join-Path ([Environment]::GetFolderPath('Programs')) 'Em Trợ Lý - Antigravity.lnk')) {
-    Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath('Programs')) 'Em Trợ Lý - Antigravity.lnk') -Force
+  if (Test-Path -LiteralPath (Join-Path ([Environment]::GetFolderPath('Programs')) 'EmTroLy - Antigravity.lnk')) {
+    Remove-Item -LiteralPath (Join-Path ([Environment]::GetFolderPath('Programs')) 'EmTroLy - Antigravity.lnk') -Force
   }
 }
 ''', encoding='utf-8-sig')
