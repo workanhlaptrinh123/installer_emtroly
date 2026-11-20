@@ -30,7 +30,7 @@ VIAddVersionKey "CompanyName" "Anh Lap Trinh"
 
 Section
   ${IfNot} ${RunningX64}
-    MessageBox MB_ICONSTOP "Bộ cài yêu cầu Windows 64 bit."
+    MessageBox MB_ICONSTOP "This installer requires 64-bit Windows."
     SetErrorLevel 1
     Quit
   ${EndIf}
@@ -41,25 +41,13 @@ Section
   !else
   File /r "${PAYLOAD_DIR}/*"
   !endif
-  ReadEnvStr $1 LOCALAPPDATA
-  IfFileExists "$1\EmTroLy\installer-job.txt" repair_existing launch_wizard
-  repair_existing:
-  ClearErrors
-  ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$PLUGINSDIR\windows-installer\repair-antigravity-shortcut.ps1"' $0
-  IfErrors launch_wizard
-  ${If} $0 == 0
-    MessageBox MB_OK|MB_ICONINFORMATION "Đã sửa shortcut EmTroLy - Antigravity. Bấm OK để mở lại shortcut trên Desktop."
-    SetErrorLevel 0
-    Quit
-  ${EndIf}
-  launch_wizard:
   ClearErrors
   ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$PLUGINSDIR\windows-installer\wizard.ps1" -PayloadRoot "$PLUGINSDIR"' $0
   IfErrors launch_error
   SetErrorLevel $0
   Goto done
   launch_error:
-    MessageBox MB_ICONSTOP "Không thể mở Windows PowerShell để khởi động bộ cài."
+    MessageBox MB_ICONSTOP "Cannot start Windows PowerShell installer."
     SetErrorLevel 1
   done:
 SectionEnd
