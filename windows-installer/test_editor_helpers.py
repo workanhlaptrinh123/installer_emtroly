@@ -259,9 +259,7 @@ if ($backups.Count -ne 1 -or -not (Test-Path -LiteralPath (Join-Path $backups[0]
   $env:TEST_FAIL_CODEX = ''
   $startMenuPath = Join-Path ([Environment]::GetFolderPath('Programs')) 'Em Trợ Lý - Antigravity.lnk'
   foreach ($stalePath in @($shortcutPath, $startMenuPath)) {
-    $staleShell = New-Object -ComObject WScript.Shell
-    $stale = $staleShell.CreateShortcut($stalePath)
-    $stale.Save()
+    [IO.File]::WriteAllBytes($stalePath, [byte[]](0..7))
   }
   & $ModulePath -Settings $settings -StatusFile $status
   $base = Join-Path $env:LOCALAPPDATA 'EmTroLy'
