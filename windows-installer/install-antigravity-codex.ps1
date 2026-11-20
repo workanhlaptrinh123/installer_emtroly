@@ -83,7 +83,7 @@ function Get-EditorRegistryDirectories($Entry) {
 }
 
 function Test-EditorDataComplete([string]$Root) {
-  foreach ($relative in @('installer-job.txt', 'Codex\config.toml', 'Codex\auth.json', 'Antigravity\UserData\settings.json', 'launch-antigravity.vbs')) {
+  foreach ($relative in @('installer-job.txt', 'Codex\config.toml', 'Codex\auth.json', 'launch-antigravity.vbs')) {
     if (-not (Test-Path -LiteralPath (Join-Path $Root $relative) -PathType Leaf)) { return $false }
   }
   $extensionsRoot = Join-Path $Root 'Antigravity\Extensions'
