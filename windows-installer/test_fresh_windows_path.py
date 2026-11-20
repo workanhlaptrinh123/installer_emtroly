@@ -25,7 +25,7 @@ class FreshWindowsPathTests(unittest.TestCase):
         self.addCleanup(self.restore_path)
         self.temporary = tempfile.TemporaryDirectory(prefix='emtroly-path-')
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name) / 'Th\u1eed nghi\u1ec7m c\u00f3 d\u1ea5u' / 'openclaw'
+        self.root = Path(self.temporary.name).resolve() / 'Th\u1eed nghi\u1ec7m c\u00f3 d\u1ea5u' / 'openclaw'
         self.root.mkdir(parents=True)
         self.bin = self.root.parent / 'bin with spaces'
         self.bin.mkdir()
@@ -57,9 +57,10 @@ class FreshWindowsPathTests(unittest.TestCase):
             f'if "%1"=="status" exit /b {status}\r\n'
             'exit /b 1\r\n', encoding='ascii')
 
-    def run_probe(self, directories):
-        self.winreg.SetValueEx(self.key, 'Path', 0, self.winreg.REG_EXPAND_SZ,
-                               ';'.join(str(path) for path in directories))
+    def run_probe(self, directories=None):
+        if directories is not None:
+            self.winreg.SetValueEx(self.key, 'Path', 0, self.winreg.REG_EXPAND_SZ,
+                                   ';'.join(str(path) for path in directories))
         env = dict(os.environ, EMTROLY_PROBE_ROOT=str(self.root),
                    EMTROLY_PROBE_VERSION='2026.11.4', OPENCLAW_STATE_DIR='should-not-inherit')
         shell = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
@@ -110,14 +111,20 @@ $functionText = $definition.Extent.Text.Replace('$PSScriptRoot', '$sourceDir')
 $sourceDir = Split-Path $Source
 . ([ScriptBlock]::Create($functionText))
 function Write-NativeInstallStatus([string]$Text) {}
-Install-UserOpenClawCli -Root $Root -CliEntry $Entry -Port 18789 -Profile 'fixture' -ExpectedVersion '2026.11.4'
+try {
+  Install-UserOpenClawCli -Root $Root -CliEntry $Entry -Port 18789 -Profile 'fixture' -ExpectedVersion '2026.11.4'
+} catch {
+  $helperDir = Join-Path $sourceDir 'native\skills\tao-tro-ly-openclaw-windows-macos-linux\scripts'
+  & python.exe -c 'import sys; sys.path.insert(0,sys.argv[1]); from install_windows_cli import install; install(*sys.argv[2:6],18789)' $helperDir $Root ([Environment]::GetFolderPath('UserProfile')) (Get-Command node.exe).Source $Entry
+  throw
+}
 ''', encoding='ascii')
         shell = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
         result = subprocess.run([str(shell), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
                                  '-File', str(driver), str(source), str(self.root), str(entry), str(local_data)],
                                 capture_output=True, timeout=60)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         info = json.loads((self.root / 'windows-cli.json').read_text(encoding='utf-8'))
         self.assertTrue(info['default'])
         self.assertEqual(Path(info['path']).parent, local_data / 'OpenClaw/bin')
-        self.assertEqual(self.run_probe([Path(info['path']).parent]), 0)
+        self.assertEqual(self.run_probe(), 0)
