@@ -39,7 +39,7 @@ cp "$BASE/windows-installer/run-native-install.ps1" "$payload/windows-installer/
 cp "$BASE/windows-installer/wizard.ps1" "$payload/windows-installer/"
 cp "$BASE/windows-installer/validation.ps1" "$payload/windows-installer/"
 cp "$BASE/windows-installer/verify-openclaw-command.ps1" "$payload/windows-installer/"
-cp "$BASE/windows-installer/repair-openclaw-path.ps1" "$payload/windows-installer/"
+cp "$BASE/windows-installer/editor-discovery.ps1" "$payload/windows-installer/"
 cp "$BASE/windows-installer/install-antigravity-codex.ps1" "$payload/windows-installer/"
 cp -a "$BASE/windows-installer/activation-probe" "$payload/windows-installer/"
 

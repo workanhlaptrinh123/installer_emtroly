@@ -127,10 +127,6 @@ preserves it and reports a conflict instead of claiming full success.
 The selected command and path are also recorded in the instance's
 `windows-cli.json`. Existing terminals must be reopened to pick up the User
 PATH change; an existing installation is not automatically modified.
-If an older installation already answers on Telegram but the command is
-missing, open the revised EXE as the same Windows user and select **Sửa PATH
-cho OpenClaw đã cài** on the first page. This repairs only the command for the
-existing instance and checks it in a fresh PowerShell without restarting the bot.
 
 The Windows development installer additionally installs Antigravity IDE
 2.7.0 and Codex extension 26.51111.21308 using pinned downloads and SHA-256.
@@ -148,9 +144,11 @@ integration requires additional downloads of roughly
 left in place for investigation. Antigravity/Codex Windows end-to-end testing
 is still required before this development version can be distributed.
 
-The Antigravity page lets users select an existing `Antigravity IDE.exe`;
-its Google signature, CLI and supported product version are checked before
-reuse. Codex and the dedicated profile remain isolated. When installing a new
+When users select “Máy đã có Antigravity IDE”, setup checks the standard user
+and system directories and paths recorded by the Windows uninstaller. One
+compatible installation is selected automatically. Only when none or several
+are found does setup ask for the installed application executable (not a setup
+file). Its Google signature, CLI and supported product version are checked before reuse. Codex and the dedicated profile remain isolated. When installing a new
 IDE, a stale uninstall registry entry is not treated as proof of an existing
 application if its recorded paths no longer contain an Antigravity executable.
 Residual installation folders are preserved and a separate installation path

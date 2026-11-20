@@ -78,29 +78,7 @@ function Quote-Cmd([string]$Value) {
   return '"' + $Value + '"'
 }
 
-function Get-EditorRegistryDirectories($Entry) {
-  $directories = @()
-  $location = [Environment]::ExpandEnvironmentVariables(([string]$Entry.InstallLocation).Trim().Trim('"'))
-  if ($location -and [IO.Path]::IsPathRooted($location)) { $directories += $location }
-  foreach ($value in @([string]$Entry.DisplayIcon, [string]$Entry.UninstallString)) {
-    $expanded = [Environment]::ExpandEnvironmentVariables($value.Trim())
-    if ($expanded -match '^"([^"\r\n]+\.exe)"' -or $expanded -match '^(.+?\.exe)(?:,\s*-?\d+|\s|$)') {
-      $executable = $Matches[1].Trim()
-      if ([IO.Path]::IsPathRooted($executable)) { $directories += (Split-Path -Parent $executable) }
-    }
-  }
-  return @($directories | Where-Object { $_ } | Select-Object -Unique)
-}
-
-function Test-EditorInstallation {
-  if (-not (Test-Path -LiteralPath $editor -PathType Leaf) -or -not (Test-Path -LiteralPath $editorCli -PathType Leaf)) { throw 'editor-cli-missing' }
-  $editorSignature = Get-AuthenticodeSignature -LiteralPath $editor
-  if ($editorSignature.Status -ne 'Valid' -or $editorSignature.SignerCertificate.Subject -notmatch 'Google') { throw 'editor-signature-invalid' }
-  $productPath = Join-Path $appDir 'resources\app\product.json'
-  if (-not (Test-Path -LiteralPath $productPath -PathType Leaf)) { throw 'editor-version-unsupported' }
-  $product = Get-Content -LiteralPath $productPath -Raw | ConvertFrom-Json
-  if ($product.applicationName -ne 'antigravity-ide' -or $product.version -ne '1.107.0') { throw 'editor-version-unsupported' }
-}
+. (Join-Path $PSScriptRoot 'editor-discovery.ps1')
 
 if ($env:OS -ne 'Windows_NT') { throw 'editor-windows-required' }
 if (([string]$Settings.base_url).TrimEnd('/') -cne 'https://codex.anhlaptrinh.vn/v1') { throw 'editor-provider-unsupported' }
@@ -120,9 +98,7 @@ if (-not $useExistingEditor) {
       if (Test-Path -LiteralPath (Join-Path $programDirectory $relativePath) -PathType Leaf) { throw 'editor-select-existing' }
     }
   }
-  $uninstallKeys = @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')
-  $appId = '{AA73B3E3-C6C8-45C8-B1DC-4AE56C751432}_is1'
-  $existing = @(Get-ItemProperty $uninstallKeys -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match '^Antigravity IDE' -or $_.PSChildName -eq $appId })
+  $existing = @(Get-EditorRegistryEntries)
   foreach ($entry in $existing) {
     $directories = @(Get-EditorRegistryDirectories $entry)
     if ($directories.Count -eq 0) { throw 'editor-registry-ambiguous' }
@@ -133,7 +109,7 @@ if (-not $useExistingEditor) {
     }
   }
 } else {
-  Test-EditorInstallation
+  Test-EditorInstallation $editor
 }
 if ($CheckOnly) { return }
 
@@ -156,7 +132,7 @@ try {
     $setupArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCLOSEAPPLICATIONS /NORESTARTAPPLICATIONS /SP- /MERGETASKS="!runcode" /DIR=' + (Quote-Cmd $appDir)
     if ((Invoke-HiddenProcess $setup $setupArgs 1200) -ne 0) { throw 'editor-install-failed' }
   }
-  Test-EditorInstallation
+  Test-EditorInstallation $editor
 
   Write-EditorStatus 'Đang cấu hình khóa API cho Codex trong thư mục riêng của Em Trợ Lý…'
   foreach ($folder in @($userData, $extensions, $codexHome)) { [void][IO.Directory]::CreateDirectory($folder) }

@@ -70,29 +70,6 @@ $groupBox = Add-TextBox $connect '' 245
 Add-Label $connect 'Gateway port (0 = tự động)' 24 292
 $portBox = Add-TextBox $connect '0' 289
 Add-Note $connect 'Owner IDs là số Telegram dương, ngăn cách bằng dấu phẩy. Group ID phải là số âm.' 342
-if (Test-Path -LiteralPath (Join-Path $env:USERPROFILE 'openclaw\installer-instance.json') -PathType Leaf) {
-  $repairButton = New-Object System.Windows.Forms.Button
-  $repairButton.Text = 'Sửa PATH cho OpenClaw đã cài'
-  $repairButton.Location = New-Object System.Drawing.Point(24, 400)
-  $repairButton.Size = New-Object System.Drawing.Size(290, 32)
-  $connect.Controls.Add($repairButton)
-  $repairButton.Add_Click({
-    $repairButton.Enabled = $false
-    $form.UseWaitCursor = $true
-    try {
-      & (Join-Path $PayloadRoot 'windows-installer\repair-openclaw-path.ps1')
-      [void][System.Windows.Forms.MessageBox]::Show($form, 'Đã sửa PATH và kiểm tra openclaw status. Mở lại PowerShell để dùng lệnh. Bot vẫn giữ nguyên.', 'Sửa PATH hoàn tất', 'OK', 'Information')
-      $script:resultCode = 0
-      $form.Close()
-    } catch {
-      Show-Error 'Chưa xác minh được PATH của trợ lý. Kiểm tra đúng tài khoản Windows, Node.js, Python và xung đột với lệnh openclaw có sẵn. Bot không bị cài lại.'
-    } finally {
-      $form.UseWaitCursor = $false
-      $repairButton.Enabled = $true
-    }
-  })
-}
-
 $secret = New-Page 'Bảo mật'
 Add-Label $secret 'Telegram Bot Token' 24 42
 $tokenBox = Add-TextBox $secret '' 39 $true
@@ -123,22 +100,39 @@ $existingEditorCheck.Text = 'Máy đã có Antigravity IDE - dùng bản đang c
 $existingEditorCheck.Location = New-Object System.Drawing.Point(24, 42)
 $existingEditorCheck.Size = New-Object System.Drawing.Size(650, 30)
 [void]$editorPage.Controls.Add($existingEditorCheck)
-Add-Label $editorPage 'Tệp Antigravity IDE.exe' 24 102
-$existingEditorBox = Add-TextBox $editorPage '' 99
-$existingEditorBox.Size = New-Object System.Drawing.Size(345, 25)
-$existingEditorBox.Enabled = $false
+$editorHint = New-Object System.Windows.Forms.Label
+$editorHint.Location = New-Object System.Drawing.Point(24, 90)
+$editorHint.Size = New-Object System.Drawing.Size(680, 38)
+$editorHint.Text = 'Bộ cài sẽ tải Antigravity IDE.'
+[void]$editorPage.Controls.Add($editorHint)
+$existingEditorBox = Add-TextBox $editorPage '' 133
+$existingEditorBox.Location = New-Object System.Drawing.Point(24, 133)
+$existingEditorBox.Size = New-Object System.Drawing.Size(535, 25)
+$existingEditorBox.ReadOnly = $true
+$existingEditorBox.Visible = $false
 $existingEditorBrowse = New-Object System.Windows.Forms.Button
-$existingEditorBrowse.Text = 'Chọn tệp...'
-$existingEditorBrowse.Location = New-Object System.Drawing.Point(605, 97)
-$existingEditorBrowse.Size = New-Object System.Drawing.Size(95, 28)
-$existingEditorBrowse.Enabled = $false
+$existingEditorBrowse.Text = 'Chọn ứng dụng…'
+$existingEditorBrowse.Location = New-Object System.Drawing.Point(570, 131)
+$existingEditorBrowse.Size = New-Object System.Drawing.Size(130, 28)
+$existingEditorBrowse.Visible = $false
 [void]$editorPage.Controls.Add($existingEditorBrowse)
+. (Join-Path $PSScriptRoot 'editor-discovery.ps1')
 $existingEditorCheck.Add_CheckedChanged({
-  $existingEditorBox.Enabled = $existingEditorCheck.Checked
-  $existingEditorBrowse.Enabled = $existingEditorCheck.Checked
-  if ($existingEditorCheck.Checked -and [string]::IsNullOrWhiteSpace($existingEditorBox.Text)) {
-    $defaultEditor = Join-Path $env:LOCALAPPDATA 'Programs\Antigravity IDE\Antigravity IDE.exe'
-    if (Test-Path -LiteralPath $defaultEditor -PathType Leaf) { $existingEditorBox.Text = $defaultEditor }
+  $existingEditorBox.Clear()
+  $existingEditorBox.Visible = $existingEditorCheck.Checked
+  $existingEditorBrowse.Visible = $false
+  if (-not $existingEditorCheck.Checked) {
+    $editorHint.Text = 'Bộ cài sẽ tải Antigravity IDE.'
+    return
+  }
+  $form.UseWaitCursor = $true
+  try { $found = @(Find-InstalledEditor) } finally { $form.UseWaitCursor = $false }
+  if ($found.Count -eq 1) {
+    $existingEditorBox.Text = $found[0]
+    $editorHint.Text = 'Đã tìm thấy Antigravity IDE. Bấm Tiếp để dùng bản này.'
+  } else {
+    $existingEditorBrowse.Visible = $true
+    $editorHint.Text = if ($found.Count) { 'Có nhiều bản Antigravity IDE. Chọn ứng dụng muốn dùng.' } else { 'Chưa tìm thấy bản tương thích. Chọn Antigravity IDE.exe trong thư mục đã cài.' }
   }
 })
 $existingEditorBrowse.Add_Click({
@@ -149,7 +143,7 @@ $existingEditorBrowse.Add_Click({
     if ($dialog.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) { $existingEditorBox.Text = $dialog.FileName }
   } finally { $dialog.Dispose() }
 })
-Add-Note $editorPage 'Nếu chưa có, bỏ chọn để bộ cài tải Antigravity IDE. Codex và cấu hình Em Trợ Lý vẫn được cài riêng.' 165
+Add-Note $editorPage 'Nếu chưa có, bỏ chọn để bộ cài tải Antigravity IDE. Codex và cấu hình Em Trợ Lý vẫn được cài riêng.' 195
 Add-Note $editorPage 'Bản đã cài phải là Antigravity IDE tương thích và có chữ ký Google hợp lệ. Bộ cài không xóa dữ liệu ứng dụng cũ.' 245
 
 $zalo = New-Page 'Zalo'
@@ -226,7 +220,7 @@ function Test-Page([int]$Index) {
     Show-Error 'Hãy xác nhận bạn hiểu và chấp nhận Full Exec cho owner và nhóm tin cậy.'
     return $false
   }
-  if ($Index -eq 3 -and $existingEditorCheck.Checked -and -not (Test-Path -LiteralPath $existingEditorBox.Text.Trim() -PathType Leaf)) {
+  if ($Index -eq 3 -and $existingEditorCheck.Checked -and ([string]::IsNullOrWhiteSpace($existingEditorBox.Text) -or -not (Test-Path -LiteralPath $existingEditorBox.Text.Trim() -PathType Leaf))) {
     Show-Error 'Hãy chọn tệp Antigravity IDE.exe đã cài trên máy.'
     return $false
   }

@@ -90,7 +90,7 @@ class FreshWindowsPathTests(unittest.TestCase):
         self.assertEqual(self.run_probe([self.bin]), 14)
 
     def test_native_registration_and_status_in_windows_powershell_51(self):
-        source = PROBE.parent / 'repair-openclaw-path.ps1'
+        source = PROBE.parents[1] / 'native/windows-cli.ps1'
         runtime = self.root / 'runtime/2026.11.4/node_modules/openclaw'
         runtime.mkdir(parents=True)
         entry = runtime / 'openclaw.mjs'
@@ -99,21 +99,18 @@ class FreshWindowsPathTests(unittest.TestCase):
         (self.root / 'openclaw.json').write_text('{"gateway":{"port":18789}}', encoding='ascii')
         local_data = self.root.parent / 'local'
         local_data.mkdir()
-        import shutil
-        manifest = {'mode': 'user', 'profile': 'member-emtroly', 'root': str(self.root),
-                    'cli_entry': str(entry), 'port': 18789, 'node': shutil.which('node.exe')}
-        (self.root / 'installer-instance.json').write_text(json.dumps(manifest), encoding='utf-8')
         (self.root / 'windows-cli.json').unlink()
         driver = self.root.parent / 'register.ps1'
         driver.write_text(r'''
-param($Source, $AccountDirectory, $LocalData)
+param($Source, $Root, $LocalData, $Entry)
 $ErrorActionPreference = 'Stop'
 $env:LOCALAPPDATA = $LocalData
-& $Source -AccountDirectory $AccountDirectory
+. $Source
+Install-UserOpenClawCli -Root $Root -CliEntry $Entry -Port 18789 -Profile member-emtroly -ExpectedVersion 2026.11.4
 ''', encoding='ascii')
         shell = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
         result = subprocess.run([str(shell), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-                                 '-File', str(driver), str(source), str(self.root.parent), str(local_data)],
+                                 '-File', str(driver), str(source), str(self.root), str(local_data), str(entry)],
                                 capture_output=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         info = json.loads((self.root / 'windows-cli.json').read_text(encoding='utf-8'))

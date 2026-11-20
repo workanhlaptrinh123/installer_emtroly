@@ -8,6 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / 'windows-installer/install-antigravity-codex.ps1'
+DISCOVERY = MODULE.with_name('editor-discovery.ps1')
 PWSH = os.environ.get('PWSH') or shutil.which('pwsh')
 
 
@@ -39,7 +40,8 @@ class EditorContractTests(unittest.TestCase):
         script = MODULE.read_text(encoding='utf-8')
         self.assertIn('use_existing_antigravity = [bool]$existingEditorCheck.Checked', wizard)
         self.assertIn('antigravity_exe = $existingEditorBox.Text.Trim()', wizard)
-        self.assertIn('Get-EditorRegistryDirectories', script)
+        self.assertIn('Find-InstalledEditor', wizard)
+        self.assertIn(DISCOVERY.name, (ROOT / 'build-windows-installer.sh').read_text())
         self.assertIn("throw 'editor-select-existing'", script)
         self.assertIn("throw 'editor-registry-ambiguous'", script)
 
@@ -79,7 +81,8 @@ $ErrorActionPreference = 'Stop'
 $tokens = $null; $parseErrors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile($ModulePath, [ref]$tokens, [ref]$parseErrors)
 if ($parseErrors.Count) { throw 'parse-failed' }
-foreach ($name in @('Quote-Cmd', 'Get-VerifiedDownload', 'Get-EditorRegistryDirectories')) {
+. (Join-Path (Split-Path -Parent $ModulePath) 'editor-discovery.ps1')
+foreach ($name in @('Quote-Cmd', 'Get-VerifiedDownload')) {
   $node = @($ast.FindAll({ param($item) $item -is [Management.Automation.Language.FunctionDefinitionAst] -and $item.Name -eq $name }, $true))
   if ($node.Count -ne 1) { throw 'function-not-found' }
   Invoke-Expression $node[0].Extent.Text
@@ -117,6 +120,7 @@ if (@(Get-EditorRegistryDirectories $empty).Count -ne 0) { throw 'empty-registry
             desktop = "([Environment]::GetFolderPath('Desktop'))"
             self.assertEqual(text.count(desktop), 1)
             module.write_text(text.replace(desktop, '$env:TEST_DESKTOP'), encoding='utf-8-sig')
+            shutil.copy2(DISCOVERY, temp / DISCOVERY.name)
             shutil.copytree(ROOT / 'windows-installer/activation-probe', temp / 'activation-probe')
             driver = temp / 'preflight.ps1'
             driver.write_text(r'''
@@ -154,6 +158,20 @@ $settings.antigravity_exe = Join-Path $old 'Antigravity IDE.exe'
 try { & $ModulePath -Settings $settings -StatusFile $status -CheckOnly; throw 'did-not-detect-missing' } catch { if ($_.Exception.Message -ne 'editor-existing-not-found') { throw } }
 $settings.antigravity_exe = Join-Path $selected 'Antigravity IDE.exe'
 & $ModulePath -Settings $settings -StatusFile $status -CheckOnly
+. (Join-Path $Directory 'editor-discovery.ps1')
+if (@(Find-InstalledEditor).Count) { throw 'stale-entry-selected' }
+$reg = [pscustomobject]@{ DisplayName='Antigravity IDE'; InstallLocation=$selected }
+$global:fixtureRegistry = @($reg, $reg)
+$found = @(Find-InstalledEditor)
+if ($found.Count -ne 1 -or $found[0] -ne $settings.antigravity_exe) { throw 'custom-install-not-found' }
+$env:ProgramFiles = Join-Path $Directory 'Program Files'
+[void](New-Item -ItemType Directory $env:ProgramFiles)
+Copy-Item -LiteralPath $selected -Destination $env:ProgramFiles -Recurse
+if (@(Find-InstalledEditor).Count -ne 2) { throw 'ambiguous-install-not-found' }
+$global:fixtureRegistry = @()
+if (@(Find-InstalledEditor).Count -ne 1) { throw 'system-install-not-found' }
+function global:Get-AuthenticodeSignature { param($LiteralPath) return @{ Status = 'NotSigned' } }
+if (@(Find-InstalledEditor).Count) { throw 'unsigned-app-selected' }
 ''', encoding='utf-8-sig')
             result = subprocess.run([PWSH, '-NoLogo', '-NoProfile', '-File', str(driver),
                                      '-ModulePath', str(module), '-Directory', str(temp)],
@@ -174,6 +192,7 @@ class EditorWindowsFixtureTests(unittest.TestCase):
             self.assertEqual(module_source.count(download), 1)
             module_source = module_source.replace(download, "  [IO.File]::WriteAllText($vsix, 'fixture')")
             staged_module.write_text(module_source, encoding='utf-8-sig')
+            shutil.copy2(DISCOVERY, temp / DISCOVERY.name)
             shutil.copytree(ROOT / 'windows-installer/activation-probe', temp / 'activation-probe')
             driver.write_text(r'''
 param($ModulePath, $Directory)

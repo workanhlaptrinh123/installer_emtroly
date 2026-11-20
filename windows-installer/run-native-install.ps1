@@ -223,7 +223,7 @@ try {
     'editor-shortcut-exists' = 'Shortcut Em Trợ Lý - Antigravity đã tồn tại; bộ cài không ghi đè.'
     'editor-desktop-missing' = 'Không tìm thấy Desktop hoặc Windows Script Host để tạo shortcut an toàn.'
     'editor-invalid-path' = 'Đường dẫn Windows chứa ký tự bộ cài chưa hỗ trợ; dữ liệu hiện có không bị ghi đè.'
-    'editor-select-existing' = 'Máy có Antigravity. Hãy tích chọn dùng bản đã cài và chọn đúng Antigravity IDE.exe; bộ cài không ghi đè.'
+    'editor-select-existing' = 'Máy có Antigravity. Hãy tích chọn dùng bản đã cài để bộ cài tìm ứng dụng.'
     'editor-existing-not-found' = 'Không tìm thấy Antigravity IDE.exe đã chọn. Hãy chọn lại hoặc bỏ chọn để tải bản mới.'
     'editor-registry-ambiguous' = 'Có thông tin Antigravity cũ trong Windows nhưng không xác định được đường dẫn. Hãy kiểm tra ứng dụng đã cài; bộ cài không tự xóa dữ liệu.'
     'editor-provider-unsupported' = 'Codex hiện chỉ hỗ trợ provider codex.anhlaptrinh.vn/v1 trong bộ cài này.'
