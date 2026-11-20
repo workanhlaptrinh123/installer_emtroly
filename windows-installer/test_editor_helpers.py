@@ -320,8 +320,7 @@ param($RepairPath, $Directory)
 $ErrorActionPreference = 'Stop'
 $env:LOCALAPPDATA = Join-Path $Directory 'Local AppData'
 $env:TEMP = Join-Path $Directory 'Temp Files'
-$env:USERPROFILE = Join-Path $Directory 'User Profile'
-[void](New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA, $env:TEMP, $env:USERPROFILE)
+[void](New-Item -ItemType Directory -Force -Path $env:LOCALAPPDATA, $env:TEMP)
 $base = Join-Path $env:LOCALAPPDATA 'EmTroLy'
 $app = Join-Path $env:LOCALAPPDATA 'Programs\EmTroLy-Antigravity-IDE-0123456789abcdef0123456789abcdef'
 $desktop = [Environment]::GetFolderPath('Desktop')
