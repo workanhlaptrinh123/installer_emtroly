@@ -60,11 +60,12 @@ cp -a "$BASE/windows-installer/activation-probe" "$payload/windows-installer/"
 
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
+    payload_win="$(cygpath -w "$payload")"
     powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "
       \$ErrorActionPreference = 'Stop'
       \$csc = Join-Path \$env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
       \$sma = ([PSObject].Assembly.Location)
-      \$winDir = (Resolve-Path '$payload/windows-installer').Path
+      \$winDir = (Resolve-Path -LiteralPath '$payload_win\windows-installer').Path
       \$ico = Join-Path \$winDir 'alt.ico'
       \$cs  = Join-Path \$winDir 'EmTroLyHost.cs'
       \$out = Join-Path \$winDir 'EmTroLyHost.exe'
