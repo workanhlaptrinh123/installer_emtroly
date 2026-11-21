@@ -347,8 +347,7 @@ try {
     try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot) } catch { }
   }
   Remove-Item -LiteralPath $pending -ErrorAction Stop
-  $hasZaloInstalled = Test-Path -LiteralPath (Join-Path $root 'workspace\skills\telegram-zalo-owner-login\SKILL.md') -PathType Leaf
-  if ($hasZaloInstalled) {
+  if ($zaloEnabled) {
     Write-SafeStatus 'Hoàn tất: Đã cài trọn gói từ A–Z gồm OpenClaw, Zalo (/zaloqr, /zalostatus), tạo ảnh, DOCX/Excel/PowerPoint, Antigravity IDE và Codex CLI.'
   } else {
     Write-SafeStatus 'Hoàn tất: Đã cài trọn gói từ A–Z gồm OpenClaw, Telegram, tạo ảnh, DOCX/Excel/PowerPoint, Antigravity IDE và Codex CLI (đã bỏ qua Zalo theo lựa chọn).'
