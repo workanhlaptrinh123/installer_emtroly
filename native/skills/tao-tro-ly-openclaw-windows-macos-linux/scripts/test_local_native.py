@@ -281,7 +281,13 @@ class WindowsCliTests(unittest.TestCase):
     def test_redirected_cli_directory_rejected(self):
         outside = self.home / "outside"
         outside.mkdir()
-        (self.localappdata / "OpenClaw").symlink_to(outside, target_is_directory=True)
+        redirected = self.localappdata / "OpenClaw"
+        try:
+            redirected.symlink_to(outside, target_is_directory=True)
+        except OSError as error:
+            if getattr(error, "winerror", None) != 1314:
+                raise
+            self.skipTest("directory symlink creation requires Windows symlink privilege")
         with self.assertRaises(ValueError):
             self.install()
         self.assertEqual(list(outside.iterdir()), [])

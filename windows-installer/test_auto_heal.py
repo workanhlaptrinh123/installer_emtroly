@@ -23,6 +23,12 @@ SHELL = str(WIN_POWERSHELL) if WIN_POWERSHELL.is_file() else (os.environ.get("PW
 TOKEN = "777888:SECRET_TELEGRAM_TOKEN_AUTOHEAL_1234567890"
 API_KEY = "custom-router-secret-key-autoheal-998877"
 
+SUBPROCESS_TEXT_KWARGS = {
+    "text": True,
+    "encoding": "utf-8",
+    "errors": "replace",
+}
+
 
 FAKE_CODEX_PY = r"""
 import json
@@ -218,7 +224,7 @@ class AutoHealRuntimeTests(unittest.TestCase):
             res = subprocess.run(
                 [SHELL, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(check_ps)],
                 capture_output=True,
-                text=True,
+                **SUBPROCESS_TEXT_KWARGS,
                 timeout=20,
             )
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
@@ -247,7 +253,7 @@ class AutoHealRuntimeTests(unittest.TestCase):
             res = subprocess.run(
                 [SHELL, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe)],
                 capture_output=True,
-                text=True,
+                **SUBPROCESS_TEXT_KWARGS,
                 timeout=20,
             )
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
@@ -348,7 +354,7 @@ class AutoHealRuntimeTests(unittest.TestCase):
                 ],
                 env=env,
                 capture_output=True,
-                text=True,
+                **SUBPROCESS_TEXT_KWARGS,
                 timeout=45,
             )
             status_text = log_file.read_text(encoding="utf-8") if log_file.exists() else ""
@@ -449,7 +455,7 @@ class AutoHealRuntimeTests(unittest.TestCase):
                 ],
                 env=env,
                 capture_output=True,
-                text=True,
+                **SUBPROCESS_TEXT_KWARGS,
                 timeout=30,
             )
             status_text = status_file.read_text(encoding="utf-8") if status_file.exists() else ""
