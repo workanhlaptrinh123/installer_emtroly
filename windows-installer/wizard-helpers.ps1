@@ -1,0 +1,529 @@
+# Smart Helpers cho giao diện Em Trợ Lý (Windows 11 WPF):
+# - Đọc phiên bản ứng dụng từ MANIFEST.txt
+# - Tự động lấy Telegram Owner ID & Group ID từ Bot Token (getUpdates)
+# - Kiểm tra nhanh kết nối Telegram Bot + Provider API Key trước khi cài
+# - Kiểm tra điều kiện hệ thống (Pre-flight: Windows x64, ổ cứng >= 2GB, kết nối mạng)
+# - Trạng thái Dashboard thực (Gateway port, Telegram, Zalo, Codex/Antigravity)
+# - Xuất báo cáo hỗ trợ kỹ thuật (đã tự động ẩn sạch Token & API Key)
+# - Tạo lối tắt ứng dụng Quản lý "Em Tro Ly - Anh Lap Trinh" trên Desktop & Start Menu
+
+function Get-EmTroLyAppVersion {
+  param([string]$PayloadRoot = '')
+  $installerVer = '2026.11.21'
+  $openClawVer = '2026.11.4'
+  if ($PayloadRoot) {
+    $manifestPath = Join-Path $PayloadRoot 'MANIFEST.txt'
+    if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+      try {
+        foreach ($line in [IO.File]::ReadAllLines($manifestPath, [System.Text.Encoding]::UTF8)) {
+          if ($line -match '^installer_version=(.+)$') { $installerVer = $Matches[1].Trim() }
+          elseif ($line -match '^openclaw=(.+)$') { $openClawVer = $Matches[1].Trim() }
+        }
+      } catch { }
+    }
+  }
+  return [pscustomobject]@{
+    InstallerVersion = $installerVer
+    OpenClawVersion  = $openClawVer
+    Display          = "v$installerVer · OpenClaw $openClawVer"
+  }
+}
+
+function Get-SafeProp($Obj, [string]$Name) {
+  if ($null -eq $Obj) { return $null }
+  if ($Obj -is [System.Collections.IDictionary]) {
+    if ($Obj.Contains($Name)) { return $Obj[$Name] }
+    return $null
+  }
+  $p = $Obj.PSObject.Properties[$Name]
+  if ($p) { return $p.Value }
+  return $null
+}
+
+function Get-TelegramIdsFromBotUpdates {
+  param([Parameter(Mandatory=$true)][string]$TelegramToken)
+  $tok = $TelegramToken.Trim()
+  if ($tok -notmatch '^[0-9]{5,}:[A-Za-z0-9_-]{20,}$') {
+    return [pscustomobject]@{
+      Ok               = $false
+      BotUsername      = ''
+      SuggestedOwnerId = ''
+      SuggestedGroupId = ''
+      Owners           = @()
+      Groups           = @()
+      Message          = 'Telegram Bot Token chưa đúng định dạng (ví dụ: 123456789:ABCdef...).'
+    }
+  }
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  try {
+    $me = Invoke-RestMethod -UseBasicParsing -Method Get -Uri ("https://api.telegram.org/bot$tok/getMe") -TimeoutSec 15 -MaximumRedirection 0
+    $meRes = Get-SafeProp $me 'result'
+    if (-not (Get-SafeProp $me 'ok') -or -not (Get-SafeProp $meRes 'is_bot')) {
+      return [pscustomobject]@{ Ok = $false; BotUsername = ''; SuggestedOwnerId = ''; SuggestedGroupId = ''; Owners = @(); Groups = @(); Message = 'Telegram không xác nhận đây là Bot hợp lệ.' }
+    }
+    $meUser = Get-SafeProp $meRes 'username'
+    $meFirst = Get-SafeProp $meRes 'first_name'
+    $botUser = if ($meUser) { '@' + [string]$meUser } else { [string]$meFirst }
+    $updates = Invoke-RestMethod -UseBasicParsing -Method Get -Uri ("https://api.telegram.org/bot$tok/getUpdates?limit=50") -TimeoutSec 15 -MaximumRedirection 0
+    $ownerMap = [ordered]@{}
+    $groupMap = [ordered]@{}
+
+    foreach ($upd in @(Get-SafeProp $updates 'result')) {
+      $candidates = @()
+      foreach ($prop in @('message', 'edited_message', 'channel_post', 'my_chat_member', 'chat_member')) {
+        $val = Get-SafeProp $upd $prop
+        if ($val) { $candidates += $val }
+      }
+      $cbq = Get-SafeProp $upd 'callback_query'
+      if ($cbq) {
+        $cbFrom = Get-SafeProp $cbq 'from'
+        if ($cbFrom) { $candidates += [pscustomobject]@{ from = $cbFrom; chat = $null } }
+        $cbMsg = Get-SafeProp $cbq 'message'
+        if ($cbMsg) { $candidates += $cbMsg }
+      }
+      foreach ($item in $candidates) {
+        $fromObj = Get-SafeProp $item 'from'
+        if ($fromObj -and (-not (Get-SafeProp $fromObj 'is_bot'))) {
+          $uid = [string](Get-SafeProp $fromObj 'id')
+          if ($uid -match '^[1-9][0-9]*$' -and -not $ownerMap.Contains($uid)) {
+            $nameParts = @()
+            $fn = Get-SafeProp $fromObj 'first_name'
+            $un = Get-SafeProp $fromObj 'username'
+            if ($fn) { $nameParts += [string]$fn }
+            if ($un) { $nameParts += ('@' + [string]$un) }
+            $ownerMap[$uid] = if ($nameParts.Count -gt 0) { ($nameParts -join ' ') } else { $uid }
+          }
+        }
+        $chatObj = Get-SafeProp $item 'chat'
+        if ($chatObj) {
+          $cid = [string](Get-SafeProp $chatObj 'id')
+          if ($cid -match '^-[1-9][0-9]*$' -and -not $groupMap.Contains($cid)) {
+            $title = Get-SafeProp $chatObj 'title'
+            $groupMap[$cid] = if ($title) { [string]$title } else { 'Nhóm Telegram' }
+          } elseif ($cid -match '^[1-9][0-9]*$' -and [string](Get-SafeProp $chatObj 'type') -eq 'private' -and -not $ownerMap.Contains($cid)) {
+            $cu = Get-SafeProp $chatObj 'username'
+            $cf = Get-SafeProp $chatObj 'first_name'
+            $pName = if ($cu) { '@' + [string]$cu } elseif ($cf) { [string]$cf } else { $cid }
+            $ownerMap[$cid] = $pName
+          }
+        }
+      }
+    }
+
+    $ownerItems = @($ownerMap.Keys | ForEach-Object { [pscustomobject]@{ Id = $_; Label = $ownerMap[$_] } })
+    $groupItems = @($groupMap.Keys | ForEach-Object { [pscustomobject]@{ Id = $_; Label = $groupMap[$_] } })
+    $firstOwner = if ($ownerItems.Count -gt 0) { [string]$ownerItems[0].Id } else { '' }
+    $firstGroup = if ($groupItems.Count -gt 0) { [string]$groupItems[0].Id } else { '' }
+
+    if ($ownerItems.Count -eq 0 -and $groupItems.Count -eq 0) {
+      return [pscustomobject]@{
+        Ok               = $true
+        BotUsername      = $botUser
+        SuggestedOwnerId = ''
+        SuggestedGroupId = ''
+        Owners           = @()
+        Groups           = @()
+        Message          = "Đã tìm thấy bot $botUser nhưng chưa có tin nhắn gần đây. Hãy mở Telegram nhắn /start cho $botUser (và nhắn 1 tin trong nhóm có bot), sau đó bấm lại nút này!"
+      }
+    }
+
+    $summaryParts = @("Bot $botUser hợp lệ.")
+    if ($firstOwner) { $summaryParts += "Owner ID: $firstOwner ($($ownerMap[$firstOwner]))." }
+    if ($firstGroup) { $summaryParts += "Group ID: $firstGroup ($($groupMap[$firstGroup]))." }
+    else { $summaryParts += 'Chưa thấy tin nhắn nhóm (hãy thêm bot vào nhóm rồi nhắn 1 tin nếu cần lấy Group ID).' }
+
+    return [pscustomobject]@{
+      Ok               = $true
+      BotUsername      = $botUser
+      SuggestedOwnerId = $firstOwner
+      SuggestedGroupId = $firstGroup
+      Owners           = $ownerItems
+      Groups           = $groupItems
+      Message          = ($summaryParts -join ' ')
+    }
+  } catch {
+    return [pscustomobject]@{
+      Ok               = $false
+      BotUsername      = ''
+      SuggestedOwnerId = ''
+      SuggestedGroupId = ''
+      Owners           = @()
+      Groups           = @()
+      Message          = 'Không kết nối được Telegram API hoặc Bot Token không đúng. Hãy kiểm tra lại Token và Internet.'
+    }
+  }
+}
+
+function Test-EmTroLyLiveCredentials {
+  param(
+    [string]$TelegramToken = '',
+    [string]$BaseUrl = 'https://codex.anhlaptrinh.vn/v1',
+    [string]$ApiKey = '',
+    [string]$Model = 'gpt-6.2-sol',
+    [string]$OpenClawRoot = ''
+  )
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  $tok = $TelegramToken.Trim()
+  $key = $ApiKey.Trim()
+  if ([string]::IsNullOrWhiteSpace($tok) -and $OpenClawRoot) {
+    $tPath = Join-Path $OpenClawRoot 'telegram.token'
+    if (Test-Path -LiteralPath $tPath -PathType Leaf) {
+      try { $tok = ([IO.File]::ReadAllText($tPath, [System.Text.Encoding]::UTF8)).Trim() } catch { }
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace($key) -and $OpenClawRoot) {
+    $kPath = Join-Path $OpenClawRoot 'member-provider.secret'
+    if (Test-Path -LiteralPath $kPath -PathType Leaf) {
+      try { $key = ([IO.File]::ReadAllText($kPath, [System.Text.Encoding]::UTF8)).Trim() } catch { }
+    }
+  }
+
+  $tgOk = $false
+  $tgText = 'Chưa nhập Bot Token'
+  if ($tok -match '^[0-9]{5,}:[A-Za-z0-9_-]{20,}$') {
+    try {
+      $me = Invoke-RestMethod -UseBasicParsing -Method Get -Uri ("https://api.telegram.org/bot$tok/getMe") -TimeoutSec 15 -MaximumRedirection 0
+      if ($me.ok -and $me.result.is_bot) {
+        $tgOk = $true
+        $tgText = 'Bot @' + [string]$me.result.username + ' sẵn sàng'
+      } else {
+        $tgText = 'Token không phải bot hợp lệ'
+      }
+    } catch {
+      $tgText = 'Không kết nối được Telegram hoặc sai Token'
+    }
+  } elseif (-not [string]::IsNullOrWhiteSpace($tok)) {
+    $tgText = 'Token sai định dạng'
+  }
+
+  $apiOk = $false
+  $apiText = 'Chưa nhập API Key'
+  $cleanBase = $BaseUrl.Trim().TrimEnd('/')
+  if (-not [string]::IsNullOrWhiteSpace($key) -and $cleanBase -match '^https://') {
+    try {
+      $headers = @{ Authorization = "Bearer $key"; Accept = 'application/json' }
+      $resp = Invoke-RestMethod -UseBasicParsing -Method Get -Uri "$cleanBase/models" -Headers $headers -TimeoutSec 15 -MaximumRedirection 0
+      $ids = @($resp.data | ForEach-Object { [string]$_.id } | Where-Object { $_ })
+      $matched = @($ids | Where-Object { $_ -ieq $Model })
+      if ($matched.Count -gt 0) {
+        $apiOk = $true
+        $apiText = "API hợp lệ · Model $($matched[0]) sẵn sàng"
+      } else {
+        $apiText = "Kết nối được API nhưng thiếu model $Model"
+      }
+    } catch {
+      $apiText = 'API Key không hợp lệ hoặc không kết nối được máy chủ AI'
+    }
+  }
+
+  return [pscustomobject]@{
+    AllOk       = ($tgOk -and $apiOk)
+    TelegramOk  = $tgOk
+    TelegramMsg = $tgText
+    ApiOk       = $apiOk
+    ApiMsg      = $apiText
+    Summary     = "Telegram: $tgText · AI: $apiText"
+  }
+}
+
+function Test-EmTroLyTcpEndpoint {
+  param([string]$TargetHost, [int]$Port = 443, [int]$TimeoutMs = 3500)
+  $tcp = New-Object System.Net.Sockets.TcpClient
+  try {
+    $iar = $tcp.BeginConnect($TargetHost, $Port, $null, $null)
+    if (-not $iar.AsyncWaitHandle.WaitOne($TimeoutMs, $false)) { return $false }
+    $tcp.EndConnect($iar)
+    return $true
+  } catch {
+    return $false
+  } finally {
+    try { $tcp.Close() } catch { }
+  }
+}
+
+function Test-EmTroLyPreflightChecks {
+  $results = @()
+
+  $isX64 = ($env:PROCESSOR_ARCHITECTURE -eq 'AMD64' -and $env:PROCESSOR_ARCHITEW6432 -ne 'ARM64')
+  $results += [pscustomobject]@{
+    Name   = 'Hệ điều hành Windows 64-bit (x64)'
+    Ok     = $isX64
+    Detail = if ($isX64) { 'Hỗ trợ đầy đủ (AMD64)' } else { 'Yêu cầu Windows 64-bit x64' }
+  }
+
+  $freeGb = 0.0
+  $diskOk = $true
+  $driveLetter = 'C'
+  try {
+    if ($env:USERPROFILE -and $env:USERPROFILE.Length -ge 2) { $driveLetter = $env:USERPROFILE.Substring(0, 1) }
+    $drv = New-Object System.IO.DriveInfo($driveLetter)
+    $freeGb = [Math]::Round(($drv.AvailableFreeSpace / 1GB), 1)
+    $diskOk = ($freeGb -ge 2.0)
+  } catch { }
+  $results += [pscustomobject]@{
+    Name   = "Dung lượng trống ổ đĩa ${driveLetter}:"
+    Ok     = $diskOk
+    Detail = if ($diskOk) { "Còn trống $freeGb GB (đạt yêu cầu >= 2 GB)" } else { "Chỉ còn $freeGb GB (cần tối thiểu 2 GB để cài trọn gói)" }
+  }
+
+  $tgReach = Test-EmTroLyTcpEndpoint -TargetHost 'api.telegram.org' -Port 443
+  $results += [pscustomobject]@{
+    Name   = 'Kết nối máy chủ Telegram (api.telegram.org)'
+    Ok     = $tgReach
+    Detail = if ($tgReach) { 'Thông suốt (HTTPS 443)' } else { 'Bị chặn hoặc mất mạng — kiểm tra VPN / tường lửa' }
+  }
+
+  $aiReach = Test-EmTroLyTcpEndpoint -TargetHost 'codex.anhlaptrinh.vn' -Port 443
+  $results += [pscustomobject]@{
+    Name   = 'Kết nối máy chủ AI (codex.anhlaptrinh.vn)'
+    Ok     = $aiReach
+    Detail = if ($aiReach) { 'Thông suốt (HTTPS 443)' } else { 'Không kết nối được máy chủ AI' }
+  }
+
+  $nodeReach = Test-EmTroLyTcpEndpoint -TargetHost 'nodejs.org' -Port 443
+  $results += [pscustomobject]@{
+    Name   = 'Kết nối tải gói môi trường (nodejs.org)'
+    Ok     = $nodeReach
+    Detail = if ($nodeReach) { 'Thông suốt (HTTPS 443)' } else { 'Không truy cập được nodejs.org' }
+  }
+
+  return $results
+}
+
+function Get-EmTroLyLiveDashboardStatus {
+  $st = if (Get-Command Get-EmTroLyInstalledState -ErrorAction SilentlyContinue) {
+    Get-EmTroLyInstalledState
+  } else { $null }
+  if (-not $st) { return $null }
+
+  $portNum = 0
+  [void][int]::TryParse([string]$st.GatewayPort, [ref]$portNum)
+  $gatewayOnline = $false
+  if ($st.OpenClawInstalled -and $portNum -ge 1024) {
+    $gatewayOnline = Test-EmTroLyTcpEndpoint -TargetHost '127.0.0.1' -Port $portNum -TimeoutMs 450
+  }
+
+  $ownerCount = @($st.OwnerIds -split ',' | Where-Object { $_ -match '^[1-9][0-9]*$' }).Count
+  $desktopDir = [Environment]::GetFolderPath('Desktop')
+  $hasAntigravityShortcut = ($desktopDir -and (Test-Path -LiteralPath (Join-Path $desktopDir 'EmTroLy - Antigravity.lnk') -PathType Leaf))
+
+  $zaloCredDir = if ($st.Root) { Join-Path $st.Root 'credentials\zalouser' } else { '' }
+  $legacyLinked = ($zaloCredDir -and (Test-Path -LiteralPath $zaloCredDir -PathType Container) -and @(Get-ChildItem -LiteralPath $zaloCredDir -Recurse -File -ErrorAction SilentlyContinue).Count -gt 0)
+
+  $zaloLinked = [bool]$legacyLinked
+  $zaloConnected = [bool]$legacyLinked
+  $hasZaloStatusCache = $false
+  $zaloStatusPath = if ($st.Root) { Join-Path $st.Root 'state\emtroly-zalo-status.json' } else { '' }
+  if ($zaloStatusPath -and (Test-Path -LiteralPath $zaloStatusPath -PathType Leaf)) {
+    try {
+      $zObj = [IO.File]::ReadAllText($zaloStatusPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+      $hasZaloStatusCache = $true
+      $isLinked = ($zObj.linked -eq $true -or $zObj.connected -eq $true)
+      if ($isLinked) {
+        $zaloLinked = $true
+        $zaloConnected = ($zObj.connected -eq $true -or $gatewayOnline)
+      }
+    } catch { }
+  }
+
+  $gwUrl = if ($portNum -ge 1024) { "http://127.0.0.1:$portNum/" } else { '' }
+  return [pscustomobject]@{
+    State                  = $st
+    GatewayOnline          = $gatewayOnline
+    GatewayPort            = $portNum
+    GatewayUrl             = $gwUrl
+    OwnerCount             = $ownerCount
+    HasAntigravityShortcut = $hasAntigravityShortcut
+    ZaloLinked             = [bool]$zaloLinked
+    ZaloConnected          = [bool]$zaloConnected
+    HasZaloStatusCache     = [bool]$hasZaloStatusCache
+  }
+}
+
+function Export-EmTroLySupportReport {
+  param(
+    [string]$OutputPath = '',
+    [string]$PayloadRoot = ''
+  )
+  $desktop = [Environment]::GetFolderPath('Desktop')
+  if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $targetDir = if ($desktop -and (Test-Path -LiteralPath $desktop -PathType Container)) { $desktop } else { $env:TEMP }
+    $OutputPath = Join-Path $targetDir "BaoCao-HoTro-EmTroLy-$stamp.txt"
+  }
+
+  $root = if ($env:USERPROFILE) { Join-Path $env:USERPROFILE 'openclaw' } else { '' }
+  $ver = Get-EmTroLyAppVersion -PayloadRoot $PayloadRoot
+  $secrets = @()
+  foreach ($secFile in @('telegram.token', 'member-provider.secret')) {
+    if ($root) {
+      $fp = Join-Path $root $secFile
+      if (Test-Path -LiteralPath $fp -PathType Leaf) {
+        try {
+          $v = ([IO.File]::ReadAllText($fp, [System.Text.Encoding]::UTF8)).Trim()
+          if ($v) { $secrets += $v }
+        } catch { }
+      }
+    }
+  }
+  if ($env:LOCALAPPDATA) {
+    $authPath = Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex\auth.json'
+    if (Test-Path -LiteralPath $authPath -PathType Leaf) {
+      try {
+        $ak = [string](([IO.File]::ReadAllText($authPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json).OPENAI_API_KEY)
+        if ($ak) { $secrets += $ak }
+      } catch { }
+    }
+  }
+
+  $sb = New-Object System.Text.StringBuilder
+  [void]$sb.AppendLine('============================================================')
+  [void]$sb.AppendLine('  BAO CAO HO TRO KY THUAT - ANH LAP TRINH (EM TRO LY)')
+  [void]$sb.AppendLine('  (Da tu dong an toan bo Bot Token, API Key & Gateway Token)')
+  [void]$sb.AppendLine('============================================================')
+  [void]$sb.AppendLine("Thoi diem xuat : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')")
+  [void]$sb.AppendLine("Phien ban app  : $($ver.Display)")
+  [void]$sb.AppendLine("Windows OS     : $([Environment]::OSVersion.VersionString) ($($env:PROCESSOR_ARCHITECTURE))")
+  [void]$sb.AppendLine('')
+
+  [void]$sb.AppendLine('[1] TRANG THAI CAI DAT')
+  if (Get-Command Get-EmTroLyInstalledState -ErrorAction SilentlyContinue) {
+    $st = Get-EmTroLyInstalledState
+    [void]$sb.AppendLine("  OpenClaw da cai : $($st.OpenClawInstalled)")
+    [void]$sb.AppendLine("  Ten tro ly      : $($st.AssistantName)")
+    [void]$sb.AppendLine("  Model           : $($st.Model)")
+    [void]$sb.AppendLine("  Gateway Port    : $($st.GatewayPort)")
+    [void]$sb.AppendLine("  Co Bot Token    : $($st.HasTelegramToken)")
+    [void]$sb.AppendLine("  Co API Secret   : $($st.HasProviderSecret)")
+    [void]$sb.AppendLine("  Zalo da cai     : $($st.ZaloInstalled)")
+    [void]$sb.AppendLine("  Codex CLI       : $($st.CodexInstalled)")
+  }
+  [void]$sb.AppendLine('')
+
+  [void]$sb.AppendLine('[2] CONG CU TRONG PATH')
+  foreach ($tool in @('node.exe', 'npm.cmd', 'python.exe', 'ffmpeg.exe', 'openclaw.cmd', 'codex.cmd', 'codex.exe')) {
+    $cmd = @(Get-Command $tool -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1)
+    $loc = if ($cmd.Count -gt 0) { $cmd[0].Source } else { '(khong tim thay)' }
+    [void]$sb.AppendLine("  $($tool.PadRight(14)) : $loc")
+  }
+  [void]$sb.AppendLine('')
+
+  [void]$sb.AppendLine('[3] KIEM TRA KET NOI & O CUNG (PRE-FLIGHT)')
+  foreach ($chk in (Test-EmTroLyPreflightChecks)) {
+    $mark = if ($chk.Ok) { '[OK]' } else { '[WARN]' }
+    [void]$sb.AppendLine("  $mark $($chk.Name): $($chk.Detail)")
+  }
+  [void]$sb.AppendLine('')
+
+  $gwLogPath = if ($root) { Join-Path $root 'user-gateway.log' } else { '' }
+  $healLogPath = if ($root) { Join-Path $root 'logs\codex-autoheal.log' } else { '' }
+  foreach ($logInfo in @(
+    @{ Title = '[4] NHAT KY GATEWAY (40 DONG CUOI)'; Path = $gwLogPath },
+    @{ Title = '[5] NHAT KY CODEX AUTO-HEAL (30 DONG CUOI)'; Path = $healLogPath }
+  )) {
+    [void]$sb.AppendLine($logInfo.Title)
+    if ($logInfo.Path -and (Test-Path -LiteralPath $logInfo.Path -PathType Leaf)) {
+      try {
+        $lines = @(Get-Content -LiteralPath $logInfo.Path -Tail 40 -ErrorAction SilentlyContinue)
+        if ($lines.Count -eq 0) { [void]$sb.AppendLine('  (trong)') }
+        foreach ($l in $lines) { [void]$sb.AppendLine('  ' + $l) }
+      } catch { [void]$sb.AppendLine('  (khong doc duoc tep)') }
+    } else {
+      [void]$sb.AppendLine('  (chua co tep nhat ky)')
+    }
+    [void]$sb.AppendLine('')
+  }
+
+  $rawReport = $sb.ToString()
+  $safeReport = if (Get-Command Remove-SensitiveStrings -ErrorAction SilentlyContinue) {
+    Remove-SensitiveStrings -Text $rawReport -Secrets $secrets
+  } else {
+    $tmp = $rawReport
+    foreach ($sec in $secrets) {
+      if ($sec -and $sec.Length -ge 6) { $tmp = $tmp.Replace($sec, '[REDACTED_SECRET]') }
+    }
+    $tmp = [regex]::Replace($tmp, '[0-9]{5,}:[A-Za-z0-9_-]{20,}', '[REDACTED_TELEGRAM_TOKEN]')
+    $tmp = [regex]::Replace($tmp, 'sk-[A-Za-z0-9_-]{12,}', '[REDACTED_API_KEY]')
+    $tmp = [regex]::Replace($tmp, '("token"\s*:\s*")[0-9a-fA-F]{24,}(")', '$1[REDACTED_GATEWAY_TOKEN]$2')
+    $tmp
+  }
+
+  [IO.File]::WriteAllText($OutputPath, $safeReport, (New-Object System.Text.UTF8Encoding($false)))
+  return $OutputPath
+}
+
+function Install-EmTroLyAppShortcut {
+  param([string]$PayloadRoot = '')
+  if (-not $env:LOCALAPPDATA) { return [pscustomobject]@{ Created = $false; Path = '' } }
+  $emUiDir = Join-Path $env:LOCALAPPDATA 'EmTroLy\UI'
+  $emWinDir = Join-Path $emUiDir 'windows-installer'
+  [void][IO.Directory]::CreateDirectory($emWinDir)
+
+  if ($PayloadRoot -and (Test-Path -LiteralPath $PayloadRoot -PathType Container)) {
+    foreach ($name in @('wizard.ps1', 'wizard-helpers.ps1', 'codex-cli.ps1', 'auto-heal-codex.ps1', 'manage-instance.ps1', 'validation.ps1')) {
+      $srcFile = Join-Path $PayloadRoot ('windows-installer\' + $name)
+      if (Test-Path -LiteralPath $srcFile -PathType Leaf) {
+        $txt = [IO.File]::ReadAllText($srcFile, [System.Text.Encoding]::UTF8)
+        [IO.File]::WriteAllText((Join-Path $emWinDir $name), $txt, (New-Object System.Text.UTF8Encoding($true)))
+      }
+    }
+    $qrBridgeSrc = Join-Path $PayloadRoot 'windows-installer\zalo-qr-session.mjs'
+    if (Test-Path -LiteralPath $qrBridgeSrc -PathType Leaf) {
+      Copy-Item -LiteralPath $qrBridgeSrc -Destination (Join-Path $emWinDir 'zalo-qr-session.mjs') -Force
+    }
+    foreach ($rootFile in @('alt.png', 'MANIFEST.txt')) {
+      $srcRoot = Join-Path $PayloadRoot $rootFile
+      if (Test-Path -LiteralPath $srcRoot -PathType Leaf) {
+        Copy-Item -LiteralPath $srcRoot -Destination (Join-Path $emUiDir $rootFile) -Force
+      }
+    }
+    $icoSrc = Join-Path $PayloadRoot 'windows-installer\alt.ico'
+    if (Test-Path -LiteralPath $icoSrc -PathType Leaf) {
+      Copy-Item -LiteralPath $icoSrc -Destination (Join-Path $emWinDir 'alt.ico') -Force
+    }
+    $hostCandidates = @(
+      (Join-Path $PayloadRoot 'windows-installer\EmTroLyHost.exe'),
+      (Join-Path $PayloadRoot 'Mo-Giao-Dien-EmTroLy.exe')
+    )
+    $hostDst = Join-Path $emUiDir 'AnhLapTrinh-EmTroLy.exe'
+    foreach ($hc in $hostCandidates) {
+      if (Test-Path -LiteralPath $hc -PathType Leaf) {
+        Copy-Item -LiteralPath $hc -Destination $hostDst -Force
+        break
+      }
+    }
+  }
+
+  $hostExe = Join-Path $emUiDir 'AnhLapTrinh-EmTroLy.exe'
+  $icoDst = Join-Path $emWinDir 'alt.ico'
+  $desktopDir = [Environment]::GetFolderPath('Desktop')
+  $startMenuDir = Join-Path ([Environment]::GetFolderPath('Programs')) 'Anh Lap Trinh'
+  $createdPath = ''
+
+  if ((Test-Path -LiteralPath $hostExe -PathType Leaf) -and $desktopDir -and (Test-Path -LiteralPath $desktopDir -PathType Container)) {
+    try {
+      $wsh = New-Object -ComObject WScript.Shell
+      $targets = @((Join-Path $desktopDir 'Em Tro Ly - Anh Lap Trinh.lnk'))
+      if ($startMenuDir) {
+        [void][IO.Directory]::CreateDirectory($startMenuDir)
+        $targets += (Join-Path $startMenuDir 'Em Tro Ly - Anh Lap Trinh.lnk')
+      }
+      foreach ($lnkPath in $targets) {
+        $sc = $wsh.CreateShortcut($lnkPath)
+        $sc.TargetPath = $hostExe
+        $sc.Arguments = "-PayloadRoot `"$emUiDir`""
+        $sc.WorkingDirectory = $emUiDir
+        $sc.Description = 'Anh Lap Trinh - Em Tro Ly (Quan ly, Cau hinh & Codex CLI)'
+        if (Test-Path -LiteralPath $icoDst -PathType Leaf) {
+          $sc.IconLocation = "$icoDst,0"
+        }
+        $sc.Save()
+      }
+      $createdPath = $targets[0]
+    } catch { }
+  }
+  return [pscustomobject]@{
+    Created = (-not [string]::IsNullOrWhiteSpace($createdPath))
+    Path    = $createdPath
+  }
+}

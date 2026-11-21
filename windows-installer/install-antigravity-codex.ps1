@@ -88,29 +88,57 @@ function Get-PrivateEditorAppDirectories {
   return @(Get-ChildItem -LiteralPath $programsRoot -Directory -Filter 'EmTroLy-Antigravity-IDE-*' -ErrorAction SilentlyContinue)
 }
 
-function Test-EditorApplicationComplete([string]$Root) {
-  $editorPath = Join-Path $Root 'Antigravity IDE.exe'
-  $editorCliPath = Join-Path $Root 'bin\antigravity-ide.cmd'
+function Resolve-EditorBundle([string]$Root, [bool]$RequirePinnedVersion = $false) {
+  if ([string]::IsNullOrWhiteSpace($Root) -or -not (Test-Path -LiteralPath $Root -PathType Container)) { return $null }
   $productPath = Join-Path $Root 'resources\app\product.json'
-  if (-not (Test-Path -LiteralPath $editorPath -PathType Leaf) -or
-      -not (Test-Path -LiteralPath $editorCliPath -PathType Leaf) -or
-      -not (Test-Path -LiteralPath $productPath -PathType Leaf)) { return $false }
+  if (-not (Test-Path -LiteralPath $productPath -PathType Leaf)) { return $null }
+  $pairs = @(
+    @{ Exe = 'Antigravity IDE.exe'; Cli = 'bin\antigravity-ide.cmd' },
+    @{ Exe = 'Antigravity.exe'; Cli = 'bin\antigravity.cmd' }
+  )
+  $matchedExe = $null
+  $matchedCli = $null
+  foreach ($pair in $pairs) {
+    $candidateExe = Join-Path $Root $pair.Exe
+    $candidateCli = Join-Path $Root $pair.Cli
+    if ((Test-Path -LiteralPath $candidateExe -PathType Leaf) -and (Test-Path -LiteralPath $candidateCli -PathType Leaf)) {
+      $matchedExe = $candidateExe
+      $matchedCli = $candidateCli
+      break
+    }
+  }
+  if (-not $matchedExe) { return $null }
   try {
     $product = Get-Content -LiteralPath $productPath -Raw | ConvertFrom-Json
-    return $product.applicationName -eq 'antigravity-ide' -and $product.version -eq '1.107.0'
+    if ($product.applicationName -notin @('antigravity-ide', 'antigravity')) { return $null }
+    if ([string]::IsNullOrWhiteSpace([string]$product.version)) { return $null }
+    if ($RequirePinnedVersion -and $product.version -ne '1.107.0') { return $null }
+    return [pscustomobject]@{
+      AppDir    = $Root
+      Editor    = $matchedExe
+      EditorCli = $matchedCli
+      Version   = [string]$product.version
+    }
   } catch {
-    return $false
+    return $null
   }
+}
+
+function Test-EditorApplicationComplete([string]$Root) {
+  return ($null -ne (Resolve-EditorBundle -Root $Root -RequirePinnedVersion $true))
 }
 
 function Test-EditorShortcutComplete([string]$Root, [string]$AppRoot) {
   if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { return $false }
   try {
+    $bundle = Resolve-EditorBundle -Root $AppRoot
+    if (-not $bundle) { return $false }
     $launchPath = Join-Path $Root 'launch-antigravity.vbs'
     $launch = [IO.File]::ReadAllText($launchPath, [Text.Encoding]::Unicode)
-    $editorPath = Join-Path $AppRoot 'Antigravity IDE.exe'
-    if ($launch -notmatch [regex]::Escape($editorPath) -or
+    if ($launch -notmatch [regex]::Escape($bundle.Editor) -or
         $launch -notmatch 'CODEX_HOME' -or
+        $launch -notmatch 'procEnv\.Remove' -or
+        $launch -match 'ELECTRON_RUN_AS_NODE"\)\s*=\s*""' -or
         $launch -notmatch '--user-data-dir' -or
         $launch -notmatch '--extensions-dir') { return $false }
     $shell = New-Object -ComObject WScript.Shell
@@ -154,6 +182,13 @@ function Test-EditorDataComplete([string]$Root) {
     }
   })
   if ($installed.Count -ne 1) { return $false }
+  $recordedAppFile = Join-Path $Root 'editor-app-path.txt'
+  if (Test-Path -LiteralPath $recordedAppFile -PathType Leaf) {
+    $recordedApp = ([IO.File]::ReadAllText($recordedAppFile)).Trim()
+    if ($recordedApp -and ($null -ne (Resolve-EditorBundle -Root $recordedApp)) -and (Test-EditorShortcutComplete $Root $recordedApp)) {
+      return $true
+    }
+  }
   foreach ($app in @(Get-PrivateEditorAppDirectories)) {
     if (Test-EditorApplicationComplete $app.FullName -and Test-EditorShortcutComplete $Root $app.FullName) { return $true }
   }
@@ -244,24 +279,49 @@ foreach ($path in @($editor, $editorCli, $userData, $extensions, $codexHome, $do
 foreach ($file in @('test.js', 'extension.js', 'package.json')) {
   if (-not (Test-Path -LiteralPath (Join-Path $activationProbe $file) -PathType Leaf)) { throw 'editor-activation-missing' }
 }
+$reusedBundle = $null
 foreach ($programDirectory in @((Join-Path $env:LOCALAPPDATA 'Programs'), $env:ProgramFiles, ${env:ProgramFiles(x86)})) {
   if (-not $programDirectory) { continue }
-  foreach ($relativePath in @('Antigravity IDE\Antigravity IDE.exe', 'Antigravity\Antigravity.exe')) {
-    if (Test-Path -LiteralPath (Join-Path $programDirectory $relativePath) -PathType Leaf) { throw 'editor-select-existing' }
+  foreach ($folderName in @('Antigravity IDE', 'Antigravity')) {
+    $candidateDir = Join-Path $programDirectory $folderName
+    foreach ($exeName in @('Antigravity IDE.exe', 'Antigravity.exe')) {
+      if (Test-Path -LiteralPath (Join-Path $candidateDir $exeName) -PathType Leaf) {
+        $bundle = Resolve-EditorBundle -Root $candidateDir
+        if (-not $bundle) { throw 'editor-version-unsupported' }
+        $reusedBundle = $bundle
+        break
+      }
+    }
+    if ($reusedBundle) { break }
   }
+  if ($reusedBundle) { break }
 }
 $existing = @(Get-EditorRegistryEntries)
 foreach ($entry in $existing) {
   $directories = @(Get-EditorRegistryDirectories $entry)
-  if ($directories.Count -eq 0) { throw 'editor-registry-ambiguous' }
+  if ($directories.Count -eq 0 -and -not $reusedBundle) { throw 'editor-registry-ambiguous' }
   foreach ($directory in $directories) {
     $privatePrefix = (Join-Path $env:LOCALAPPDATA 'Programs\EmTroLy-Antigravity-IDE-').TrimEnd('\')
     if ($directory.TrimEnd('\') -ieq $appDir.TrimEnd('\') -or
         $directory.TrimEnd('\') -like ($privatePrefix + '*')) { continue }
     foreach ($name in @('Antigravity IDE.exe', 'Antigravity.exe')) {
-      if (Test-Path -LiteralPath (Join-Path $directory $name) -PathType Leaf) { throw 'editor-select-existing' }
+      if (Test-Path -LiteralPath (Join-Path $directory $name) -PathType Leaf) {
+        if (-not $reusedBundle) {
+          $bundle = Resolve-EditorBundle -Root $directory
+          if (-not $bundle) { throw 'editor-version-unsupported' }
+          $reusedBundle = $bundle
+        }
+        break
+      }
     }
   }
+}
+$reusingExistingEditor = ($null -ne $reusedBundle)
+if ($reusingExistingEditor) {
+  $appDir = $reusedBundle.AppDir
+  $editor = $reusedBundle.Editor
+  $editorCli = $reusedBundle.EditorCli
+  foreach ($reusedPath in @($appDir, $editor, $editorCli)) { [void](Quote-Cmd $reusedPath) }
 }
 if ($CheckOnly) { return }
 
@@ -278,16 +338,21 @@ try {
     [IO.File]::WriteAllText($receipt, $jobId)
   }
   New-PrivateDirectory $downloadDir
-  if (-not (Test-Path -LiteralPath $editor -PathType Leaf)) {
-    Write-EditorStatus 'Đang tải Antigravity IDE chính thức (khoảng 190 MB)...'
-    $setup = Join-Path $downloadDir 'antigravity-ide-setup.exe'
-    Get-VerifiedDownload -Url $ideUrl -Path $setup -Hash $ideHash
-    if (-not (Test-GoogleAuthenticodeSignature -Path $setup -ExpectedHash $ideHash)) { throw 'editor-installer-signature-invalid' }
-    Write-EditorStatus 'Đang cài Antigravity IDE...'
-    $setupArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCLOSEAPPLICATIONS /NORESTARTAPPLICATIONS /SP- /MERGETASKS="!runcode" /DIR=' + (Quote-Cmd $appDir)
-    if ((Invoke-HiddenProcess $setup $setupArgs 1200) -ne 0) { throw 'editor-install-failed' }
+  if ($reusingExistingEditor) {
+    Write-EditorStatus 'Đã phát hiện Antigravity IDE có sẵn trên máy; đang dùng để cài Extension Codex và cấu hình riêng...'
+  } else {
+    if (-not (Test-Path -LiteralPath $editor -PathType Leaf)) {
+      Write-EditorStatus 'Đang tải Antigravity IDE chính thức (khoảng 190 MB)...'
+      $setup = Join-Path $downloadDir 'antigravity-ide-setup.exe'
+      Get-VerifiedDownload -Url $ideUrl -Path $setup -Hash $ideHash
+      if (-not (Test-GoogleAuthenticodeSignature -Path $setup -ExpectedHash $ideHash)) { throw 'editor-installer-signature-invalid' }
+      Write-EditorStatus 'Đang cài Antigravity IDE...'
+      $setupArgs = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /NOCLOSEAPPLICATIONS /NORESTARTAPPLICATIONS /SP- /MERGETASKS="!runcode" /DIR=' + (Quote-Cmd $appDir)
+      if ((Invoke-HiddenProcess $setup $setupArgs 1200) -ne 0) { throw 'editor-install-failed' }
+    }
+    Test-EditorInstallation $editor
   }
-  Test-EditorInstallation $editor
+  [IO.File]::WriteAllText((Join-Path $base 'editor-app-path.txt'), $appDir, (New-Object Text.UTF8Encoding($false)))
 
   Write-EditorStatus 'Đang cấu hình khóa API cho Codex trong thư mục riêng của Em Trợ Lý…'
   foreach ($folder in @($userData, $extensions, $codexHome)) { [void][IO.Directory]::CreateDirectory($folder) }
@@ -296,7 +361,8 @@ try {
   $config = @"
 model_provider = "router"
 model = "$model"
-preferred_auth_method = "apikey"
+model_context_window = 272000
+model_auto_compact_token_limit = 200000
 cli_auth_credentials_store = "file"
 
 [model_providers.router]
@@ -361,19 +427,22 @@ requires_openai_auth = true
   $launchPath = Join-Path $base 'launch-antigravity.vbs'
   $script = @"
 Option Explicit
-Dim shell, command
+Dim shell, procEnv, name, command
 Set shell = CreateObject("WScript.Shell")
-shell.Environment("PROCESS")("CODEX_HOME") = "$($codexHome.Replace('"','""'))"
-shell.Environment("PROCESS")("OPENAI_API_KEY") = ""
-shell.Environment("PROCESS")("VSCODE_IPC_HOOK_CLI") = ""
-shell.Environment("PROCESS")("ELECTRON_RUN_AS_NODE") = ""
-shell.Environment("PROCESS")("NODE_OPTIONS") = ""
+Set procEnv = shell.Environment("PROCESS")
+procEnv("CODEX_HOME") = "$($codexHome.Replace('"','""'))"
+On Error Resume Next
+For Each name In Array("OPENAI_API_KEY", "VSCODE_IPC_HOOK_CLI", "ELECTRON_RUN_AS_NODE", "NODE_OPTIONS", "VSCODE_DEV")
+  procEnv.Remove name
+Next
+On Error GoTo 0
 shell.CurrentDirectory = "$($appDir.Replace('"','""'))"
 command = Chr(34) & "$($editor.Replace('"','""'))" & Chr(34) & _
   " --user-data-dir " & Chr(34) & "$($userData.Replace('"','""'))" & Chr(34) & _
   " --extensions-dir " & Chr(34) & "$($extensions.Replace('"','""'))" & Chr(34) & _
   " --new-window"
 shell.Run command, 1, False
+Set procEnv = Nothing
 Set shell = Nothing
 "@
   [IO.File]::WriteAllText($launchPath, $script, [Text.Encoding]::Unicode)

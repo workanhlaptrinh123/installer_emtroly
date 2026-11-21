@@ -10,19 +10,33 @@ $shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'EmTroLy - A
 $legacyShortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Em Trợ Lý - Antigravity.lnk'
 $receipt = Join-Path $base 'installer-job.txt'
 
-function Test-EditorApplication([string]$Root) {
-  $editor = Join-Path $Root 'Antigravity IDE.exe'
-  $cli = Join-Path $Root 'bin\antigravity-ide.cmd'
+function Resolve-EditorBundle([string]$Root, [bool]$RequirePinnedVersion = $false) {
+  if ([string]::IsNullOrWhiteSpace($Root) -or -not (Test-Path -LiteralPath $Root -PathType Container)) { return $null }
   $productPath = Join-Path $Root 'resources\app\product.json'
-  if (-not (Test-Path -LiteralPath $editor -PathType Leaf) -or
-      -not (Test-Path -LiteralPath $cli -PathType Leaf) -or
-      -not (Test-Path -LiteralPath $productPath -PathType Leaf)) { return $false }
-  try {
-    $product = Get-Content -LiteralPath $productPath -Raw | ConvertFrom-Json
-    return $product.applicationName -eq 'antigravity-ide' -and $product.version -eq '1.107.0'
-  } catch {
-    return $false
+  if (-not (Test-Path -LiteralPath $productPath -PathType Leaf)) { return $null }
+  foreach ($pair in @(
+    @{ Exe = 'Antigravity IDE.exe'; Cli = 'bin\antigravity-ide.cmd' },
+    @{ Exe = 'Antigravity.exe'; Cli = 'bin\antigravity.cmd' }
+  )) {
+    $editor = Join-Path $Root $pair.Exe
+    $cli = Join-Path $Root $pair.Cli
+    if ((Test-Path -LiteralPath $editor -PathType Leaf) -and (Test-Path -LiteralPath $cli -PathType Leaf)) {
+      try {
+        $product = Get-Content -LiteralPath $productPath -Raw | ConvertFrom-Json
+        if ($product.applicationName -notin @('antigravity-ide', 'antigravity')) { return $null }
+        if ([string]::IsNullOrWhiteSpace([string]$product.version)) { return $null }
+        if ($RequirePinnedVersion -and $product.version -ne '1.107.0') { return $null }
+        return [pscustomobject]@{ AppDir = $Root; Editor = $editor }
+      } catch {
+        return $null
+      }
+    }
   }
+  return $null
+}
+
+function Test-EditorApplication([string]$Root) {
+  return ($null -ne (Resolve-EditorBundle -Root $Root -RequirePinnedVersion $true))
 }
 
 function Test-EmTroLyDataComplete([string]$Root) {
@@ -64,39 +78,59 @@ if (-not (Test-Path -LiteralPath $base -PathType Container) -or
     -not (Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\wscript.exe') -PathType Leaf) -or
     -not (Test-EmTroLyDataComplete $base)) { exit 2 }
 
-$appRoot = $null
+$bundle = $null
+$recordedPathFile = Join-Path $base 'editor-app-path.txt'
+if (Test-Path -LiteralPath $recordedPathFile -PathType Leaf) {
+  $recordedDir = ([IO.File]::ReadAllText($recordedPathFile)).Trim()
+  $bundle = Resolve-EditorBundle -Root $recordedDir
+}
 $savedJob = if (Test-Path -LiteralPath $receipt -PathType Leaf) { [IO.File]::ReadAllText($receipt).Trim() } else { '' }
-if ($savedJob -match '^[a-f0-9]{32}$') {
+if (-not $bundle -and $savedJob -match '^[a-f0-9]{32}$') {
   $candidate = Join-Path $programsRoot ('EmTroLy-Antigravity-IDE-' + $savedJob)
-  if (Test-EditorApplication $candidate) { $appRoot = $candidate }
+  if (Test-EditorApplication $candidate) { $bundle = Resolve-EditorBundle -Root $candidate -RequirePinnedVersion $true }
 }
-if (-not $appRoot -and (Test-Path -LiteralPath $programsRoot -PathType Container)) {
-  $appRoot = @(Get-ChildItem -LiteralPath $programsRoot -Directory -Filter 'EmTroLy-Antigravity-IDE-*' -ErrorAction SilentlyContinue | Where-Object {
+if (-not $bundle -and (Test-Path -LiteralPath $programsRoot -PathType Container)) {
+  $foundPrivate = @(Get-ChildItem -LiteralPath $programsRoot -Directory -Filter 'EmTroLy-Antigravity-IDE-*' -ErrorAction SilentlyContinue | Where-Object {
     Test-EditorApplication $_.FullName
-  } | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+  } | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
+  if ($foundPrivate.Count -gt 0) { $bundle = Resolve-EditorBundle -Root $foundPrivate[0].FullName -RequirePinnedVersion $true }
 }
-if (-not $appRoot) { exit 2 }
+if (-not $bundle) {
+  foreach ($progDir in @($programsRoot, $env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+    if (-not $progDir) { continue }
+    foreach ($subName in @('Antigravity IDE', 'Antigravity')) {
+      $b = Resolve-EditorBundle -Root (Join-Path $progDir $subName)
+      if ($b) { $bundle = $b; break }
+    }
+    if ($bundle) { break }
+  }
+}
+if (-not $bundle) { exit 2 }
 
-$editor = Join-Path $appRoot 'Antigravity IDE.exe'
+$appRoot = $bundle.AppDir
+$editor = $bundle.Editor
 $userData = Join-Path $base 'Antigravity\UserData'
 $extensions = Join-Path $base 'Antigravity\Extensions'
 $codexHome = Join-Path $base 'Codex'
 $launchPath = Join-Path $base 'launch-antigravity.vbs'
 $script = @"
 Option Explicit
-Dim shell, command
+Dim shell, procEnv, name, command
 Set shell = CreateObject("WScript.Shell")
-shell.Environment("PROCESS")("CODEX_HOME") = "$($codexHome.Replace('"','""'))"
-shell.Environment("PROCESS")("OPENAI_API_KEY") = ""
-shell.Environment("PROCESS")("VSCODE_IPC_HOOK_CLI") = ""
-shell.Environment("PROCESS")("ELECTRON_RUN_AS_NODE") = ""
-shell.Environment("PROCESS")("NODE_OPTIONS") = ""
+Set procEnv = shell.Environment("PROCESS")
+procEnv("CODEX_HOME") = "$($codexHome.Replace('"','""'))"
+On Error Resume Next
+For Each name In Array("OPENAI_API_KEY", "VSCODE_IPC_HOOK_CLI", "ELECTRON_RUN_AS_NODE", "NODE_OPTIONS", "VSCODE_DEV")
+  procEnv.Remove name
+Next
+On Error GoTo 0
 shell.CurrentDirectory = "$($appRoot.Replace('"','""'))"
 command = Chr(34) & "$($editor.Replace('"','""'))" & Chr(34) & _
   " --user-data-dir " & Chr(34) & "$($userData.Replace('"','""'))" & Chr(34) & _
   " --extensions-dir " & Chr(34) & "$($extensions.Replace('"','""'))" & Chr(34) & _
   " --new-window"
 shell.Run command, 1, False
+Set procEnv = Nothing
 Set shell = Nothing
 "@
 [IO.File]::WriteAllText($launchPath, $script, [Text.Encoding]::Unicode)

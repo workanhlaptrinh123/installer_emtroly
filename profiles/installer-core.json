@@ -1,0 +1,11 @@
+{
+  "id": "installer-core",
+  "version": "1.0.0",
+  "description": "Fast Windows installer core baseline with Telegram, media and Office basics without Zalo",
+  "modules": [
+    "basic-assistant",
+    "telegram-basic-lite",
+    "image-generation-basic",
+    "document-office-basic"
+  ]
+}

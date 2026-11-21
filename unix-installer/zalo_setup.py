@@ -44,7 +44,7 @@ def _cli_json(node, entry, env, arguments):
         raise RuntimeError("OpenClaw returned invalid plugin information") from None
 
 
-def configure(root, home, node, entry, env, member, owners, source):
+def configure(root, home, node, entry, env, member, owners, source, enable_zalo=True):
     root, home, node, entry, source = (Path(item) for item in (root, home, node, entry, source))
     if not (root / "openclaw.json").is_file() or root.resolve() != root or root not in entry.parents:
         raise ValueError("A private OpenClaw instance is required")
@@ -78,6 +78,8 @@ def configure(root, home, node, entry, env, member, owners, source):
     actual = approval_state.get("file", {}).get("agents", {}).get("main", {})
     if actual.get("security") != "full" or actual.get("ask") != "off":
         raise RuntimeError("Full Exec approval verification failed")
+    if not enable_zalo:
+        return
     try:
         info = _cli_json(node, entry, environment, ["plugins", "info", "zalouser", "--json"])
     except RuntimeError:

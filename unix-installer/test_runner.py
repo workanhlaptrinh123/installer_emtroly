@@ -39,7 +39,7 @@ class RunnerTests(unittest.TestCase):
                     patch.object(runner.service, "check_linux_user_service"), \
                     patch.object(runner.Path, "home", return_value=home), \
                     patch.object(runner.telegram, "verify_bot"), \
-                    patch.object(runner.provider, "verify", return_value="gpt-6.1-sol"), \
+                    patch.object(runner.provider, "verify", return_value="gpt-6.2-sol"), \
                     patch.object(runner, "choose_port", return_value=19789), \
                     patch.object(runner.dependencies, "install_node", return_value=(home / "node", home / "npm")), \
                     patch.object(runner.python_runtime, "install", return_value=home / "python3"), \

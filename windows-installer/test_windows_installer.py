@@ -47,7 +47,7 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertIn("accept_full_access", wizard)
         self.assertIn("$fullAccessCheck.Checked = $false", wizard)
         self.assertIn("$zaloCheck.Checked = $true", wizard)
-        self.assertIn("$zaloCheck.Enabled = $false", wizard)
+        self.assertIn("$zaloCheck.Enabled = $true", wizard)
         self.assertIn("$qrOwnerBox.Text = (($ownersBox.Text -split ',')[0]).Trim()", wizard)
         self.assertIn("/models", runner)
         self.assertIn("api.telegram.org/bot", runner)

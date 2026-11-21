@@ -1,216 +1,1202 @@
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$PayloadRoot)
+param(
+  [Parameter(Mandatory=$true)][string]$PayloadRoot,
+  [switch]$CodexMode,
+  [switch]$SmokeTest
+)
 
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName PresentationFramework
+Add-Type -AssemblyName PresentationCore
+Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
-[System.Windows.Forms.Application]::EnableVisualStyles()
 
-$form = New-Object System.Windows.Forms.Form
-$form.Text = 'Em Trợ Lý - Cài đặt'
-$form.StartPosition = 'CenterScreen'
-$form.Size = New-Object System.Drawing.Size(780, 620)
-$form.MinimumSize = New-Object System.Drawing.Size(780, 620)
-$form.MaximizeBox = $false
-$form.FormBorderStyle = 'FixedDialog'
-
-$tab = New-Object System.Windows.Forms.TabControl
-$tab.Location = New-Object System.Drawing.Point(12, 12)
-$tab.Size = New-Object System.Drawing.Size(740, 490)
-$form.Controls.Add($tab)
-
-function New-Page([string]$Title) {
-  $page = New-Object System.Windows.Forms.TabPage
-  $page.Text = $Title
-  $page.BackColor = [System.Drawing.Color]::White
-  [void]$tab.TabPages.Add($page)
-  return $page
+function Resolve-HelperScript([string]$FileName) {
+  $p = if ($PSScriptRoot) { Join-Path $PSScriptRoot $FileName } else { '' }
+  if (-not $p -or -not (Test-Path -LiteralPath $p -PathType Leaf)) {
+    $p = Join-Path $PayloadRoot ('windows-installer\' + $FileName)
+  }
+  return $p
 }
 
-function Add-Label([System.Windows.Forms.Control]$Page, [string]$Text, [int]$X, [int]$Y, [int]$Width = 210, [int]$Height = 24) {
-  $label = New-Object System.Windows.Forms.Label
-  $label.Text = $Text
-  $label.Location = New-Object System.Drawing.Point($X, $Y)
-  $label.Size = New-Object System.Drawing.Size($Width, $Height)
-  [void]$Page.Controls.Add($label)
+$codexHelperPath = Resolve-HelperScript 'codex-cli.ps1'
+. ([ScriptBlock]::Create([IO.File]::ReadAllText($codexHelperPath, [System.Text.Encoding]::UTF8)))
+
+$manageHelperPath = Resolve-HelperScript 'manage-instance.ps1'
+. ([ScriptBlock]::Create([IO.File]::ReadAllText($manageHelperPath, [System.Text.Encoding]::UTF8)))
+
+$autoHealHelperPath = Resolve-HelperScript 'auto-heal-codex.ps1'
+if (Test-Path -LiteralPath $autoHealHelperPath -PathType Leaf) {
+  . ([ScriptBlock]::Create([IO.File]::ReadAllText($autoHealHelperPath, [System.Text.Encoding]::UTF8)))
 }
 
-function Add-TextBox([System.Windows.Forms.Control]$Page, [string]$Default, [int]$Y, [bool]$Password = $false) {
-  $box = New-Object System.Windows.Forms.TextBox
-  $box.Location = New-Object System.Drawing.Point(250, $Y)
-  $box.Size = New-Object System.Drawing.Size(450, 25)
-  $box.Text = $Default
-  $box.Font = New-Object System.Drawing.Font('Segoe UI', 10)
-  if ($Password) { $box.UseSystemPasswordChar = $true }
-  [void]$Page.Controls.Add($box)
-  return $box
+$wizardHelperPath = Resolve-HelperScript 'wizard-helpers.ps1'
+if (Test-Path -LiteralPath $wizardHelperPath -PathType Leaf) {
+  . ([ScriptBlock]::Create([IO.File]::ReadAllText($wizardHelperPath, [System.Text.Encoding]::UTF8)))
 }
 
-function Add-Note([System.Windows.Forms.Control]$Page, [string]$Text, [int]$Y) {
-  $label = New-Object System.Windows.Forms.Label
-  $label.Text = $Text
-  $label.Location = New-Object System.Drawing.Point(24, $Y)
-  $label.Size = New-Object System.Drawing.Size(680, 52)
-  $label.AutoSize = $false
-  [void]$Page.Controls.Add($label)
+$uiFontFamily  = 'Segoe UI'
+$appVersionObj = if (Get-Command Get-EmTroLyAppVersion -ErrorAction SilentlyContinue) {
+  Get-EmTroLyAppVersion -PayloadRoot $PayloadRoot
+} else {
+  [pscustomobject]@{ InstallerVersion = '2026.11.21'; Display = 'v2026.11.21 · OpenClaw 2026.11.4' }
 }
 
-$connect = New-Page 'Kết nối'
-Add-Label $connect 'Tên trợ lý' 24 72
-$assistantBox = Add-TextBox $connect 'Trợ lý OpenClaw' 69
-Add-Label $connect 'Provider Base URL (HTTPS)' 24 116
-$baseUrlBox = Add-TextBox $connect 'https://codex.anhlaptrinh.vn/v1' 113
-$baseUrlBox.ReadOnly = $true
-Add-Label $connect 'Model' 24 160
-$modelBox = Add-TextBox $connect 'gpt-6.1-sol' 157
-Add-Label $connect 'Telegram Owner IDs' 24 204
-$ownersBox = Add-TextBox $connect '' 201
-Add-Label $connect 'Telegram Group ID' 24 248
-$groupBox = Add-TextBox $connect '' 245
-Add-Label $connect 'Gateway port (0 = tự động)' 24 292
-$portBox = Add-TextBox $connect '0' 289
-Add-Note $connect 'Owner IDs là số Telegram dương, ngăn cách bằng dấu phẩy. Group ID phải là số âm.' 342
-$secret = New-Page 'Bảo mật'
-Add-Label $secret 'Telegram Bot Token' 24 42
-$tokenBox = Add-TextBox $secret '' 39 $true
-Add-Label $secret 'Provider API Key' 24 92
-$apiKeyBox = Add-TextBox $secret '' 89 $true
-Add-Note $secret 'Khóa API dùng cho OpenClaw và cho Codex nếu chọn cài; token và key được lưu riêng trên máy. Không chia sẻ thông tin bí mật.' 150
-Add-Note $secret 'Bot phải được tạo bằng BotFather. Nếu dùng trong nhóm, kiểm tra /setprivacy của đúng bot.' 245
+$xamlText = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Em Trợ Lý - Cài đặt"
+        Width="1040" Height="760"
+        MinWidth="980" MinHeight="700"
+        WindowStartupLocation="CenterScreen"
+        Background="#F4F7FB"
+        FontFamily="Segoe UI"
+        FontSize="13.5"
+        Foreground="#0F172A"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
+        TextOptions.TextFormattingMode="Display"
+        TextOptions.TextRenderingMode="ClearType">
 
-$profile = New-Page 'Hồ sơ'
-Add-Label $profile 'Đối tượng phục vụ (tùy chọn)' 24 42
-$audienceBox = Add-TextBox $profile '' 39
-Add-Label $profile 'Cách xưng hô (tùy chọn)' 24 92
-$addressingBox = Add-TextBox $profile '' 89
-Add-Label $profile 'Phong cách trả lời (tùy chọn)' 24 142
-$styleBox = Add-TextBox $profile '' 139
-Add-Note $profile 'Bộ cài gồm OpenClaw, Zalo, Antigravity IDE và Codex với dữ liệu riêng. Cần Internet để tải các thành phần.' 210
-$fullAccessCheck = New-Object System.Windows.Forms.CheckBox
-$fullAccessCheck.Text = 'Tôi hiểu và đồng ý cấp Full Exec cho owner và nhóm đã nhập'
-$fullAccessCheck.Location = New-Object System.Drawing.Point(24, 290)
-$fullAccessCheck.Size = New-Object System.Drawing.Size(650, 30)
+  <Window.Resources>
+    <SolidColorBrush x:Key="BgCanvas" Color="#F4F7FB"/>
+    <SolidColorBrush x:Key="BgCard" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="BgSubtle" Color="#F8FAFC"/>
+    <SolidColorBrush x:Key="BgInfo" Color="#EFF6FF"/>
+    <SolidColorBrush x:Key="BgSuccess" Color="#ECFDF5"/>
+    <SolidColorBrush x:Key="BgWarn" Color="#FFFBEB"/>
+    <SolidColorBrush x:Key="BgDanger" Color="#FEF2F2"/>
+    <SolidColorBrush x:Key="BorderBrushLight" Color="#E2E8F0"/>
+    <SolidColorBrush x:Key="BorderBrushInfo" Color="#BFDBFE"/>
+    <SolidColorBrush x:Key="BorderBrushDanger" Color="#FECACA"/>
+    <SolidColorBrush x:Key="PrimaryBrush" Color="#2563EB"/>
+    <SolidColorBrush x:Key="PrimaryHover" Color="#1D4ED8"/>
+    <SolidColorBrush x:Key="DangerBrush" Color="#DC2626"/>
+    <SolidColorBrush x:Key="DangerHover" Color="#B91C1C"/>
+    <SolidColorBrush x:Key="SuccessBrush" Color="#059669"/>
+    <SolidColorBrush x:Key="WarnBrush" Color="#D97706"/>
+    <SolidColorBrush x:Key="TextMain" Color="#0F172A"/>
+    <SolidColorBrush x:Key="TextSub" Color="#64748B"/>
+
+    <Style x:Key="CardBorder" TargetType="Border">
+      <Setter Property="Background" Value="{StaticResource BgCard}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderBrushLight}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="CornerRadius" Value="12"/>
+      <Setter Property="Padding" Value="16,13"/>
+    </Style>
+
+    <Style x:Key="PrimaryBtn" TargetType="Button">
+      <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="FontFamily" Value="Segoe UI"/>
+      <Setter Property="FontSize" Value="13.5"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Padding" Value="16,8"/>
+      <Setter Property="Height" Value="38"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource PrimaryHover}"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="bd" Property="Opacity" Value="0.48"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="SecondaryBtn" TargetType="Button">
+      <Setter Property="Background" Value="{StaticResource BgCard}"/>
+      <Setter Property="Foreground" Value="{StaticResource TextMain}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderBrushLight}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="FontFamily" Value="Segoe UI"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Padding" Value="14,7"/>
+      <Setter Property="Height" Value="36"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="#F1F5F9"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="bd" Property="Opacity" Value="0.45"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="SoftAccentBtn" TargetType="Button" BasedOn="{StaticResource SecondaryBtn}">
+      <Setter Property="Background" Value="{StaticResource BgInfo}"/>
+      <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderBrushInfo}"/>
+    </Style>
+
+    <Style x:Key="SoftDangerBtn" TargetType="Button" BasedOn="{StaticResource SecondaryBtn}">
+      <Setter Property="Background" Value="{StaticResource BgDanger}"/>
+      <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderBrushDanger}"/>
+    </Style>
+
+    <Style x:Key="DangerBtn" TargetType="Button" BasedOn="{StaticResource PrimaryBtn}">
+      <Setter Property="Background" Value="{StaticResource DangerBrush}"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource DangerHover}"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="bd" Property="Opacity" Value="0.48"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="NavBtn" TargetType="Button">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="#334155"/>
+      <Setter Property="FontFamily" Value="Segoe UI"/>
+      <Setter Property="FontSize" Value="13.5"/>
+      <Setter Property="FontWeight" Value="Medium"/>
+      <Setter Property="Height" Value="42"/>
+      <Setter Property="HorizontalContentAlignment" Value="Left"/>
+      <Setter Property="Padding" Value="14,0"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="#F1F5F9"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="bd" Property="Opacity" Value="0.45"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="ModernInput" TargetType="TextBox">
+      <Setter Property="FontFamily" Value="Segoe UI"/>
+      <Setter Property="FontSize" Value="13.5"/>
+      <Setter Property="Foreground" Value="{StaticResource TextMain}"/>
+      <Setter Property="Background" Value="#FFFFFF"/>
+      <Setter Property="BorderBrush" Value="#CBD5E1"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Height" Value="36"/>
+      <Setter Property="Padding" Value="10,6"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TextBox">
+            <Border x:Name="bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="7">
+              <ScrollViewer x:Name="PART_ContentHost" Margin="2,0" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsFocused" Value="True">
+                <Setter TargetName="bd" Property="BorderBrush" Value="#2563EB"/>
+                <Setter TargetName="bd" Property="BorderThickness" Value="1.5"/>
+              </Trigger>
+              <Trigger Property="IsReadOnly" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="#F8FAFC"/>
+                <Setter Property="Foreground" Value="#475569"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="ModernPassword" TargetType="PasswordBox">
+      <Setter Property="FontFamily" Value="Segoe UI"/>
+      <Setter Property="FontSize" Value="13.5"/>
+      <Setter Property="Foreground" Value="{StaticResource TextMain}"/>
+      <Setter Property="Background" Value="#FFFFFF"/>
+      <Setter Property="BorderBrush" Value="#CBD5E1"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Height" Value="36"/>
+      <Setter Property="Padding" Value="10,6"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="PasswordBox">
+            <Border x:Name="bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="7">
+              <ScrollViewer x:Name="PART_ContentHost" Margin="2,0" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsFocused" Value="True">
+                <Setter TargetName="bd" Property="BorderBrush" Value="#2563EB"/>
+                <Setter TargetName="bd" Property="BorderThickness" Value="1.5"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="FieldLabel" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="Segoe UI"/>
+      <Setter Property="FontSize" Value="12.5"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="#334155"/>
+      <Setter Property="Margin" Value="0,0,0,5"/>
+    </Style>
+  </Window.Resources>
+
+  <Grid>
+    <Grid.ColumnDefinitions>
+      <ColumnDefinition Width="238"/>
+      <ColumnDefinition Width="*"/>
+    </Grid.ColumnDefinitions>
+
+    <!-- LEFT SIDEBAR -->
+    <Border Grid.Column="0" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="0,0,1,0">
+      <DockPanel LastChildFill="True" Margin="14,16,14,16">
+        <!-- Brand Logo -->
+        <StackPanel DockPanel.Dock="Top" Margin="2,0,2,18">
+          <Border Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="10,8" Margin="0,0,0,10">
+            <Image x:Name="LogoImage" Height="46" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+          </Border>
+          <TextBlock Text="Em Trợ Lý" FontSize="18" FontWeight="Bold" Foreground="#0F172A" Margin="4,0,0,0"/>
+          <TextBlock Text="Trọn gói AI · Telegram · Zalo · Codex" FontSize="11.5" Foreground="#64748B" Margin="4,2,0,0"/>
+        </StackPanel>
+
+        <!-- Bottom Status & Version -->
+        <StackPanel DockPanel.Dock="Bottom" Margin="2,12,2,0">
+          <!-- Zalo Connected Icon Pill (Visible when installed & Zalo enabled) -->
+          <Border x:Name="SidebarZaloPill" Background="#ECFDF5" BorderBrush="#6EE7B7" BorderThickness="1" CornerRadius="8" Padding="10,7" Margin="0,0,0,6" Cursor="Hand" Visibility="Collapsed">
+            <StackPanel Orientation="Horizontal">
+              <Border x:Name="SidebarZaloIconCircle" Width="18" Height="18" CornerRadius="9" Background="#10B981" VerticalAlignment="Center" Margin="0,0,8,0">
+                <Grid>
+                  <Path x:Name="SidebarZaloCheckIcon" Data="M 4,9.2 L 7.4,12.5 L 14,5.6" Stroke="#FFFFFF" StrokeThickness="2.1" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                  <Ellipse x:Name="SidebarZaloPendingDot" Width="6" Height="6" Fill="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+                </Grid>
+              </Border>
+              <TextBlock x:Name="SidebarZaloText" Text="Zalo: Đã kết nối" FontSize="12" FontWeight="Bold" Foreground="#065F46" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Border>
+          <Border x:Name="SidebarStatusPill" Background="#F1F5F9" CornerRadius="8" Padding="10,8" Margin="0,0,0,8">
+            <StackPanel Orientation="Horizontal">
+              <Ellipse x:Name="SidebarStatusDot" Width="8" Height="8" Fill="#94A3B8" VerticalAlignment="Center" Margin="0,0,8,0"/>
+              <TextBlock x:Name="SidebarStatusText" Text="Chưa cài đặt" FontSize="12" FontWeight="SemiBold" Foreground="#475569"/>
+            </StackPanel>
+          </Border>
+          <TextBlock x:Name="VersionText" Text="v2026.11.21 · Anh Lập Trình" FontSize="11" Foreground="#94A3B8" Margin="4,0,0,0" TextTrimming="CharacterEllipsis"/>
+        </StackPanel>
+
+        <!-- Navigation Buttons -->
+        <StackPanel>
+          <Button x:Name="NavHomeBtn" Style="{StaticResource NavBtn}" Content="  Cài đặt nhanh" Margin="0,0,0,4"/>
+          <Button x:Name="NavConfigBtn" Style="{StaticResource NavBtn}" Content="  Tiến trình cài đặt" Margin="0,0,0,4"/>
+          <Button x:Name="NavCodexBtn" Style="{StaticResource NavBtn}" Content="  Codex CLI" Margin="0,0,0,4"/>
+          <Button x:Name="NavDiagBtn" Style="{StaticResource NavBtn}" Content="  Chẩn đoán &amp; Hỗ trợ" Margin="0,0,0,4"/>
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <!-- RIGHT WORKSPACE -->
+    <DockPanel Grid.Column="1" LastChildFill="True">
+      <!-- Top Header -->
+      <Border DockPanel.Dock="Top" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="0,0,0,1" Padding="24,14">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+            <Border x:Name="HeaderZaloBadge" Background="#ECFDF5" BorderBrush="#6EE7B7" BorderThickness="1" CornerRadius="16" Padding="11,5" Margin="0,0,10,0" VerticalAlignment="Center" Cursor="Hand" Visibility="Collapsed">
+              <StackPanel Orientation="Horizontal">
+                <Border Width="16" Height="16" CornerRadius="8" Background="#10B981" VerticalAlignment="Center" Margin="0,0,6,0">
+                  <Path Data="M 3.5,8.2 L 6.6,11.2 L 12.6,5" Stroke="#FFFFFF" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                </Border>
+                <TextBlock Text="Đã kết nối Zalo" FontSize="12" FontWeight="Bold" Foreground="#065F46" VerticalAlignment="Center"/>
+              </StackPanel>
+            </Border>
+            <Button x:Name="HeaderQuickBtn" Style="{StaticResource SoftAccentBtn}" Content="Mở Codex CLI" VerticalAlignment="Center" MinWidth="136"/>
+          </StackPanel>
+          <StackPanel VerticalAlignment="Center">
+            <TextBlock x:Name="HeaderTitle" Text="Cài đặt nhanh trọn gói A–Z" FontSize="19" FontWeight="Bold" Foreground="#0F172A"/>
+            <TextBlock x:Name="HeaderSubtitle" Text="Nhập 4 thông tin cơ bản bên dưới rồi bấm Cài đặt — mọi thứ còn lại hoàn toàn tự động" FontSize="12.5" Foreground="#64748B" Margin="0,2,0,0"/>
+          </StackPanel>
+        </DockPanel>
+      </Border>
+
+      <!-- Bottom Sticky Action Bar -->
+      <Border DockPanel.Dock="Bottom" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="0,1,0,0" Padding="24,12">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+            <Button x:Name="StopTaskBtn" Style="{StaticResource SoftDangerBtn}" Content="Dừng lại" MinWidth="112" Margin="0,0,10,0" Visibility="Collapsed"/>
+            <Button x:Name="CancelBtn" Style="{StaticResource SecondaryBtn}" Content="Thoát" MinWidth="98" Margin="0,0,10,0"/>
+            <Button x:Name="PrimaryActionBtn" Style="{StaticResource PrimaryBtn}" Content="Cài đặt trọn gói A–Z" MinWidth="172"/>
+          </StackPanel>
+          <TextBlock x:Name="FooterHintText" Text="Mẹo: Dán Bot Token rồi bấm Lấy ID tự động để khỏi cần tìm tay." FontSize="12.5" Foreground="#64748B" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,14,0"/>
+        </DockPanel>
+      </Border>
+
+      <!-- CENTER CONTENT VIEWS -->
+      <Grid Margin="22,16,22,16">
+
+        <!-- VIEW A: LIVE 4-CARD DASHBOARD (Manage Mode Overview) -->
+        <ScrollViewer x:Name="ViewDashboard" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+          <StackPanel>
+            <!-- Hero Summary Banner -->
+            <Border Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="12" Padding="18,14" Margin="0,0,0,14">
+              <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                  <Button x:Name="DashOpenWebBtn" Style="{StaticResource SoftAccentBtn}" Content="Mở Dashboard Web" Margin="0,0,8,0"/>
+                  <Button x:Name="DashRefreshBtn" Style="{StaticResource SecondaryBtn}" Content="Làm mới"/>
+                </StackPanel>
+                <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                  <TextBlock x:Name="DashHeroTitle" Text="Trợ lý OpenClaw đang sẵn sàng trên máy" FontSize="15.5" FontWeight="Bold" Foreground="#1E3A8A"/>
+                  <TextBlock x:Name="DashHeroSub" Text="Model: gpt-6.2-sol · Owner IDs: —" FontSize="12.5" Foreground="#3B82F6" Margin="0,3,0,0"/>
+                </StackPanel>
+              </DockPanel>
+            </Border>
+
+            <!-- 2x2 Status Cards -->
+            <UniformGrid Columns="2" Margin="0,0,0,14">
+              <!-- Card 1: Gateway -->
+              <Border Style="{StaticResource CardBorder}" Margin="0,0,7,12">
+                <DockPanel>
+                  <Button x:Name="DashRestartBtn" DockPanel.Dock="Bottom" Style="{StaticResource SecondaryBtn}" Content="Kiểm tra &amp; Khởi động lại" HorizontalAlignment="Left" Margin="0,12,0,0"/>
+                  <StackPanel>
+                    <DockPanel Margin="0,0,0,6">
+                      <Border x:Name="CardGwBadge" DockPanel.Dock="Right" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="8,2" VerticalAlignment="Center">
+                        <TextBlock x:Name="CardGwBadgeText" Text="✓ Đang chạy" FontSize="11.5" FontWeight="Bold" Foreground="#065F46"/>
+                      </Border>
+                      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Ellipse x:Name="CardGwDot" Width="10" Height="10" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="OpenClaw Gateway" FontSize="14.5" FontWeight="Bold"/>
+                      </StackPanel>
+                    </DockPanel>
+                    <TextBlock x:Name="CardGwStatus" Text="Đang kiểm tra..." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+
+              <!-- Card 2: Telegram -->
+              <Border Style="{StaticResource CardBorder}" Margin="7,0,0,12">
+                <DockPanel>
+                  <Button x:Name="DashEditConfigBtn" DockPanel.Dock="Bottom" Style="{StaticResource SoftAccentBtn}" Content="Đổi Owner ID / Bot Token" HorizontalAlignment="Left" Margin="0,12,0,0"/>
+                  <StackPanel>
+                    <DockPanel Margin="0,0,0,6">
+                      <Border x:Name="CardTgBadge" DockPanel.Dock="Right" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="8,2" VerticalAlignment="Center">
+                        <TextBlock x:Name="CardTgBadgeText" Text="✓ Đã kết nối" FontSize="11.5" FontWeight="Bold" Foreground="#065F46"/>
+                      </Border>
+                      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Ellipse x:Name="CardTgDot" Width="10" Height="10" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="Kết nối Telegram Bot" FontSize="14.5" FontWeight="Bold"/>
+                      </StackPanel>
+                    </DockPanel>
+                    <TextBlock x:Name="CardTgStatus" Text="Đang kiểm tra..." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+
+              <!-- Card 3: Zalo -->
+              <Border x:Name="CardZaloBorder" Style="{StaticResource CardBorder}" Margin="0,0,7,0">
+                <DockPanel>
+                  <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                    <Button x:Name="DashZaloQrBtn" Style="{StaticResource SoftAccentBtn}" Content="Quét QR Zalo" Margin="0,0,8,0"/>
+                    <Button x:Name="DashZaloBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Đồng bộ lại"/>
+                  </StackPanel>
+                  <StackPanel>
+                    <DockPanel Margin="0,0,0,6">
+                      <Border x:Name="CardZaloBadge" DockPanel.Dock="Right" Background="#ECFDF5" BorderBrush="#6EE7B7" BorderThickness="1" CornerRadius="11" Padding="9,3" VerticalAlignment="Center">
+                        <StackPanel Orientation="Horizontal">
+                          <Border x:Name="CardZaloBadgeIcon" Width="14" Height="14" CornerRadius="7" Background="#10B981" VerticalAlignment="Center" Margin="0,0,5,0">
+                            <Path Data="M 3,7.2 L 5.8,9.8 L 11,4.4" Stroke="#FFFFFF" StrokeThickness="1.9" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                          </Border>
+                          <TextBlock x:Name="CardZaloBadgeText" Text="Đã kết nối" FontSize="11.5" FontWeight="Bold" Foreground="#065F46" VerticalAlignment="Center"/>
+                        </StackPanel>
+                      </Border>
+                      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Ellipse x:Name="CardZaloDot" Width="10" Height="10" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="Zalo cá nhân (/zaloqr)" FontSize="14.5" FontWeight="Bold"/>
+                      </StackPanel>
+                    </DockPanel>
+                    <TextBlock x:Name="CardZaloStatus" Text="Đang kiểm tra..." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+
+              <!-- Card 4: Antigravity & Codex -->
+              <Border Style="{StaticResource CardBorder}" Margin="7,0,0,0">
+                <DockPanel>
+                  <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                    <Button x:Name="DashCodexRepairBtn" Style="{StaticResource SecondaryBtn}" Content="Sửa / Cài lại Codex" Margin="0,0,8,0"/>
+                    <Button x:Name="DashOpenCodexBtn" Style="{StaticResource SoftAccentBtn}" Content="Dùng Codex CLI"/>
+                  </StackPanel>
+                  <StackPanel>
+                    <DockPanel Margin="0,0,0,6">
+                      <Border x:Name="CardCodexBadge" DockPanel.Dock="Right" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="8,2" VerticalAlignment="Center">
+                        <TextBlock x:Name="CardCodexBadgeText" Text="✓ Sẵn sàng" FontSize="11.5" FontWeight="Bold" Foreground="#065F46"/>
+                      </Border>
+                      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Ellipse x:Name="CardCodexDot" Width="10" Height="10" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="Antigravity IDE &amp; Codex CLI" FontSize="14.5" FontWeight="Bold"/>
+                      </StackPanel>
+                    </DockPanel>
+                    <TextBlock x:Name="CardCodexStatus" Text="Đang kiểm tra..." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </DockPanel>
+              </Border>
+            </UniformGrid>
+
+            <!-- Quick Maintenance Strip -->
+            <Border Style="{StaticResource CardBorder}">
+              <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                  <Button x:Name="DashAutoHealBtn" Style="{StaticResource PrimaryBtn}" Content="Tự sửa lỗi bằng Codex" Margin="0,0,8,0"/>
+                  <Button x:Name="DashExportBtn" Style="{StaticResource SecondaryBtn}" Content="Xuất báo cáo hỗ trợ"/>
+                </StackPanel>
+                <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                  <TextBlock Text="Sửa lỗi tự động &amp; Hỗ trợ nhanh" FontSize="14" FontWeight="Bold"/>
+                  <TextBlock Text="Trợ lý gặp trục trặc? Để Codex CLI tự kiểm tra log và khắc phục ngay, không mất dữ liệu cũ." FontSize="12.5" Foreground="#64748B" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                </StackPanel>
+              </DockPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- VIEW B: SETUP & QUICK-EDIT FORM (Shared single source of truth!) -->
+        <ScrollViewer x:Name="ViewSetupForm" VerticalScrollBarVisibility="Auto" Visibility="Visible">
+          <StackPanel>
+            <!-- Mode Notice Banner (Visible in Manage Mode) -->
+            <Border x:Name="ManageEditBanner" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,0,12" Visibility="Collapsed">
+              <TextBlock Text="✓ Chế độ Chỉnh sửa nhanh: Chỉ cần sửa ô bạn muốn đổi rồi bấm Lưu thay đổi (~3 giây). Bot Token &amp; API Key có thể để trống để giữ nguyên mã cũ." FontSize="12.5" FontWeight="SemiBold" Foreground="#065F46" TextWrapping="Wrap"/>
+            </Border>
+
+            <!-- Card 1: 4 Essential Inputs -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,12">
+              <StackPanel>
+                <DockPanel Margin="0,0,0,12">
+                  <CheckBox x:Name="ShowSecretCheck" DockPanel.Dock="Right" Content="Hiện mã bí mật" VerticalAlignment="Center" FontSize="12.5" Foreground="#475569"/>
+                  <TextBlock Text="1. Thông tin kết nối bắt buộc" FontSize="15" FontWeight="Bold"/>
+                </DockPanel>
+
+                <!-- Bot Token + Auto-fetch IDs -->
+                <TextBlock x:Name="TokenFieldLabel" Style="{StaticResource FieldLabel}" Text="Telegram Bot Token (tạo qua @BotFather)"/>
+                <Grid Margin="0,0,0,10">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <Grid Grid.Column="0">
+                    <PasswordBox x:Name="TokenPwdBox" Style="{StaticResource ModernPassword}"/>
+                    <TextBox x:Name="TokenPlainBox" Style="{StaticResource ModernInput}" Visibility="Collapsed"/>
+                  </Grid>
+                  <Button x:Name="AutoFetchIdBtn" Grid.Column="1" Style="{StaticResource SoftAccentBtn}" Content="Lấy ID tự động" Margin="10,0,0,0" MinWidth="136"/>
+                </Grid>
+
+                <!-- API Key + Test Connection -->
+                <TextBlock x:Name="ApiKeyFieldLabel" Style="{StaticResource FieldLabel}" Text="Provider API Key (dùng chung cho OpenClaw &amp; Codex CLI)"/>
+                <Grid Margin="0,0,0,10">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                  </Grid.ColumnDefinitions>
+                  <Grid Grid.Column="0">
+                    <PasswordBox x:Name="ApiKeyPwdBox" Style="{StaticResource ModernPassword}"/>
+                    <TextBox x:Name="ApiKeyPlainBox" Style="{StaticResource ModernInput}" Visibility="Collapsed"/>
+                  </Grid>
+                  <Button x:Name="TestConnBtn" Grid.Column="1" Style="{StaticResource SecondaryBtn}" Content="Kiểm tra kết nối" Margin="10,0,0,0" MinWidth="136"/>
+                </Grid>
+
+                <!-- Live Verification Feedback Pill -->
+                <Border x:Name="LiveCheckBanner" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,0,0,12" Visibility="Collapsed">
+                  <TextBlock x:Name="LiveCheckText" Text="" FontSize="12.5" Foreground="#334155" TextWrapping="Wrap"/>
+                </Border>
+
+                <!-- 2-Column Row: Owner IDs & Group ID -->
+                <Grid Margin="0,0,0,10">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="14"/>
+                    <ColumnDefinition Width="*"/>
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Grid.Column="0">
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="Telegram Owner IDs (số dương, cách bởi dấu phẩy)"/>
+                    <TextBox x:Name="OwnersBox" Style="{StaticResource ModernInput}"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="2">
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="Telegram Group ID (số âm, ví dụ: -1001234567890)"/>
+                    <TextBox x:Name="GroupBox" Style="{StaticResource ModernInput}"/>
+                  </StackPanel>
+                </Grid>
+
+                <!-- Model Selection -->
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="14"/>
+                    <ColumnDefinition Width="*"/>
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Grid.Column="0">
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="Mô hình AI mặc định (Model)"/>
+                    <ComboBox x:Name="ModelBox" Height="36" FontFamily="Segoe UI" FontSize="13.5" Padding="10,6" VerticalContentAlignment="Center"/>
+                  </StackPanel>
+                  <StackPanel Grid.Column="2">
+                    <TextBlock Style="{StaticResource FieldLabel}" Text="Tên trợ lý hiển thị"/>
+                    <TextBox x:Name="AssistantBox" Style="{StaticResource ModernInput}" Text="Trợ lý OpenClaw"/>
+                  </StackPanel>
+                </Grid>
+              </StackPanel>
+            </Border>
+
+            <!-- Card 2: Options & Consent -->
+            <Border x:Name="InstallOptionsCard" Style="{StaticResource CardBorder}" Margin="0,0,0,12">
+              <StackPanel>
+                <TextBlock Text="2. Tùy chọn cài đặt trọn gói A–Z" FontSize="15" FontWeight="Bold" Margin="0,0,0,10"/>
+                <CheckBox x:Name="ZaloCheck" Content="Cài đặt Zalo cá nhân &amp; lệnh quét mã /zaloqr (bỏ tích nếu không cần Zalo)" FontSize="13.5" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                <CheckBox x:Name="ExistingEditorCheck" Content="Chỉ cài OpenClaw cơ bản (tích chọn nếu muốn bỏ qua Antigravity IDE &amp; Codex CLI)" FontSize="13" Foreground="#334155" Margin="0,0,0,10"/>
+                <Border Background="#FFFBEB" BorderBrush="#FDE68A" BorderThickness="1" CornerRadius="8" Padding="12,10">
+                  <StackPanel>
+                    <CheckBox x:Name="FullAccessCheck" Content="Tôi hiểu và đồng ý cấp quyền Full Exec cho Owner &amp; nhóm Telegram đã chọn" FontSize="13" FontWeight="Bold" Foreground="#92400E"/>
+                    <TextBlock Text="Quyền Full Exec cho phép trợ lý đọc, sửa tệp và chạy lệnh trên máy theo yêu cầu. Chỉ thêm người tin cậy vào nhóm." FontSize="12" Foreground="#B45309" Margin="22,4,0,0" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+            </Border>
+
+            <!-- Card 3: Collapsible Advanced Settings -->
+            <Border Style="{StaticResource CardBorder}">
+              <Expander x:Name="AdvancedExpander" Header="Tùy chỉnh nâng cao (Hồ sơ giao tiếp, cổng Gateway, QR Owner, URL máy chủ)" FontSize="13.5" FontWeight="SemiBold" Foreground="#334155" IsExpanded="False">
+                <StackPanel Margin="0,12,0,0">
+                  <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="2*"/>
+                      <ColumnDefinition Width="14"/>
+                      <ColumnDefinition Width="*"/>
+                      <ColumnDefinition Width="14"/>
+                      <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                      <TextBlock Style="{StaticResource FieldLabel}" Text="Địa chỉ máy chủ AI (HTTPS)"/>
+                      <TextBox x:Name="BaseUrlBox" Style="{StaticResource ModernInput}" Text="https://codex.anhlaptrinh.vn/v1" IsReadOnly="True"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                      <TextBlock Style="{StaticResource FieldLabel}" Text="Cổng Gateway (0 = tự động)"/>
+                      <TextBox x:Name="PortBox" Style="{StaticResource ModernInput}" Text="0"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="4">
+                      <TextBlock Style="{StaticResource FieldLabel}" Text="Owner ID nhận QR Zalo"/>
+                      <TextBox x:Name="QrOwnerBox" Style="{StaticResource ModernInput}"/>
+                    </StackPanel>
+                  </Grid>
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*"/>
+                      <ColumnDefinition Width="12"/>
+                      <ColumnDefinition Width="*"/>
+                      <ColumnDefinition Width="12"/>
+                      <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                      <TextBlock Style="{StaticResource FieldLabel}" Text="Đối tượng phục vụ (tùy chọn)"/>
+                      <TextBox x:Name="AudienceBox" Style="{StaticResource ModernInput}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                      <TextBlock Style="{StaticResource FieldLabel}" Text="Cách xưng hô (tùy chọn)"/>
+                      <TextBox x:Name="AddressingBox" Style="{StaticResource ModernInput}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="4">
+                      <TextBlock Style="{StaticResource FieldLabel}" Text="Phong cách trả lời (tùy chọn)"/>
+                      <TextBox x:Name="StyleBox" Style="{StaticResource ModernInput}"/>
+                    </StackPanel>
+                  </Grid>
+                </StackPanel>
+              </Expander>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- VIEW C: LIVE 5-STEP PROGRESS CHECKLIST & AUTO-HEAL -->
+        <ScrollViewer x:Name="ViewProgress" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+          <StackPanel>
+            <!-- Status Banner + Progress Bar -->
+            <Border x:Name="ProgressCard" Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="12" Padding="18,16" Margin="0,0,0,14">
+              <StackPanel>
+                <TextBlock x:Name="CoreReadyText" Text="" FontSize="13" FontWeight="SemiBold" Foreground="#059669" Margin="0,0,0,4" Visibility="Collapsed"/>
+                <DockPanel Margin="0,0,0,10">
+                  <TextBlock x:Name="ProgressPercentText" DockPanel.Dock="Right" Text="0%" FontSize="15" FontWeight="Bold" Foreground="#2563EB" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="StatusText" Text="Mọi thứ đã sẵn sàng. Bấm Cài đặt trọn gói A–Z để bắt đầu." FontSize="14.5" FontWeight="Bold" Foreground="#0F172A" TextWrapping="Wrap" Margin="0,0,12,0"/>
+                </DockPanel>
+                <ProgressBar x:Name="InstallProgressBar" Height="10" Minimum="0" Maximum="100" Value="0" Foreground="#2563EB" Background="#DBEAFE" BorderThickness="0"/>
+              </StackPanel>
+            </Border>
+
+            <!-- 5-Step Checklist Card -->
+            <Border x:Name="InstallChecklistCard" Style="{StaticResource CardBorder}" Margin="0,0,0,14">
+              <StackPanel>
+                <TextBlock Text="Tiến trình tự động từ A–Z" FontSize="14.5" FontWeight="Bold" Margin="0,0,0,12"/>
+                <Grid Margin="0,0,0,9">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="26"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <TextBlock x:Name="Step1Icon" Grid.Column="0" Text="○" FontSize="15" FontWeight="Bold" Foreground="#94A3B8" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="Step1Text" Grid.Column="1" Text="Bước 1 · Kiểm tra kết nối API &amp; Bot Telegram" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="Step1Badge" Grid.Column="2" Text="Chờ thực hiện" FontSize="12" Foreground="#94A3B8" VerticalAlignment="Center"/>
+                </Grid>
+                <Grid Margin="0,0,0,9">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="26"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <TextBlock x:Name="Step2Icon" Grid.Column="0" Text="○" FontSize="15" FontWeight="Bold" Foreground="#94A3B8" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="Step2Text" Grid.Column="1" Text="Bước 2 · Chuẩn bị môi trường (Node.js, Python, FFmpeg)" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="Step2Badge" Grid.Column="2" Text="Chờ thực hiện" FontSize="12" Foreground="#94A3B8" VerticalAlignment="Center"/>
+                </Grid>
+                <Grid Margin="0,0,0,9">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="26"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <TextBlock x:Name="Step3Icon" Grid.Column="0" Text="○" FontSize="15" FontWeight="Bold" Foreground="#94A3B8" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="Step3Text" Grid.Column="1" Text="Bước 3 · Cài OpenClaw, tạo ảnh, kỹ năng văn phòng &amp; Gateway" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="Step3Badge" Grid.Column="2" Text="Chờ thực hiện" FontSize="12" Foreground="#94A3B8" VerticalAlignment="Center"/>
+                </Grid>
+                <Grid Margin="0,0,0,9">
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="26"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <TextBlock x:Name="Step4Icon" Grid.Column="0" Text="○" FontSize="15" FontWeight="Bold" Foreground="#94A3B8" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="Step4Text" Grid.Column="1" Text="Bước 4 · Cài đặt Zalo cá nhân &amp; lệnh /zaloqr, /zalostatus" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="Step4Badge" Grid.Column="2" Text="Chờ thực hiện" FontSize="12" Foreground="#94A3B8" VerticalAlignment="Center"/>
+                </Grid>
+                <Grid>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="26"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                  <TextBlock x:Name="Step5Icon" Grid.Column="0" Text="○" FontSize="15" FontWeight="Bold" Foreground="#94A3B8" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="Step5Text" Grid.Column="1" Text="Bước 5 · Cài Antigravity IDE, Codex Extension &amp; Codex CLI" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="Step5Badge" Grid.Column="2" Text="Chờ thực hiện" FontSize="12" Foreground="#94A3B8" VerticalAlignment="Center"/>
+                </Grid>
+              </StackPanel>
+            </Border>
+
+            <!-- Auto-Heal Note + Retry/Manual Auto-Heal Controls -->
+            <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="14,12" Margin="0,0,0,12">
+              <TextBlock x:Name="AutoHealProgressNote" Text="Tự động sửa lỗi (Auto-Heal): Nếu phát sinh lỗi kỹ thuật trong quá trình cài đặt, Codex CLI sẽ tự chẩn đoán và khắc phục rồi nghiệm thu lại giúp bạn." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
+            </Border>
+
+            <!-- Retry Codex Key Panel (Only when $retryEditor) -->
+            <Border x:Name="RetryEditorPanel" Style="{StaticResource CardBorder}" Margin="0,0,0,12" Visibility="Collapsed">
+              <StackPanel>
+                <TextBlock Style="{StaticResource FieldLabel}" Text="Nhập Khóa API để tiếp tục cài Antigravity &amp; Codex CLI:"/>
+                <PasswordBox x:Name="RetryKeyPwdBox" Style="{StaticResource ModernPassword}"/>
+              </StackPanel>
+            </Border>
+
+            <!-- Manual Auto-Heal Trigger (Shown if fresh install fails) -->
+            <StackPanel x:Name="InstallFailureActions" Orientation="Horizontal" Visibility="Collapsed">
+              <Button x:Name="BtnInstallAutoHeal" Style="{StaticResource PrimaryBtn}" Content="Tự sửa lỗi bằng Codex" Margin="0,0,10,0"/>
+              <Button x:Name="BtnProgressExport" Style="{StaticResource SecondaryBtn}" Content="Xuất báo cáo hỗ trợ"/>
+            </StackPanel>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- VIEW D: CODEX CLI WORKSPACE -->
+        <Grid x:Name="ViewCodex" Visibility="Collapsed">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+          </Grid.RowDefinitions>
+
+          <!-- Workspace Bar -->
+          <Border Grid.Row="0" Style="{StaticResource CardBorder}" Margin="0,0,0,12" Padding="16,12">
+            <StackPanel>
+              <DockPanel Margin="0,0,0,8">
+                <TextBlock x:Name="CodexStateText" DockPanel.Dock="Right" Text="Đang kiểm tra Codex CLI..." FontSize="12.5" FontWeight="SemiBold" Foreground="#059669" VerticalAlignment="Center"/>
+                <TextBlock Text="Thư mục làm việc của Codex CLI" FontSize="13.5" FontWeight="Bold"/>
+              </DockPanel>
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="CodexDirBox" Grid.Column="0" Style="{StaticResource ModernInput}"/>
+                <Button x:Name="CodexBrowseBtn" Grid.Column="1" Style="{StaticResource SecondaryBtn}" Content="Chọn thư mục..." Margin="8,0,0,0"/>
+                <Button x:Name="CodexOpenDirBtn" Grid.Column="2" Style="{StaticResource SecondaryBtn}" Content="Mở" Margin="6,0,0,0" MinWidth="56"/>
+                <Button x:Name="CodexTerminalBtn" Grid.Column="3" Style="{StaticResource SoftAccentBtn}" Content="Mở cửa sổ lệnh" Margin="6,0,0,0"/>
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <!-- Prompt Input Card -->
+          <Border Grid.Row="1" Style="{StaticResource CardBorder}" Margin="0,0,0,12" Padding="16,12">
+            <StackPanel>
+              <DockPanel Margin="0,0,0,8">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                  <Button x:Name="PresetConfigBtn" Style="{StaticResource SoftAccentBtn}" Content="Kiểm tra cấu hình" Height="28" Padding="10,2" FontSize="12" Margin="0,0,6,0"/>
+                  <Button x:Name="PresetSkillBtn" Style="{StaticResource SoftAccentBtn}" Content="Sửa kỹ năng" Height="28" Padding="10,2" FontSize="12" Margin="0,0,6,0"/>
+                  <Button x:Name="PresetFixBtn" Style="{StaticResource SoftAccentBtn}" Content="Tự tìm &amp; sửa lỗi" Height="28" Padding="10,2" FontSize="12"/>
+                </StackPanel>
+                <TextBlock Text="Yêu cầu tiếng Việt cho Codex CLI" FontSize="13.5" FontWeight="Bold" VerticalAlignment="Center"/>
+              </DockPanel>
+              <TextBox x:Name="CodexPromptBox" FontFamily="Segoe UI" FontSize="13.5" Height="74" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Padding="10,8" BorderBrush="#CBD5E1" BorderThickness="1"/>
+              <DockPanel Margin="0,10,0,0">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                  <Button x:Name="CodexClearBtn" Style="{StaticResource SecondaryBtn}" Content="Xóa kết quả" Margin="0,0,8,0"/>
+                  <Button x:Name="CodexStopBtn" Style="{StaticResource SoftDangerBtn}" Content="Dừng" Margin="0,0,8,0" IsEnabled="False"/>
+                  <Button x:Name="CodexRunBtn" Style="{StaticResource PrimaryBtn}" Content="Thực hiện bằng Codex"/>
+                </StackPanel>
+                <CheckBox x:Name="CodexWriteCheck" Content="Cho phép Codex sửa tệp trực tiếp" IsChecked="True" VerticalAlignment="Center" FontSize="12.5" Foreground="#334155"/>
+              </DockPanel>
+            </StackPanel>
+          </Border>
+
+          <!-- Streaming Output Card -->
+          <Border Grid.Row="2" Style="{StaticResource CardBorder}" Padding="14,12">
+            <DockPanel>
+              <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                <Button x:Name="CodexRefreshBtn" DockPanel.Dock="Right" Style="{StaticResource SecondaryBtn}" Content="Làm mới" Height="28" Padding="10,2" FontSize="12"/>
+                <TextBlock Text="Kết quả thực hiện" FontSize="13" FontWeight="Bold" VerticalAlignment="Center"/>
+              </DockPanel>
+              <TextBox x:Name="CodexOutputBox" FontFamily="Segoe UI" FontSize="13" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Padding="10,8"/>
+            </DockPanel>
+          </Border>
+        </Grid>
+
+        <!-- VIEW E: DIAGNOSTICS, PRE-FLIGHT & SUPPORT -->
+        <ScrollViewer x:Name="ViewDiagnostics" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+          <StackPanel>
+            <!-- Pre-flight Check Card -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,14">
+              <StackPanel>
+                <DockPanel Margin="0,0,0,12">
+                  <Button x:Name="RunPreflightBtn" DockPanel.Dock="Right" Style="{StaticResource SoftAccentBtn}" Content="Kiểm tra hệ thống ngay"/>
+                  <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="Kiểm tra máy &amp; kết nối mạng (Pre-flight)" FontSize="15" FontWeight="Bold"/>
+                    <TextBlock Text="Kiểm tra Windows x64, ổ đĩa trống và đường truyền tới Telegram / AI / Node.js" FontSize="12.5" Foreground="#64748B" Margin="0,2,0,0"/>
+                  </StackPanel>
+                </DockPanel>
+                <StackPanel x:Name="PreflightListPanel">
+                  <TextBlock Text="Bấm nút Kiểm tra hệ thống ngay để quét nhanh tình trạng máy." FontSize="13" Foreground="#64748B"/>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <!-- Auto-Heal & Component Tools -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,14">
+              <StackPanel>
+                <TextBlock Text="Tự động sửa lỗi &amp; Khôi phục từng phần" FontSize="15" FontWeight="Bold" Margin="0,0,0,6"/>
+                <TextBlock Text="An toàn tuyệt đối: giữ nguyên dữ liệu cấu hình và lịch sử trò chuyện cũ trên máy." FontSize="12.5" Foreground="#64748B" Margin="0,0,0,12"/>
+                <WrapPanel>
+                  <Button x:Name="DiagAutoHealBtn" Style="{StaticResource PrimaryBtn}" Content="Tự sửa lỗi bằng Codex" Margin="0,0,10,8"/>
+                  <Button x:Name="DiagRestartBtn" Style="{StaticResource SecondaryBtn}" Content="Khởi động lại Gateway" Margin="0,0,10,8"/>
+                  <Button x:Name="DiagZaloQrBtn" Style="{StaticResource SoftAccentBtn}" Content="Lấy mã QR Zalo" Margin="0,0,10,8"/>
+                  <Button x:Name="DiagZaloBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Đồng bộ Zalo" Margin="0,0,10,8"/>
+                  <Button x:Name="DiagCodexBtn" Style="{StaticResource SecondaryBtn}" Content="Sửa / Cài lại Codex" Margin="0,0,10,8"/>
+                </WrapPanel>
+              </StackPanel>
+            </Border>
+
+            <!-- Support Export & Desktop Shortcut -->
+            <Border Style="{StaticResource CardBorder}">
+              <StackPanel>
+                <TextBlock Text="Hỗ trợ kỹ thuật &amp; Lối tắt ứng dụng" FontSize="15" FontWeight="Bold" Margin="0,0,0,6"/>
+                <TextBlock Text="File báo cáo hỗ trợ đã tự động ẩn toàn bộ Bot Token, API Key và Gateway Token trước khi xuất." FontSize="12.5" Foreground="#64748B" Margin="0,0,0,12"/>
+                <StackPanel Orientation="Horizontal">
+                  <Button x:Name="DiagExportBtn" Style="{StaticResource SoftAccentBtn}" Content="Xuất báo cáo hỗ trợ (.txt)" Margin="0,0,10,0"/>
+                  <Button x:Name="DiagShortcutBtn" Style="{StaticResource SecondaryBtn}" Content="Tạo lối tắt trên Desktop"/>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- VIEW F: LIVE ZALO QR LOGIN (Dual GUI + Telegram Owner Delivery) -->
+        <ScrollViewer x:Name="ViewZaloQr" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+          <StackPanel>
+            <Border Style="{StaticResource CardBorder}" Padding="24,22">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="268"/>
+                  <ColumnDefinition Width="24"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left QR / Connected Icon Frame -->
+                <Border x:Name="ZaloQrFrame" Grid.Column="0" Width="264" Height="264" Background="#FFFFFF" BorderBrush="#BFDBFE" BorderThickness="1.5" CornerRadius="14" Padding="14" VerticalAlignment="Top">
+                  <Grid>
+                    <Image x:Name="ZaloQrImage" Width="232" Height="232" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor" Visibility="Collapsed"/>
+                    <StackPanel x:Name="ZaloQrLoadingBox" VerticalAlignment="Center" HorizontalAlignment="Center">
+                      <TextBlock Text="Đang tạo mã QR..." FontSize="14.5" FontWeight="Bold" Foreground="#2563EB" HorizontalAlignment="Center"/>
+                      <TextBlock Text="Vui lòng đợi ~3 giây" FontSize="12" Foreground="#64748B" HorizontalAlignment="Center" Margin="0,6,0,0"/>
+                    </StackPanel>
+                    <StackPanel x:Name="ZaloQrSuccessBox" VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="Collapsed">
+                      <Border Width="88" Height="88" CornerRadius="44" Background="#ECFDF5" BorderBrush="#6EE7B7" BorderThickness="2" HorizontalAlignment="Center" Margin="0,0,0,12">
+                        <Border Width="64" Height="64" CornerRadius="32" Background="#10B981" HorizontalAlignment="Center" VerticalAlignment="Center">
+                          <Path Data="M 18,33 L 28,43 L 46,22" Stroke="#FFFFFF" StrokeThickness="4.2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                        </Border>
+                      </Border>
+                      <TextBlock Text="Đã kết nối Zalo!" FontSize="16.5" FontWeight="Bold" Foreground="#065F46" HorizontalAlignment="Center"/>
+                      <Border Background="#D1FAE5" BorderBrush="#6EE7B7" BorderThickness="1" CornerRadius="12" Padding="10,3" HorizontalAlignment="Center" Margin="0,8,0,0">
+                        <StackPanel Orientation="Horizontal">
+                          <Ellipse Width="7" Height="7" Fill="#059669" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                          <TextBlock Text="Đang trực tuyến" FontSize="11.5" FontWeight="Bold" Foreground="#065F46" VerticalAlignment="Center"/>
+                        </StackPanel>
+                      </Border>
+                    </StackPanel>
+                  </Grid>
+                </Border>
+
+                <!-- Right Instructions & Live Sync Status -->
+                <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                  <DockPanel Margin="0,0,0,10">
+                    <Border x:Name="ZaloQrTimerPill" DockPanel.Dock="Right" Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="6" Padding="10,4" VerticalAlignment="Center">
+                      <TextBlock x:Name="ZaloQrTimerText" Text="Đang chuẩn bị..." FontSize="12" FontWeight="Bold" Foreground="#1D4ED8"/>
+                    </Border>
+                    <TextBlock x:Name="ZaloQrMainHeading" Text="Quét mã QR đăng nhập Zalo" FontSize="17" FontWeight="Bold" Foreground="#0F172A" VerticalAlignment="Center"/>
+                  </DockPanel>
+
+                  <TextBlock x:Name="ZaloQrStatusText" Text="Đang khởi tạo phiên đăng nhập Zalo cá nhân..." FontSize="13.5" FontWeight="SemiBold" Foreground="#334155" TextWrapping="Wrap" Margin="0,0,0,10"/>
+
+                  <!-- Telegram Delivery Confirmation Banner -->
+                  <Border x:Name="ZaloQrTgBanner" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="12,9" Margin="0,0,0,14">
+                    <TextBlock x:Name="ZaloQrTgText" Text="Chuẩn bị gửi đồng thời mã QR tới Telegram Chủ sở hữu..." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
+                  </Border>
+
+                  <!-- 3-Step Guide -->
+                  <Border x:Name="ZaloQrGuideBox" Background="#F8FAFC" CornerRadius="8" Padding="12,10" Margin="0,0,0,16">
+                    <StackPanel>
+                      <TextBlock Text="1. Mở ứng dụng Zalo trên điện thoại (hoặc xem ảnh gửi trong Telegram)." FontSize="12.5" Foreground="#334155" TextWrapping="Wrap" Margin="0,0,0,5"/>
+                      <TextBlock Text="2. Bấm biểu tượng Quét mã QR ở góc trên bên phải ứng dụng Zalo." FontSize="12.5" Foreground="#334155" TextWrapping="Wrap" Margin="0,0,0,5"/>
+                      <TextBlock Text="3. Quét mã bên trái và bấm Đăng nhập — phần mềm sẽ tự báo hoàn tất ngay!" FontSize="12.5" FontWeight="SemiBold" Foreground="#0F172A" TextWrapping="Wrap"/>
+                    </StackPanel>
+                  </Border>
+
+                  <StackPanel Orientation="Horizontal">
+                    <Button x:Name="ZaloQrRefreshBtn" Style="{StaticResource PrimaryBtn}" Content="Tạo mã QR mới" Margin="0,0,10,0"/>
+                    <Button x:Name="ZaloQrBackBtn" Style="{StaticResource SecondaryBtn}" Content="Về Tổng quan"/>
+                  </StackPanel>
+                </StackPanel>
+              </Grid>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+
+      </Grid>
+    </DockPanel>
+  </Grid>
+</Window>
+'@
+
+$xmlDoc = [xml]$xamlText
+$reader = New-Object System.Xml.XmlNodeReader($xmlDoc)
+$window = [System.Windows.Markup.XamlReader]::Load($reader)
+
+function Get-Ui([string]$Name) {
+  return $window.FindName($Name)
+}
+
+# WPF Adapters keeping 100% clean compatibility with installer contracts
+function Enable-WpfCheckBoxAdapter($cb) {
+  $cb | Add-Member -MemberType ScriptProperty -Name Checked -Value { [bool]$this.IsChecked } -SecondValue { param($v) $this.IsChecked = [bool]$v } -Force
+  $cb | Add-Member -MemberType ScriptProperty -Name Enabled -Value { [bool]$this.IsEnabled } -SecondValue { param($v) $this.IsEnabled = [bool]$v } -Force
+}
+
+function New-WpfSecretBoxAdapter($pwdBox, $plainBox) {
+  $state = [pscustomobject]@{
+    PwdBox = $pwdBox
+    PlainBox = $plainBox
+    Masked = $true
+  }
+  $state | Add-Member -MemberType ScriptProperty -Name Text -Value {
+    if ($this.Masked) { return [string]$this.PwdBox.Password }
+    return [string]$this.PlainBox.Text
+  } -SecondValue {
+    param($v)
+    $s = if ($null -eq $v) { '' } else { [string]$v }
+    $this.PwdBox.Password = $s
+    $this.PlainBox.Text = $s
+  } -Force
+  $state | Add-Member -MemberType ScriptProperty -Name UseSystemPasswordChar -Value {
+    return [bool]$this.Masked
+  } -SecondValue {
+    param($v)
+    $wantMask = [bool]$v
+    if ($wantMask -and -not $this.Masked) {
+      $this.PwdBox.Password = $this.PlainBox.Text
+      $this.PlainBox.Visibility = [System.Windows.Visibility]::Collapsed
+      $this.PwdBox.Visibility = [System.Windows.Visibility]::Visible
+      $this.Masked = $true
+    } elseif (-not $wantMask -and $this.Masked) {
+      $this.PlainBox.Text = $this.PwdBox.Password
+      $this.PwdBox.Visibility = [System.Windows.Visibility]::Collapsed
+      $this.PlainBox.Visibility = [System.Windows.Visibility]::Visible
+      $this.Masked = $false
+    }
+  } -Force
+  $state | Add-Member -MemberType ScriptMethod -Name Clear -Value {
+    $this.PwdBox.Clear()
+    $this.PlainBox.Clear()
+  } -Force
+  return $state
+}
+
+# Bind Named Controls
+$logoImage          = Get-Ui 'LogoImage'
+$sidebarZaloPill    = Get-Ui 'SidebarZaloPill'
+$sidebarZaloIconCircle = Get-Ui 'SidebarZaloIconCircle'
+$sidebarZaloCheckIcon = Get-Ui 'SidebarZaloCheckIcon'
+$sidebarZaloPendingDot = Get-Ui 'SidebarZaloPendingDot'
+$sidebarZaloText    = Get-Ui 'SidebarZaloText'
+$sidebarStatusPill  = Get-Ui 'SidebarStatusPill'
+$sidebarStatusDot   = Get-Ui 'SidebarStatusDot'
+$sidebarStatusText  = Get-Ui 'SidebarStatusText'
+$versionText        = Get-Ui 'VersionText'
+$navHomeBtn         = Get-Ui 'NavHomeBtn'
+$navConfigBtn       = Get-Ui 'NavConfigBtn'
+$navCodexBtn        = Get-Ui 'NavCodexBtn'
+$navDiagBtn         = Get-Ui 'NavDiagBtn'
+$headerZaloBadge    = Get-Ui 'HeaderZaloBadge'
+$headerQuickBtn     = Get-Ui 'HeaderQuickBtn'
+$headerTitle        = Get-Ui 'HeaderTitle'
+$headerSubtitle     = Get-Ui 'HeaderSubtitle'
+$stopTaskButton     = Get-Ui 'StopTaskBtn'
+$cancelButton       = Get-Ui 'CancelBtn'
+$primaryActionBtn   = Get-Ui 'PrimaryActionBtn'
+$footerHintText     = Get-Ui 'FooterHintText'
+
+$viewDashboard      = Get-Ui 'ViewDashboard'
+$viewSetupForm      = Get-Ui 'ViewSetupForm'
+$viewProgress       = Get-Ui 'ViewProgress'
+$viewCodex          = Get-Ui 'ViewCodex'
+$viewDiagnostics    = Get-Ui 'ViewDiagnostics'
+$viewZaloQr         = Get-Ui 'ViewZaloQr'
+
+$dashHeroTitle      = Get-Ui 'DashHeroTitle'
+$dashHeroSub        = Get-Ui 'DashHeroSub'
+$dashOpenWebBtn     = Get-Ui 'DashOpenWebBtn'
+$dashRefreshBtn     = Get-Ui 'DashRefreshBtn'
+$cardGwBadge        = Get-Ui 'CardGwBadge'
+$cardGwBadgeText    = Get-Ui 'CardGwBadgeText'
+$cardGwDot          = Get-Ui 'CardGwDot'
+$cardGwStatus       = Get-Ui 'CardGwStatus'
+$cardTgBadge        = Get-Ui 'CardTgBadge'
+$cardTgBadgeText    = Get-Ui 'CardTgBadgeText'
+$cardTgDot          = Get-Ui 'CardTgDot'
+$cardTgStatus       = Get-Ui 'CardTgStatus'
+$cardZaloBorder     = Get-Ui 'CardZaloBorder'
+$cardZaloBadge      = Get-Ui 'CardZaloBadge'
+$cardZaloBadgeIcon  = Get-Ui 'CardZaloBadgeIcon'
+$cardZaloBadgeText  = Get-Ui 'CardZaloBadgeText'
+$cardZaloDot        = Get-Ui 'CardZaloDot'
+$cardZaloStatus     = Get-Ui 'CardZaloStatus'
+$cardCodexBadge     = Get-Ui 'CardCodexBadge'
+$cardCodexBadgeText = Get-Ui 'CardCodexBadgeText'
+$cardCodexDot       = Get-Ui 'CardCodexDot'
+$cardCodexStatus    = Get-Ui 'CardCodexStatus'
+$dashRestartBtn     = Get-Ui 'DashRestartBtn'
+$dashEditConfigBtn  = Get-Ui 'DashEditConfigBtn'
+$dashZaloQrBtn      = Get-Ui 'DashZaloQrBtn'
+$dashZaloBtn        = Get-Ui 'DashZaloBtn'
+$dashCodexRepairBtn = Get-Ui 'DashCodexRepairBtn'
+$dashOpenCodexBtn   = Get-Ui 'DashOpenCodexBtn'
+$dashAutoHealBtn    = Get-Ui 'DashAutoHealBtn'
+$dashExportBtn      = Get-Ui 'DashExportBtn'
+
+$manageEditBanner   = Get-Ui 'ManageEditBanner'
+$showSecretCheck    = Get-Ui 'ShowSecretCheck'
+$tokenFieldLabel    = Get-Ui 'TokenFieldLabel'
+$apiKeyFieldLabel   = Get-Ui 'ApiKeyFieldLabel'
+$tokenBox           = New-WpfSecretBoxAdapter (Get-Ui 'TokenPwdBox') (Get-Ui 'TokenPlainBox')
+$apiKeyBox          = New-WpfSecretBoxAdapter (Get-Ui 'ApiKeyPwdBox') (Get-Ui 'ApiKeyPlainBox')
+$autoFetchIdBtn     = Get-Ui 'AutoFetchIdBtn'
+$testConnBtn        = Get-Ui 'TestConnBtn'
+$liveCheckBanner    = Get-Ui 'LiveCheckBanner'
+$liveCheckText      = Get-Ui 'LiveCheckText'
+$ownersBox          = Get-Ui 'OwnersBox'
+$groupBox           = Get-Ui 'GroupBox'
+$modelBox           = Get-Ui 'ModelBox'
+$assistantBox       = Get-Ui 'AssistantBox'
+$installOptionsCard = Get-Ui 'InstallOptionsCard'
+$zaloCheck          = Get-Ui 'ZaloCheck'
+$existingEditorCheck = Get-Ui 'ExistingEditorCheck'
+$fullAccessCheck    = Get-Ui 'FullAccessCheck'
+$advancedExpander   = Get-Ui 'AdvancedExpander'
+$baseUrlBox         = Get-Ui 'BaseUrlBox'
+$portBox            = Get-Ui 'PortBox'
+$qrOwnerBox         = Get-Ui 'QrOwnerBox'
+$audienceBox        = Get-Ui 'AudienceBox'
+$addressingBox      = Get-Ui 'AddressingBox'
+$styleBox           = Get-Ui 'StyleBox'
+
+$coreReadyText      = Get-Ui 'CoreReadyText'
+$statusText         = Get-Ui 'StatusText'
+$progressPercentText = Get-Ui 'ProgressPercentText'
+$installProgressBar = Get-Ui 'InstallProgressBar'
+$installChecklistCard = Get-Ui 'InstallChecklistCard'
+$autoHealProgressNote = Get-Ui 'AutoHealProgressNote'
+$retryEditorPanel   = Get-Ui 'RetryEditorPanel'
+$retryKeyPwdBox     = Get-Ui 'RetryKeyPwdBox'
+$installFailureActions = Get-Ui 'InstallFailureActions'
+$btnInstallAutoHeal = Get-Ui 'BtnInstallAutoHeal'
+$btnProgressExport  = Get-Ui 'BtnProgressExport'
+
+$codexStateText     = Get-Ui 'CodexStateText'
+$codexDirBox        = Get-Ui 'CodexDirBox'
+$codexBrowseBtn     = Get-Ui 'CodexBrowseBtn'
+$codexOpenDirBtn    = Get-Ui 'CodexOpenDirBtn'
+$codexTerminalBtn   = Get-Ui 'CodexTerminalBtn'
+$presetConfigBtn    = Get-Ui 'PresetConfigBtn'
+$presetSkillBtn     = Get-Ui 'PresetSkillBtn'
+$presetFixBtn       = Get-Ui 'PresetFixBtn'
+$codexPromptBox     = Get-Ui 'CodexPromptBox'
+$codexWriteCheck    = Get-Ui 'CodexWriteCheck'
+$codexRunBtn        = Get-Ui 'CodexRunBtn'
+$codexStopBtn       = Get-Ui 'CodexStopBtn'
+$codexClearBtn      = Get-Ui 'CodexClearBtn'
+$codexRefreshBtn    = Get-Ui 'CodexRefreshBtn'
+$codexOutputBox     = Get-Ui 'CodexOutputBox'
+
+$runPreflightBtn    = Get-Ui 'RunPreflightBtn'
+$preflightListPanel = Get-Ui 'PreflightListPanel'
+$diagAutoHealBtn    = Get-Ui 'DiagAutoHealBtn'
+$diagRestartBtn     = Get-Ui 'DiagRestartBtn'
+$diagZaloQrBtn      = Get-Ui 'DiagZaloQrBtn'
+$diagZaloBtn        = Get-Ui 'DiagZaloBtn'
+$diagCodexBtn       = Get-Ui 'DiagCodexBtn'
+$diagExportBtn      = Get-Ui 'DiagExportBtn'
+$diagShortcutBtn    = Get-Ui 'DiagShortcutBtn'
+
+$zaloQrFrame        = Get-Ui 'ZaloQrFrame'
+$zaloQrImage        = Get-Ui 'ZaloQrImage'
+$zaloQrLoadingBox   = Get-Ui 'ZaloQrLoadingBox'
+$zaloQrSuccessBox   = Get-Ui 'ZaloQrSuccessBox'
+$zaloQrMainHeading  = Get-Ui 'ZaloQrMainHeading'
+$zaloQrTimerPill    = Get-Ui 'ZaloQrTimerPill'
+$zaloQrTimerText    = Get-Ui 'ZaloQrTimerText'
+$zaloQrStatusText   = Get-Ui 'ZaloQrStatusText'
+$zaloQrTgBanner     = Get-Ui 'ZaloQrTgBanner'
+$zaloQrTgText       = Get-Ui 'ZaloQrTgText'
+$zaloQrGuideBox     = Get-Ui 'ZaloQrGuideBox'
+$zaloQrRefreshBtn   = Get-Ui 'ZaloQrRefreshBtn'
+$zaloQrBackBtn      = Get-Ui 'ZaloQrBackBtn'
+
+Enable-WpfCheckBoxAdapter $zaloCheck
+Enable-WpfCheckBoxAdapter $existingEditorCheck
+Enable-WpfCheckBoxAdapter $fullAccessCheck
+
+# Defaults matching installer contracts
 $fullAccessCheck.Checked = $false
-[void]$profile.Controls.Add($fullAccessCheck)
-Add-Note $profile 'Full Exec có thể đọc, sửa, xóa file và chạy lệnh trên máy. Chỉ cấp quyền cho những người bạn tin tưởng.' 330
-
-$editorPage = New-Page 'Antigravity'
-$existingEditorCheck = New-Object System.Windows.Forms.CheckBox
-$existingEditorCheck.Text = 'Máy đã có Antigravity IDE – chỉ cài OpenClaw và Zalo'
-$existingEditorCheck.Location = New-Object System.Drawing.Point(24, 42)
-$existingEditorCheck.Size = New-Object System.Drawing.Size(650, 30)
-[void]$editorPage.Controls.Add($existingEditorCheck)
-Add-Note $editorPage 'Tích chọn: chỉ cài OpenClaw và Zalo. Bộ cài sẽ bỏ qua Antigravity và Codex.' 100
-Add-Note $editorPage 'Bỏ trống: cài OpenClaw và Zalo trước. Khi trợ lý sẵn sàng, bộ cài mới tải Antigravity IDE và cấu hình Codex trong thư mục riêng.' 170
-
-$zalo = New-Page 'Zalo'
-$zaloCheck = New-Object System.Windows.Forms.CheckBox
-$zaloCheck.Text = 'Cài plugin Zalo và lệnh /zaloqr (bắt buộc)'
-$zaloCheck.Location = New-Object System.Drawing.Point(24, 42)
-$zaloCheck.Size = New-Object System.Drawing.Size(650, 30)
 $zaloCheck.Checked = $true
-$zaloCheck.Enabled = $false
-[void]$zalo.Controls.Add($zaloCheck)
-Add-Label $zalo 'QR owner ID (tùy chọn)' 24 92
-$qrOwnerBox = Add-TextBox $zalo '' 89
-Add-Note $zalo 'Sau khi cài, owner nhắn /zaloqr trong Telegram riêng để nhận mã; dùng /zalostatus để kiểm tra kết nối.' 150
-Add-Note $zalo 'Không cần quét QR trong lúc cài. Owner cần nhấn /start trước khi yêu cầu mã.' 250
+$zaloCheck.Enabled = $true
+$existingEditorCheck.Checked = $false
+$versionText.Text = "v$($appVersionObj.InstallerVersion) · Anh Lập Trình"
 
-$installPage = New-Page 'Cài đặt'
-$statusLabel = New-Object System.Windows.Forms.Label
-$statusLabel.Text = 'Sẵn sàng. Bấm Cài đặt để bắt đầu.'
-$statusLabel.Location = New-Object System.Drawing.Point(24, 42)
-$statusLabel.Size = New-Object System.Drawing.Size(680, 68)
-$statusLabel.Font = New-Object System.Drawing.Font('Segoe UI', 11, [System.Drawing.FontStyle]::Bold)
-[void]$installPage.Controls.Add($statusLabel)
-Add-Note $installPage 'Bộ cài chỉ chờ OpenClaw, Zalo, /zaloqr, /zalostatus, tạo ảnh và thao tác DOCX/Excel/PowerPoint cơ bản. Không cần đợi Codex hay quét QR.' 130
-Add-Note $installPage 'Windows x64 cần Internet và PowerShell 5.1. Gateway chạy ẩn trong tài khoản Windows, không dùng Docker.' 215
+foreach ($m in @('gpt-6.2-sol', 'GPT-6.1-terra', 'gpt-6.2-astra')) {
+  [void]$modelBox.Items.Add($m)
+}
+$modelBox.SelectedIndex = 0
 
-$coreLabel = New-Object System.Windows.Forms.Label
-$coreLabel.Location = New-Object System.Drawing.Point(24, 16)
-$coreLabel.Size = New-Object System.Drawing.Size(680, 24)
-$coreLabel.ForeColor = [Drawing.Color]::DarkGreen
-[void]$installPage.Controls.Add($coreLabel)
-$retryLabel = New-Object System.Windows.Forms.Label
-$retryLabel.Text = 'Khóa API cho Codex:'
-$retryLabel.Location = New-Object System.Drawing.Point(24, 310)
-$retryLabel.Visible = $false
-[void]$installPage.Controls.Add($retryLabel)
-$retryKey = Add-TextBox $installPage '' 306 $true
-$retryKey.Visible = $false
+# Load Brand Logo (alt.png) & Window Icon (alt.ico) without locking files on disk
+$logoPath = Join-Path $PayloadRoot 'alt.png'
+if (-not (Test-Path -LiteralPath $logoPath -PathType Leaf) -and $PSScriptRoot) {
+  $cand = Join-Path (Split-Path -Parent $PSScriptRoot) 'alt.png'
+  if (Test-Path -LiteralPath $cand -PathType Leaf) { $logoPath = $cand }
+}
+if (Test-Path -LiteralPath $logoPath -PathType Leaf) {
+  try {
+    $imgBytes = [IO.File]::ReadAllBytes($logoPath)
+    $ms = New-Object System.IO.MemoryStream(,$imgBytes)
+    $bmp = New-Object System.Windows.Media.Imaging.BitmapImage
+    $bmp.BeginInit()
+    $bmp.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+    $bmp.StreamSource = $ms
+    $bmp.EndInit()
+    $bmp.Freeze()
+    $ms.Dispose()
+    $logoImage.Source = $bmp
+  } catch { }
+}
+
+$iconPath = Join-Path $PayloadRoot 'windows-installer\alt.ico'
+if (-not (Test-Path -LiteralPath $iconPath -PathType Leaf) -and $PSScriptRoot) {
+  $candIco = Join-Path $PSScriptRoot 'alt.ico'
+  if (Test-Path -LiteralPath $candIco -PathType Leaf) { $iconPath = $candIco }
+}
+if (Test-Path -LiteralPath $iconPath -PathType Leaf) {
+  try {
+    $icoBytes = [IO.File]::ReadAllBytes($iconPath)
+    $ims = New-Object System.IO.MemoryStream(,$icoBytes)
+    $window.Icon = [System.Windows.Media.Imaging.BitmapFrame]::Create($ims, [System.Windows.Media.Imaging.BitmapCreateOptions]::None, [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad)
+    $ims.Dispose()
+  } catch { }
+}
+
+# State variables
 $pending = Join-Path $env:USERPROFILE 'openclaw\installer-codex-pending.json'
-$retryEditor = $false
+$script:currentView = 'home'
+$script:isManageMode = $false
+$script:installRunning = $false
+$script:installCompleted = $false
+$script:retryEditor = $false
+$script:currentManageAction = ''
+$script:resultCode = 1
+$script:runnerProcess = $null
+$script:runnerDeadline = [datetime]::MinValue
+$script:privateDir = $null
+$script:secretFile = $null
+$script:safeLog = $null
+$script:sessionApiKeyFallback = ''
+$script:lastInstallErrorDetail = ''
+$script:gatewayDashboardUrl = ''
 
-$backButton = New-Object System.Windows.Forms.Button
-$backButton.Text = 'Quay lại'
-$backButton.Location = New-Object System.Drawing.Point(360, 520)
-$backButton.Size = New-Object System.Drawing.Size(110, 32)
-$form.Controls.Add($backButton)
-$nextButton = New-Object System.Windows.Forms.Button
-$nextButton.Text = 'Tiếp'
-$nextButton.Location = New-Object System.Drawing.Point(480, 520)
-$nextButton.Size = New-Object System.Drawing.Size(110, 32)
-$form.Controls.Add($nextButton)
-$installButton = New-Object System.Windows.Forms.Button
-$installButton.Text = 'Cài đặt'
-$installButton.Location = New-Object System.Drawing.Point(600, 520)
-$installButton.Size = New-Object System.Drawing.Size(110, 32)
-$form.Controls.Add($installButton)
-$cancelButton = New-Object System.Windows.Forms.Button
-$cancelButton.Text = 'Hủy'
-$cancelButton.Location = New-Object System.Drawing.Point(240, 520)
-$cancelButton.Size = New-Object System.Drawing.Size(100, 32)
-$form.Controls.Add($cancelButton)
+$script:codexProcess = $null
+$script:codexPrivateDir = $null
+$script:codexLogFile = $null
+$script:codexLogOffset = 0
+$script:codexRunning = $false
 
-$pages = @($connect, $secret, $profile, $editorPage, $zalo, $installPage)
-$runnerProcess = $null
-$secretFile = $null
-$statusFile = $null
-$privateDir = $null
-$safeLog = $null
-$installRunning = $false
-$resultCode = 1
+$script:zaloQrProcess = $null
+$script:zaloQrDir = $null
+$script:zaloQrStateFile = $null
+$script:zaloQrPngFile = $null
+$script:zaloQrLoadedTicks = 0
+$script:zaloQrRunning = $false
+$script:openZaloQrAfterManage = $false
+$script:zaloConnectedState = $false
+$script:zaloInstalledState = $false
+$script:zaloSyncProc = $null
+$script:lastZaloSyncAt = [datetime]::MinValue
+
+$codexGuideText = "Hướng dẫn nhanh:`r`n1. Chọn thư mục cần chỉnh sửa (mặc định là thư mục trợ lý OpenClaw).`r`n2. Nhập yêu cầu bằng tiếng Việt vào ô phía trên (hoặc bấm 1 mẫu gợi ý).`r`n3. Bấm `"Thực hiện bằng Codex`" để Codex CLI tự đọc và sửa tệp giúp bạn."
+$codexDirBox.Text = Get-CodexDefaultWorkspace
+$codexOutputBox.Text = $codexGuideText
+
+function New-Brush([string]$Hex) {
+  return (New-Object System.Windows.Media.BrushConverter).ConvertFromString($Hex)
+}
 
 function Show-Error([string]$Message) {
-  [System.Windows.Forms.MessageBox]::Show($form, $Message, 'Không thể tiếp tục', 'OK', 'Warning') | Out-Null
+  [void][System.Windows.MessageBox]::Show($window, $Message, 'Không thể tiếp tục', [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
 }
 
-function Test-Page([int]$Index) {
-  if ($Index -eq 0) {
-    if ([string]::IsNullOrWhiteSpace($baseUrlBox.Text) -or $baseUrlBox.Text -notmatch '^https://') { Show-Error 'Provider Base URL phải bắt đầu bằng https://.'; return $false }
-    if ($modelBox.Text -notin @('gpt-6.1-sol','gpt-6.1-terra','gpt-6-astra')) { Show-Error 'Model phải là gpt-6.1-sol, gpt-6.1-terra hoặc gpt-6-astra.'; return $false }
-    if ($ownersBox.Text -notmatch '^[1-9][0-9]*(,[1-9][0-9]*)*$') { Show-Error 'Owner IDs không hợp lệ.'; return $false }
-    if ($groupBox.Text -notmatch '^-[1-9][0-9]*$') { Show-Error 'Group ID phải là số âm.'; return $false }
-    $port = 0
-    if (-not [int]::TryParse($portBox.Text, [ref]$port) -or ($port -ne 0 -and ($port -lt 1024 -or $port -gt 65000))) { Show-Error 'Gateway port phải là 0 hoặc từ 1024 đến 65000.'; return $false }
-  }
-  if ($Index -eq 1) {
-    if ([string]::IsNullOrWhiteSpace($tokenBox.Text)) { Show-Error 'Hãy nhập Telegram Bot Token.'; return $false }
-    if ([string]::IsNullOrWhiteSpace($apiKeyBox.Text)) { Show-Error 'Hãy nhập Provider API Key.'; return $false }
-  }
-  if ($Index -eq 2 -and -not $fullAccessCheck.Checked) {
-    Show-Error 'Hãy xác nhận bạn hiểu và chấp nhận Full Exec cho owner và nhóm tin cậy.'
-    return $false
-  }
-  if ($Index -eq 4 -and $zaloCheck.Checked) {
-    if ([string]::IsNullOrWhiteSpace($qrOwnerBox.Text)) {
-      $qrOwnerBox.Text = (($ownersBox.Text -split ',')[0]).Trim()
-    }
-    if ($qrOwnerBox.Text -notmatch '^[1-9][0-9]*$') { Show-Error 'QR owner ID phải là số dương.'; return $false }
-    if ((',' + $ownersBox.Text + ',') -notmatch (',' + [regex]::Escape($qrOwnerBox.Text) + ',')) { Show-Error 'QR owner ID phải nằm trong danh sách Owner IDs.'; return $false }
-  }
-  return $true
-}
-
-function Set-Buttons {
-  $installButton.Text = if ($retryEditor) { 'Thử lại bước Codex' } else { 'Cài đặt' }
-  $installButton.Width = if ($retryEditor) { 150 } else { 110 }
-  $cancelButton.Text = if ($retryEditor) { 'Đóng' } else { 'Hủy' }
-  $isLast = $tab.SelectedIndex -eq ($tab.TabPages.Count - 1)
-  $backButton.Enabled = (-not $retryEditor -and -not $installRunning -and $tab.SelectedIndex -gt 0)
-  $nextButton.Enabled = (-not $installRunning -and -not $isLast)
-  $installButton.Enabled = (-not $installRunning -and $isLast)
-  $cancelButton.Enabled = -not $installRunning
+function Show-Info([string]$Message, [string]$Title = 'Thông báo') {
+  [void][System.Windows.MessageBox]::Show($window, $Message, $Title, [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
 }
 
 function Cleanup-Secret {
@@ -219,160 +1205,1627 @@ function Cleanup-Secret {
   }
 }
 
-function Start-Install {
-  if ($retryEditor) {
-    if ([string]::IsNullOrWhiteSpace($retryKey.Text)) { Show-Error 'Hãy nhập khóa API để tiếp tục cài Codex.'; return }
-  } else {
-    if (-not (Test-Page 0) -or -not (Test-Page 1) -or -not (Test-Page 2) -or -not (Test-Page 3) -or -not (Test-Page 4)) { return }
-    $answer = [System.Windows.Forms.MessageBox]::Show($form, 'Các Owner IDs và mọi thành viên trong nhóm Telegram đã chọn có thể yêu cầu đọc, sửa, xóa file và chạy lệnh trên máy. Bạn có tin tưởng họ?', 'Xác nhận Full Exec', 'YesNo', 'Warning')
-    if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) { return }
-    if ($zaloCheck.Checked) {
-      $answer = [System.Windows.Forms.MessageBox]::Show($form, 'Zalo dùng danh sách cho phép. Sau khi cài, owner nhắn /zaloqr trong Telegram riêng để nhận QR. Bạn đồng ý?', 'Xác nhận Zalo', 'YesNo', 'Warning')
-      if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) { return }
+function Cleanup-CodexRun {
+  if ($script:codexPrivateDir -and (Test-Path -LiteralPath $script:codexPrivateDir)) {
+    Remove-Item -LiteralPath $script:codexPrivateDir -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  $script:codexPrivateDir = $null
+  $script:codexLogFile = $null
+  $script:codexLogOffset = 0
+}
+
+function Stop-ProcessTreeById([int]$ProcessId) {
+  if ($ProcessId -le 0 -or $ProcessId -eq $PID) { return }
+  try {
+    $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $ProcessId" -ErrorAction SilentlyContinue)
+    foreach ($child in $children) {
+      if ($child.ProcessId) { Stop-ProcessTreeById ([int]$child.ProcessId) }
+    }
+  } catch { }
+  try {
+    $tkPath = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+    if (Test-Path -LiteralPath $tkPath -PathType Leaf) {
+      $tkPsi = New-Object System.Diagnostics.ProcessStartInfo
+      $tkPsi.FileName = $tkPath
+      $tkPsi.Arguments = "/PID $ProcessId /T /F"
+      $tkPsi.UseShellExecute = $false
+      $tkPsi.CreateNoWindow = $true
+      $tkPsi.RedirectStandardOutput = $true
+      $tkPsi.RedirectStandardError = $true
+      $tkProc = [Diagnostics.Process]::Start($tkPsi)
+      [void]$tkProc.WaitForExit(3000)
+      $tkProc.Dispose()
+    }
+  } catch { }
+  try { Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue } catch { }
+}
+
+function Stop-CodexRun {
+  if (-not $script:codexRunning) { return }
+  if ($script:codexLogFile) {
+    $pidPath = "$($script:codexLogFile).pid"
+    if (Test-Path -LiteralPath $pidPath -PathType Leaf) {
+      try {
+        $childPid = ([IO.File]::ReadAllText($pidPath, [Text.Encoding]::ASCII)).Trim()
+        if ($childPid -match '^[0-9]+$') { Stop-ProcessTreeById ([int]$childPid) }
+      } catch { }
     }
   }
-  $script:installRunning = $true
-  Set-Buttons
-  $statusLabel.Text = 'Đang kiểm tra thông tin cài đặt...'
+  if ($script:codexProcess) {
+    try {
+      if (-not $script:codexProcess.HasExited) {
+        Stop-ProcessTreeById $script:codexProcess.Id
+        try { $script:codexProcess.Kill() } catch { }
+      }
+    } catch { }
+  }
+}
+
+# Async UI background task helper (keeps WPF silky-smooth during network checks)
+$script:asyncTasks = New-Object System.Collections.ArrayList
+$asyncTimer = New-Object System.Windows.Threading.DispatcherTimer
+$asyncTimer.Interval = [TimeSpan]::FromMilliseconds(120)
+$asyncTimer.Add_Tick({
+  for ($i = $script:asyncTasks.Count - 1; $i -ge 0; $i--) {
+    $item = $script:asyncTasks[$i]
+    if ($item.Handle.IsCompleted) {
+      $script:asyncTasks.RemoveAt($i)
+      $res = $null
+      $err = $null
+      try {
+        $out = $item.Ps.EndInvoke($item.Handle)
+        if ($out -and $out.Count -gt 0) { $res = $out[$out.Count - 1] }
+      } catch {
+        $err = $_
+      } finally {
+        try { $item.Ps.Dispose() } catch { }
+      }
+      try { & $item.OnComplete $res $err } catch { }
+    }
+  }
+  if ($script:asyncTasks.Count -eq 0) { $asyncTimer.Stop() }
+})
+
+function Start-AsyncUiTask {
+  param(
+    [Parameter(Mandatory=$true)][scriptblock]$Work,
+    [hashtable]$Params = @{},
+    [Parameter(Mandatory=$true)][scriptblock]$OnComplete
+  )
+  $ps = [PowerShell]::Create()
+  [void]$ps.AddScript($Work.ToString())
+  foreach ($k in $Params.Keys) {
+    [void]$ps.AddParameter($k, $Params[$k])
+  }
+  $handle = $ps.BeginInvoke()
+  [void]$script:asyncTasks.Add([pscustomobject]@{ Ps = $ps; Handle = $handle; OnComplete = $OnComplete })
+  if (-not $asyncTimer.IsEnabled) { $asyncTimer.Start() }
+}
+
+# 5-Step Progress Checklist Updater
+function Set-ChecklistStep([int]$Index, [string]$State, [string]$Badge = '') {
+  $iconCtrl = Get-Ui "Step${Index}Icon"
+  $textCtrl = Get-Ui "Step${Index}Text"
+  $badgeCtrl = Get-Ui "Step${Index}Badge"
+  if (-not $iconCtrl) { return }
+  switch ($State) {
+    'done' {
+      $iconCtrl.Text = '✓'
+      $iconCtrl.Foreground = New-Brush '#059669'
+      $textCtrl.Foreground = New-Brush '#0F172A'
+      $textCtrl.FontWeight = [System.Windows.FontWeights]::SemiBold
+      $badgeCtrl.Text = if ($Badge) { $Badge } else { 'Hoàn tất' }
+      $badgeCtrl.Foreground = New-Brush '#059669'
+    }
+    'active' {
+      $iconCtrl.Text = '●'
+      $iconCtrl.Foreground = New-Brush '#2563EB'
+      $textCtrl.Foreground = New-Brush '#1D4ED8'
+      $textCtrl.FontWeight = [System.Windows.FontWeights]::Bold
+      $badgeCtrl.Text = if ($Badge) { $Badge } else { 'Đang chạy...' }
+      $badgeCtrl.Foreground = New-Brush '#2563EB'
+    }
+    'heal' {
+      $iconCtrl.Text = '↻'
+      $iconCtrl.Foreground = New-Brush '#D97706'
+      $textCtrl.Foreground = New-Brush '#B45309'
+      $textCtrl.FontWeight = [System.Windows.FontWeights]::Bold
+      $badgeCtrl.Text = if ($Badge) { $Badge } else { 'Codex đang tự sửa...' }
+      $badgeCtrl.Foreground = New-Brush '#D97706'
+    }
+    'skipped' {
+      $iconCtrl.Text = '—'
+      $iconCtrl.Foreground = New-Brush '#94A3B8'
+      $textCtrl.Foreground = New-Brush '#94A3B8'
+      $textCtrl.FontWeight = [System.Windows.FontWeights]::Normal
+      $badgeCtrl.Text = 'Bỏ qua'
+      $badgeCtrl.Foreground = New-Brush '#94A3B8'
+    }
+    'error' {
+      $iconCtrl.Text = '✕'
+      $iconCtrl.Foreground = New-Brush '#DC2626'
+      $textCtrl.Foreground = New-Brush '#DC2626'
+      $textCtrl.FontWeight = [System.Windows.FontWeights]::Bold
+      $badgeCtrl.Text = if ($Badge) { $Badge } else { 'Gặp lỗi' }
+      $badgeCtrl.Foreground = New-Brush '#DC2626'
+    }
+    default {
+      $iconCtrl.Text = '○'
+      $iconCtrl.Foreground = New-Brush '#94A3B8'
+      $textCtrl.Foreground = New-Brush '#475569'
+      $textCtrl.FontWeight = [System.Windows.FontWeights]::Normal
+      $badgeCtrl.Text = 'Chờ thực hiện'
+      $badgeCtrl.Foreground = New-Brush '#94A3B8'
+    }
+  }
+}
+
+function Update-ProgressFromStatus([string]$Message) {
+  $zaloOn = $zaloCheck.Checked
+  $editorOn = (-not $existingEditorCheck.Checked)
+  $pct = 8
+  $activeStep = 1
+  $isHealing = ($Message -match 'Codex CLI đang tự động|Phát hiện sự cố|tự sửa lỗi')
+
+  if ($Message.StartsWith('Hoàn tất:')) {
+    $pct = 100
+    for ($s = 1; $s -le 5; $s++) {
+      if ($s -eq 4 -and -not $zaloOn) { Set-ChecklistStep 4 'skipped' }
+      elseif ($s -eq 5 -and -not $editorOn) { Set-ChecklistStep 5 'skipped' }
+      else { Set-ChecklistStep $s 'done' }
+    }
+    $installProgressBar.IsIndeterminate = $false
+    $installProgressBar.Value = 100
+    $progressPercentText.Text = '100%'
+    return
+  }
+
+  if ($Message -match 'Antigravity|Codex CLI|lối tắt|Thử lại bước Codex') { $activeStep = 5; $pct = 88 }
+  elseif ($Message -match 'Zalo|/zaloqr|menu Telegram') { $activeStep = 4; $pct = 74 }
+  elseif ($Message -match 'OpenClaw|kỹ năng|Full Exec|Gateway|lệnh openclaw') { $activeStep = 3; $pct = 55 }
+  elseif ($Message -match 'Node\.js|Python|FFmpeg|môi trường') { $activeStep = 2; $pct = 32 }
+  else { $activeStep = 1; $pct = 14 }
+
+  if ($script:currentManageAction) {
+    $installProgressBar.IsIndeterminate = $true
+    $progressPercentText.Text = 'Đang xử lý...'
+    return
+  }
+
+  $installProgressBar.IsIndeterminate = $false
+  $installProgressBar.Value = $pct
+  $progressPercentText.Text = "$pct%"
+
+  for ($s = 1; $s -le 5; $s++) {
+    if ($s -eq 4 -and -not $zaloOn) { Set-ChecklistStep 4 'skipped'; continue }
+    if ($s -eq 5 -and -not $editorOn) { Set-ChecklistStep 5 'skipped'; continue }
+    if ($s -lt $activeStep) { Set-ChecklistStep $s 'done' }
+    elseif ($s -eq $activeStep) {
+      if ($isHealing) { Set-ChecklistStep $s 'heal' }
+      else { Set-ChecklistStep $s 'active' }
+    } else {
+      Set-ChecklistStep $s 'pending'
+    }
+  }
+}
+
+function Update-CodexAvailability {
+  $info = Find-EmTroLyCodexCli
+  $codexStateText.Text = $info.Label
+  $codexStateText.Foreground = if ($info.Available) { New-Brush '#059669' } else { New-Brush '#D97706' }
+  $codexRunBtn.IsEnabled = (-not $script:codexRunning -and $info.Available)
+  $codexStopBtn.IsEnabled = $script:codexRunning
+  $codexTerminalBtn.IsEnabled = (-not $script:codexRunning -and $info.Available)
+  return $info
+}
+
+function Update-ZaloGlobalBadges {
+  if ($script:isManageMode -and $script:zaloInstalledState) {
+    $sidebarZaloPill.Visibility = [System.Windows.Visibility]::Visible
+    if ($script:zaloConnectedState) {
+      $sidebarZaloPill.Background = New-Brush '#ECFDF5'
+      $sidebarZaloPill.BorderBrush = New-Brush '#6EE7B7'
+      $sidebarZaloIconCircle.Background = New-Brush '#10B981'
+      $sidebarZaloCheckIcon.Visibility = [System.Windows.Visibility]::Visible
+      $sidebarZaloPendingDot.Visibility = [System.Windows.Visibility]::Collapsed
+      $sidebarZaloText.Text = 'Zalo: Đã kết nối'
+      $sidebarZaloText.Foreground = New-Brush '#065F46'
+      $headerZaloBadge.Visibility = [System.Windows.Visibility]::Visible
+    } else {
+      $sidebarZaloPill.Background = New-Brush '#FFFBEB'
+      $sidebarZaloPill.BorderBrush = New-Brush '#FDE68A'
+      $sidebarZaloIconCircle.Background = New-Brush '#F59E0B'
+      $sidebarZaloCheckIcon.Visibility = [System.Windows.Visibility]::Collapsed
+      $sidebarZaloPendingDot.Visibility = [System.Windows.Visibility]::Visible
+      $sidebarZaloText.Text = 'Zalo: Chưa kết nối'
+      $sidebarZaloText.Foreground = New-Brush '#B45309'
+      $headerZaloBadge.Visibility = [System.Windows.Visibility]::Collapsed
+    }
+  } else {
+    $sidebarZaloPill.Visibility = [System.Windows.Visibility]::Collapsed
+    $headerZaloBadge.Visibility = [System.Windows.Visibility]::Collapsed
+  }
+}
+
+function Start-LiveZaloStatusSync([switch]$Force) {
+  if ($SmokeTest -or -not $script:isManageMode) { return }
+  if ($script:zaloSyncProc -and -not $script:zaloSyncProc.HasExited) { return }
+  if (-not $Force -and $script:lastZaloSyncAt -gt (Get-Date).AddSeconds(-12)) { return }
+  $st = Get-EmTroLyInstalledState
+  if (-not $st.OpenClawInstalled -or -not $st.ZaloInstalled) { return }
+  $bridgeScript = Resolve-HelperScript 'zalo-qr-session.mjs'
+  $nodeExe = Resolve-EmTroLyNodeBinary -OpenClawRoot $st.Root
+  if (-not (Test-Path -LiteralPath $bridgeScript -PathType Leaf) -or -not $nodeExe) { return }
   try {
-  $settings = if ($retryEditor) { @{ ai_api_key = $retryKey.Text } } else { [ordered]@{
-    member = 'emtroly'
-    assistant_name = $assistantBox.Text.Trim()
-    base_url = $baseUrlBox.Text.Trim().TrimEnd('/')
-    model = $modelBox.Text.Trim()
-    owner_ids = $ownersBox.Text.Trim()
-    group_id = $groupBox.Text.Trim()
-    gateway_port = $portBox.Text.Trim()
-    audience = $audienceBox.Text.Trim()
-    addressing = $addressingBox.Text.Trim()
-    style = $styleBox.Text.Trim()
-    accept_full_access = [bool]$fullAccessCheck.Checked
-    configure_zalo = [bool]$zaloCheck.Checked
-    skip_editor = [bool]$existingEditorCheck.Checked
-    qr_owner_id = $qrOwnerBox.Text.Trim()
-    telegram_token = $tokenBox.Text
-    ai_api_key = $apiKeyBox.Text
-  } }
-  $script:privateDir = Join-Path $env:TEMP ('openclaw-member-' + [guid]::NewGuid().ToString('N'))
-  $acl = New-Object System.Security.AccessControl.DirectorySecurity
-  $acl.SetAccessRuleProtection($true, $false)
-  $inherit = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
-  $propagate = [System.Security.AccessControl.PropagationFlags]::None
-  $allow = [System.Security.AccessControl.AccessControlType]::Allow
-  $full = [System.Security.AccessControl.FileSystemRights]::FullControl
-  $user = [Security.Principal.WindowsIdentity]::GetCurrent().User
-  $system = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
-  $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($user, $full, $inherit, $propagate, $allow)))
-  $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($system, $full, $inherit, $propagate, $allow)))
-  [void][IO.Directory]::CreateDirectory($script:privateDir, $acl)
-  $script:secretFile = Join-Path $script:privateDir 'settings.json'
-  $script:safeLog = Join-Path $script:privateDir 'status.txt'
-  $json = $settings | ConvertTo-Json -Depth 8
-  [IO.File]::WriteAllText($script:secretFile, $json, (New-Object Text.UTF8Encoding($false)))
-  $runner = Join-Path $PayloadRoot 'windows-installer\run-native-install.ps1'
-  $settingsPath = $script:secretFile
-  $rootPath = $PayloadRoot
-  $logPath = $script:safeLog
-  $shellPath = Join-Path $PSHOME 'powershell.exe'
-  $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-  $startInfo.FileName = $shellPath
-  $startInfo.Arguments = '-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
-    $runner + '" -SettingsFile "' + $settingsPath +
-    '" -PayloadRoot "' + $rootPath + '" -LogFile "' + $logPath + '"'
-  if ($retryEditor) { $startInfo.Arguments += ' -EditorOnly' }
-  $startInfo.UseShellExecute = $false
-  $startInfo.CreateNoWindow = $true
-  $script:runnerProcess = [Diagnostics.Process]::Start($startInfo)
-  $script:runnerDeadline = (Get-Date).AddMinutes(90)
-  $tokenBox.Clear()
-  if (-not $retryEditor -and -not $settings.skip_editor) { $retryKey.Text = $apiKeyBox.Text }
-  $apiKeyBox.Clear()
-  $timer.Start()
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $nodeExe
+    $psi.Arguments = '"' + $bridgeScript.Replace('"', '\"') + '" --sync-status --root "' + $st.Root.Replace('"', '\"') + '"'
+    $psi.WorkingDirectory = $st.Root
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $script:zaloSyncProc = [Diagnostics.Process]::Start($psi)
+    $script:lastZaloSyncAt = Get-Date
+    if (-not $liveSyncTimer.IsEnabled) { $liveSyncTimer.Start() }
+  } catch { }
+}
+
+function Update-DashboardCards {
+  if (-not $script:isManageMode) { return }
+  $dash = if (Get-Command Get-EmTroLyLiveDashboardStatus -ErrorAction SilentlyContinue) {
+    Get-EmTroLyLiveDashboardStatus
+  } else { $null }
+  if (-not $dash -or -not $dash.State) { return }
+  $st = $dash.State
+  $script:gatewayDashboardUrl = $dash.GatewayUrl
+  $script:zaloInstalledState = [bool]$st.ZaloInstalled
+
+  $dashHeroTitle.Text = "$($st.AssistantName) đã sẵn sàng trên máy"
+  $dashHeroSub.Text = "Model: $($st.Model) · Owner IDs: $($st.OwnerIds) · Group: $($st.GroupId)"
+  $dashOpenWebBtn.IsEnabled = (-not [string]::IsNullOrWhiteSpace($dash.GatewayUrl))
+
+  if ($dash.GatewayOnline) {
+    $cardGwDot.Fill = New-Brush '#059669'
+    $cardGwBadge.Background = New-Brush '#ECFDF5'
+    $cardGwBadge.BorderBrush = New-Brush '#A7F3D0'
+    $cardGwBadgeText.Foreground = New-Brush '#065F46'
+    $cardGwBadgeText.Text = '✓ Đang kết nối'
+    $cardGwStatus.Text = "Đang hoạt động tốt tại cổng $($dash.GatewayPort) (127.0.0.1:$($dash.GatewayPort))"
+  } else {
+    $cardGwDot.Fill = New-Brush '#D97706'
+    $cardGwBadge.Background = New-Brush '#FFFBEB'
+    $cardGwBadge.BorderBrush = New-Brush '#FDE68A'
+    $cardGwBadgeText.Foreground = New-Brush '#B45309'
+    $cardGwBadgeText.Text = '● Chưa phản hồi'
+    $cardGwStatus.Text = "Cổng $($st.GatewayPort) chưa phản hồi — bấm Khởi động lại hoặc Tự sửa lỗi bằng Codex."
+  }
+
+  if ($st.HasTelegramToken) {
+    $cardTgDot.Fill = New-Brush '#059669'
+    $cardTgBadge.Background = New-Brush '#ECFDF5'
+    $cardTgBadge.BorderBrush = New-Brush '#A7F3D0'
+    $cardTgBadgeText.Foreground = New-Brush '#065F46'
+    $cardTgBadgeText.Text = '✓ Đã kết nối'
+    $cardTgStatus.Text = "Đã lưu Bot Token an toàn · $($dash.OwnerCount) Owner được cấp quyền Full Exec."
+  } else {
+    $cardTgDot.Fill = New-Brush '#DC2626'
+    $cardTgBadge.Background = New-Brush '#FEF2F2'
+    $cardTgBadge.BorderBrush = New-Brush '#FECACA'
+    $cardTgBadgeText.Foreground = New-Brush '#B91C1C'
+    $cardTgBadgeText.Text = '✕ Thiếu Token'
+    $cardTgStatus.Text = 'Chưa thấy tệp telegram.token — vào Cấu hình nhanh để cập nhật lại Token.'
+  }
+
+  $isZaloLinked = ($st.ZaloInstalled -and $dash.PSObject.Properties['ZaloLinked'] -and $dash.ZaloLinked)
+  $script:zaloConnectedState = [bool]$isZaloLinked
+
+  if ($st.ZaloInstalled) {
+    if ($isZaloLinked) {
+      $cardZaloDot.Fill = New-Brush '#059669'
+      $cardZaloBorder.BorderBrush = New-Brush '#A7F3D0'
+      $cardZaloBadge.Background = New-Brush '#ECFDF5'
+      $cardZaloBadge.BorderBrush = New-Brush '#6EE7B7'
+      $cardZaloBadgeIcon.Visibility = [System.Windows.Visibility]::Visible
+      $cardZaloBadgeText.Foreground = New-Brush '#065F46'
+      $cardZaloBadgeText.Text = 'Đã kết nối'
+      $dashZaloQrBtn.Content = 'Xem kết nối / Đổi Zalo'
+      $cardZaloStatus.Text = 'Tài khoản Zalo cá nhân đã kết nối trực tuyến và sẵn sàng nhận/gửi tin nhắn.'
+    } else {
+      $cardZaloDot.Fill = New-Brush '#D97706'
+      $cardZaloBorder.BorderBrush = New-Brush '#E2E8F0'
+      $cardZaloBadge.Background = New-Brush '#FFFBEB'
+      $cardZaloBadge.BorderBrush = New-Brush '#FDE68A'
+      $cardZaloBadgeIcon.Visibility = [System.Windows.Visibility]::Collapsed
+      $cardZaloBadgeText.Foreground = New-Brush '#B45309'
+      $cardZaloBadgeText.Text = '● Chưa đăng nhập'
+      $dashZaloQrBtn.Content = 'Quét QR Zalo'
+      $cardZaloStatus.Text = 'Đã cài plugin Zalo · Bấm "Quét QR Zalo" bên dưới để quét mã đăng nhập ngay.'
+    }
+  } else {
+    $cardZaloDot.Fill = New-Brush '#94A3B8'
+    $cardZaloBorder.BorderBrush = New-Brush '#E2E8F0'
+    $cardZaloBadge.Background = New-Brush '#F1F5F9'
+    $cardZaloBadge.BorderBrush = New-Brush '#E2E8F0'
+    $cardZaloBadgeIcon.Visibility = [System.Windows.Visibility]::Collapsed
+    $cardZaloBadgeText.Foreground = New-Brush '#64748B'
+    $cardZaloBadgeText.Text = 'Chưa cài'
+    $dashZaloQrBtn.Content = 'Quét QR Zalo'
+    $cardZaloStatus.Text = 'Chưa cài đặt Zalo (bấm nút bên dưới để cài và hiện mã QR đăng nhập).'
+  }
+
+  if ($st.CodexInstalled) {
+    $cardCodexDot.Fill = New-Brush '#059669'
+    $cardCodexBadge.Background = New-Brush '#ECFDF5'
+    $cardCodexBadge.BorderBrush = New-Brush '#A7F3D0'
+    $cardCodexBadgeText.Foreground = New-Brush '#065F46'
+    $cardCodexBadgeText.Text = '✓ Sẵn sàng'
+    $scNote = if ($dash.HasAntigravityShortcut) { 'Đã có lối tắt Antigravity trên Desktop.' } else { 'Sẵn sàng dòng lệnh codex.' }
+    $cardCodexStatus.Text = "Codex CLI sẵn sàng · $scNote"
+  } else {
+    $cardCodexDot.Fill = New-Brush '#D97706'
+    $cardCodexBadge.Background = New-Brush '#FFFBEB'
+    $cardCodexBadge.BorderBrush = New-Brush '#FDE68A'
+    $cardCodexBadgeText.Foreground = New-Brush '#B45309'
+    $cardCodexBadgeText.Text = '● Chưa cài'
+    $cardCodexStatus.Text = 'Chưa phát hiện Codex CLI — bấm Sửa / Cài lại Codex để cài đặt tự động.'
+  }
+
+  Update-ZaloGlobalBadges
+  $hasCache = ($dash.PSObject.Properties['HasZaloStatusCache'] -and $dash.HasZaloStatusCache)
+  if ($st.ZaloInstalled -and (-not $hasCache -or $script:lastZaloSyncAt -lt (Get-Date).AddSeconds(-18))) {
+    Start-LiveZaloStatusSync
+  }
+}
+
+function Stop-ZaloQrSession {
+  if ($zaloQrTimer) { $zaloQrTimer.Stop() }
+  $script:zaloQrRunning = $false
+  if ($script:zaloQrProcess) {
+    try {
+      if (-not $script:zaloQrProcess.HasExited) {
+        Stop-ProcessTreeById $script:zaloQrProcess.Id
+        try { $script:zaloQrProcess.Kill() } catch { }
+      }
+    } catch { }
+    try { $script:zaloQrProcess.Dispose() } catch { }
+    $script:zaloQrProcess = $null
+  }
+  if ($script:zaloQrDir -and (Test-Path -LiteralPath $script:zaloQrDir)) {
+    Remove-Item -LiteralPath $script:zaloQrDir -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  $script:zaloQrDir = $null
+  $script:zaloQrStateFile = $null
+  $script:zaloQrPngFile = $null
+  $script:zaloQrLoadedTicks = 0
+}
+
+function Set-NavActive([string]$Key) {
+  if ($Key -ne 'zaloqr' -and $script:zaloQrRunning) {
+    Stop-ZaloQrSession
+  }
+  $script:currentView = $Key
+  $viewDashboard.Visibility   = [System.Windows.Visibility]::Collapsed
+  $viewSetupForm.Visibility   = [System.Windows.Visibility]::Collapsed
+  $viewProgress.Visibility    = [System.Windows.Visibility]::Collapsed
+  $viewCodex.Visibility       = [System.Windows.Visibility]::Collapsed
+  $viewDiagnostics.Visibility = [System.Windows.Visibility]::Collapsed
+  $viewZaloQr.Visibility      = [System.Windows.Visibility]::Collapsed
+
+  foreach ($b in @($navHomeBtn, $navConfigBtn, $navCodexBtn, $navDiagBtn)) {
+    $b.Background = [System.Windows.Media.Brushes]::Transparent
+    $b.Foreground = New-Brush '#334155'
+    $b.FontWeight = [System.Windows.FontWeights]::Medium
+  }
+
+  $activeBtn = $navHomeBtn
+  if ($script:installRunning -or $script:retryEditor) {
+    $viewProgress.Visibility = [System.Windows.Visibility]::Visible
+    $installChecklistCard.Visibility = if ($script:currentManageAction) { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
+    $activeBtn = if ($script:isManageMode) { $navHomeBtn } else { $navConfigBtn }
+    $headerTitle.Text = if ($script:retryEditor) { 'Tiếp tục cài Antigravity & Codex CLI' } elseif ($script:currentManageAction) { 'Đang thực hiện tác vụ quản lý' } else { 'Đang cài đặt trọn gói từ A–Z' }
+    $headerSubtitle.Text = 'Bạn có thể theo dõi từng bước trực quan bên dưới hoặc bấm Dừng lại / Dừng & Thoát bất cứ lúc nào'
+  } elseif ($Key -eq 'home') {
+    $activeBtn = $navHomeBtn
+    if ($script:isManageMode) {
+      $viewDashboard.Visibility = [System.Windows.Visibility]::Visible
+      $headerTitle.Text = 'Bảng điều khiển tổng quan'
+      $headerSubtitle.Text = 'Theo dõi trạng thái trực tiếp các thành phần và thao tác nhanh chỉ với 1 bấm'
+      Update-DashboardCards
+    } else {
+      $viewSetupForm.Visibility = [System.Windows.Visibility]::Visible
+      $headerTitle.Text = 'Cài đặt nhanh trọn gói A–Z'
+      $headerSubtitle.Text = 'Chỉ cần điền 4 thông tin cơ bản — OpenClaw, Telegram, Zalo, Antigravity & Codex sẽ tự cài đầy đủ'
+    }
+  } elseif ($Key -eq 'config') {
+    $activeBtn = $navConfigBtn
+    if ($script:isManageMode) {
+      $viewSetupForm.Visibility = [System.Windows.Visibility]::Visible
+      $headerTitle.Text = 'Cấu hình & Chỉnh sửa nhanh'
+      $headerSubtitle.Text = 'Đổi Owner ID, Group ID, Model hoặc Bot Token chỉ trong ~3 giây mà không cần cài lại'
+    } else {
+      $viewProgress.Visibility = [System.Windows.Visibility]::Visible
+      $installChecklistCard.Visibility = [System.Windows.Visibility]::Visible
+      $headerTitle.Text = 'Tiến trình cài đặt tự động A–Z'
+      $headerSubtitle.Text = 'Danh sách 5 bước cài đặt tự động và cơ chế tự sửa lỗi bằng Codex CLI'
+    }
+  } elseif ($Key -eq 'codex') {
+    $activeBtn = $navCodexBtn
+    $viewCodex.Visibility = [System.Windows.Visibility]::Visible
+    $headerTitle.Text = 'Chỉnh sửa nhanh bằng Codex CLI'
+    $headerSubtitle.Text = 'Chọn thư mục và gõ yêu cầu tiếng Việt — Codex sẽ tự đọc, sửa tệp và kiểm tra giúp bạn'
+    [void](Update-CodexAvailability)
+  } elseif ($Key -eq 'diag') {
+    $activeBtn = $navDiagBtn
+    $viewDiagnostics.Visibility = [System.Windows.Visibility]::Visible
+    $headerTitle.Text = 'Chẩn đoán hệ thống & Hỗ trợ'
+    $headerSubtitle.Text = 'Kiểm tra kết nối mạng, cho Codex tự sửa lỗi hoặc xuất báo cáo hỗ trợ đã ẩn mã bí mật'
+  } elseif ($Key -eq 'zaloqr') {
+    $activeBtn = $navHomeBtn
+    $viewZaloQr.Visibility = [System.Windows.Visibility]::Visible
+    $headerTitle.Text = 'Đăng nhập Zalo cá nhân bằng mã QR'
+    $headerSubtitle.Text = 'Mã QR được hiển thị trực tiếp tại đây và gửi đồng thời vào Telegram của Chủ sở hữu'
+  }
+
+  $activeBtn.Background = New-Brush '#EFF6FF'
+  $activeBtn.Foreground = New-Brush '#2563EB'
+  $activeBtn.FontWeight = [System.Windows.FontWeights]::Bold
+  Set-Buttons
+}
+
+function Set-Buttons {
+  $navHomeBtn.Content   = if ($script:isManageMode) { '  Tổng quan' } else { '  Cài đặt nhanh' }
+  $navConfigBtn.Content = if ($script:isManageMode) { '  Cấu hình nhanh' } else { '  Tiến trình cài đặt' }
+
+  foreach ($nb in @($navHomeBtn, $navConfigBtn, $navCodexBtn, $navDiagBtn)) {
+    $nb.IsEnabled = (-not $script:installRunning -and -not $script:retryEditor)
+  }
+
+  $onCodex = ($script:currentView -eq 'codex')
+  $headerQuickBtn.Content = if ($onCodex) {
+    if ($script:isManageMode) { '← Về Tổng quan' } else { '← Về Cài đặt' }
+  } else { 'Mở Codex CLI' }
+  $headerQuickBtn.IsEnabled = (-not $script:installRunning -and -not $script:retryEditor)
+
+  if ($script:isManageMode) {
+    $sidebarStatusPill.Background = New-Brush '#ECFDF5'
+    $sidebarStatusDot.Fill = New-Brush '#059669'
+    $sidebarStatusText.Text = 'Đã cài đặt · Sẵn sàng'
+    $sidebarStatusText.Foreground = New-Brush '#065F46'
+  } else {
+    $sidebarStatusPill.Background = New-Brush '#F1F5F9'
+    $sidebarStatusDot.Fill = New-Brush '#94A3B8'
+    $sidebarStatusText.Text = 'Chưa cài đặt'
+    $sidebarStatusText.Foreground = New-Brush '#475569'
+  }
+  Update-ZaloGlobalBadges
+
+  # ALWAYS allow stopping & exiting cleanly while running!
+  if ($script:installRunning) {
+    $footerHintText.Text = 'Đang chạy... Bạn có thể bấm "Dừng lại" hoặc "Dừng & Thoát" bất cứ lúc nào.'
+    $stopTaskButton.Visibility = [System.Windows.Visibility]::Visible
+    $stopTaskButton.IsEnabled = $true
+    $primaryActionBtn.Visibility = [System.Windows.Visibility]::Collapsed
+    $cancelButton.Content = 'Dừng & Thoát'
+    $cancelButton.Style = $window.FindResource('DangerBtn')
+    $cancelButton.MinWidth = 148
+    $cancelButton.IsEnabled = $true
+    return
+  }
+
+  $stopTaskButton.Visibility = [System.Windows.Visibility]::Collapsed
+
+  if ($onCodex -and $script:codexRunning) {
+    $cancelButton.Content = 'Dừng & Thoát'
+    $cancelButton.Style = $window.FindResource('DangerBtn')
+    $cancelButton.MinWidth = 148
+  } else {
+    $cancelButton.Content = 'Thoát'
+    $cancelButton.Style = $window.FindResource('SecondaryBtn')
+    $cancelButton.MinWidth = 98
+  }
+  $cancelButton.IsEnabled = $true
+
+  if ($script:retryEditor) {
+    $footerHintText.Text = 'OpenClaw đã chạy tốt. Nhập API Key rồi bấm Thử lại bước Codex.'
+    $primaryActionBtn.Visibility = [System.Windows.Visibility]::Visible
+    $primaryActionBtn.Content = 'Thử lại bước Codex'
+    $primaryActionBtn.IsEnabled = $true
+  } elseif ($onCodex -or $script:currentView -eq 'diag' -or $script:currentView -eq 'zaloqr') {
+    $footerHintText.Text = if ($script:currentView -eq 'zaloqr') { 'Quét mã QR trên màn hình hoặc trong Telegram — tự báo hoàn tất ngay khi đăng nhập.' } else { 'Mẹo: Mọi mã bí mật đều được lưu cục bộ an toàn trên máy bạn.' }
+    $primaryActionBtn.Visibility = [System.Windows.Visibility]::Collapsed
+  } elseif ($script:isManageMode) {
+    $footerHintText.Text = 'Sửa ô nào lưu ô đó (~3 giây) · Giữ nguyên lịch sử & dữ liệu cũ.'
+    $primaryActionBtn.Visibility = [System.Windows.Visibility]::Visible
+    $primaryActionBtn.Content = if ($script:currentView -eq 'home') { 'Cấu hình nhanh' } else { 'Lưu thay đổi' }
+    $primaryActionBtn.IsEnabled = $true
+  } else {
+    $footerHintText.Text = 'Mẹo: Dán Bot Token rồi bấm "Lấy ID tự động" để khỏi tìm thủ công.'
+    $primaryActionBtn.Visibility = [System.Windows.Visibility]::Visible
+    $primaryActionBtn.Content = 'Cài đặt trọn gói A–Z'
+    $primaryActionBtn.IsEnabled = $true
+  }
+}
+
+function Stop-ActiveRunner([string]$ReasonMessage = 'Đã dừng tiến trình theo yêu cầu của bạn.') {
+  $installTimer.Stop()
+  $proc = $script:runnerProcess
+  $script:runnerProcess = $null
+  $script:installRunning = $false
+  $script:currentManageAction = ''
+  if ($proc) {
+    $procId = 0
+    try { $procId = [int]$proc.Id } catch { }
+    if ($procId -gt 0) { Stop-ProcessTreeById $procId }
+    try { if (-not $proc.HasExited) { $proc.Kill() } } catch { }
+    try { [void]$proc.WaitForExit(2000) } catch { }
+    try { $proc.Dispose() } catch { }
+  }
+  Cleanup-Secret
+  $installProgressBar.IsIndeterminate = $false
+  if (-not [string]::IsNullOrWhiteSpace($ReasonMessage)) {
+    $statusText.Text = $ReasonMessage
+  }
+  if (-not $script:retryEditor -and -not $script:installCompleted) {
+    $script:resultCode = 2
+  }
+  Set-Buttons
+}
+
+function Apply-ManageModeUI {
+  $st = Get-EmTroLyInstalledState
+  if (-not $st.OpenClawInstalled) { return }
+  $script:isManageMode = $true
+  $script:installCompleted = $true
+  $script:resultCode = 0
+
+  $assistantBox.Text = $st.AssistantName
+  $baseUrlBox.Text = $st.BaseUrl
+  for ($i = 0; $i -lt $modelBox.Items.Count; $i++) {
+    if ([string]$modelBox.Items[$i] -ieq [string]$st.Model) {
+      $modelBox.SelectedIndex = $i
+      break
+    }
+  }
+  $ownersBox.Text = $st.OwnerIds
+  $groupBox.Text = $st.GroupId
+  $portBox.Text = $st.GatewayPort
+  $audienceBox.Text = $st.Audience
+  $addressingBox.Text = $st.Addressing
+  $styleBox.Text = $st.Style
+  $fullAccessCheck.Checked = $true
+  $zaloCheck.Checked = $st.ZaloInstalled
+  if ($st.OwnerIds) {
+    $qrOwnerBox.Text = (($ownersBox.Text -split ',')[0]).Trim()
+  }
+
+  $manageEditBanner.Visibility = [System.Windows.Visibility]::Visible
+  $installOptionsCard.Visibility = [System.Windows.Visibility]::Collapsed
+  $tokenFieldLabel.Text = 'Telegram Bot Token mới (để trống = giữ nguyên mã cũ)'
+  $apiKeyFieldLabel.Text = 'Provider API Key mới (để trống = giữ nguyên mã cũ)'
+  Update-DashboardCards
+}
+
+function Test-FormInputs([bool]$ForManageConfig = $false) {
+  if ([string]::IsNullOrWhiteSpace($assistantBox.Text)) { Show-Error 'Hãy nhập tên trợ lý hiển thị.'; return $false }
+  if ([string]::IsNullOrWhiteSpace($baseUrlBox.Text) -or $baseUrlBox.Text -notmatch '^https://') { Show-Error 'Provider Base URL phải bắt đầu bằng https://.'; return $false }
+  if ([string]$modelBox.SelectedItem -notin @('gpt-6.2-sol', 'GPT-6.1-terra', 'gpt-6.2-astra')) { Show-Error 'Model phải là gpt-6.2-sol, GPT-6.1-terra hoặc gpt-6.2-astra.'; return $false }
+  if ($ownersBox.Text.Trim() -notmatch '^[1-9][0-9]*(,[1-9][0-9]*)*$') { Show-Error 'Telegram Owner IDs không hợp lệ (nhập số dương, cách nhau bởi dấu phẩy).'; return $false }
+  if ($groupBox.Text.Trim() -notmatch '^-[1-9][0-9]*$') { Show-Error 'Telegram Group ID phải là số âm (ví dụ: -1001234567890).'; return $false }
+  $portVal = 0
+  if (-not [int]::TryParse($portBox.Text.Trim(), [ref]$portVal) -or ($portVal -ne 0 -and ($portVal -lt 1024 -or $portVal -gt 65000))) {
+    Show-Error 'Cổng Gateway phải là 0 hoặc từ 1024 đến 65000.'
+    return $false
+  }
+
+  if ($ForManageConfig) {
+    if (-not [string]::IsNullOrWhiteSpace($tokenBox.Text) -and $tokenBox.Text.Trim() -notmatch '^[0-9]{5,}:[A-Za-z0-9_-]{20,}$') {
+      Show-Error 'Telegram Bot Token mới không đúng định dạng (hoặc xóa trống để giữ nguyên Token cũ).'
+      return $false
+    }
+  } else {
+    if ([string]::IsNullOrWhiteSpace($tokenBox.Text)) { Show-Error 'Hãy nhập Telegram Bot Token.'; return $false }
+    if ([string]::IsNullOrWhiteSpace($apiKeyBox.Text)) { Show-Error 'Hãy nhập Provider API Key.'; return $false }
+    if (-not $fullAccessCheck.Checked) { Show-Error 'Hãy tích xác nhận bạn hiểu và đồng ý cấp quyền Full Exec.'; return $false }
+    if ($zaloCheck.Checked) {
+      if ([string]::IsNullOrWhiteSpace($qrOwnerBox.Text)) {
+        $qrOwnerBox.Text = (($ownersBox.Text -split ',')[0]).Trim()
+      }
+      if ($qrOwnerBox.Text.Trim() -notmatch '^[1-9][0-9]*$' -or ((',' + $ownersBox.Text.Trim() + ',') -notmatch (',' + [regex]::Escape($qrOwnerBox.Text.Trim()) + ','))) {
+        Show-Error 'QR Owner ID phải nằm trong danh sách Telegram Owner IDs.'
+        return $false
+      }
+    }
+  }
+  return $true
+}
+
+function Start-ManageAction([string]$ActionName, [string]$ErrorDetail = '') {
+  if ($script:installRunning) { return }
+  if ($ActionName -eq 'update-config') {
+    if (-not (Test-FormInputs -ForManageConfig $true)) { return }
+  }
+  if ($ActionName -eq 'install-zalo') {
+    if ([string]::IsNullOrWhiteSpace($qrOwnerBox.Text) -and $ownersBox.Text.Trim()) {
+      $qrOwnerBox.Text = (($ownersBox.Text -split ',')[0]).Trim()
+    }
+  }
+
+  $script:currentManageAction = $ActionName
+  $script:installRunning = $true
+  $installFailureActions.Visibility = [System.Windows.Visibility]::Collapsed
+  $retryEditorPanel.Visibility = [System.Windows.Visibility]::Collapsed
+  $statusText.Text = 'Đang chuẩn bị thực hiện thao tác...'
+  $installProgressBar.IsIndeterminate = $true
+  $progressPercentText.Text = 'Đang xử lý...'
+  Set-NavActive 'progress'
+
+  try {
+    $script:privateDir = Join-Path $env:TEMP ('openclaw-manage-' + [guid]::NewGuid().ToString('N'))
+    New-CodexPrivateDirectory $script:privateDir
+    $script:secretFile = Join-Path $script:privateDir 'manage-request.json'
+    $script:safeLog = Join-Path $script:privateDir 'status.txt'
+    $workerCopy = Join-Path $script:privateDir 'manage-worker.ps1'
+    $workerSrc = [IO.File]::ReadAllText($manageHelperPath, [System.Text.Encoding]::UTF8)
+    [IO.File]::WriteAllText($workerCopy, $workerSrc, (New-Object System.Text.UTF8Encoding($true)))
+
+    $effectiveApiKey = if (-not [string]::IsNullOrWhiteSpace($apiKeyBox.Text)) {
+      $apiKeyBox.Text.Trim()
+    } elseif (-not [string]::IsNullOrWhiteSpace($retryKeyPwdBox.Password)) {
+      $retryKeyPwdBox.Password.Trim()
+    } else {
+      $script:sessionApiKeyFallback
+    }
+
+    $payloadObj = [ordered]@{
+      action         = $ActionName
+      assistant_name = $assistantBox.Text.Trim()
+      base_url       = $baseUrlBox.Text.Trim().TrimEnd('/')
+      model          = ([string]$modelBox.SelectedItem).Trim()
+      owner_ids      = $ownersBox.Text.Trim()
+      group_id       = $groupBox.Text.Trim()
+      gateway_port   = $portBox.Text.Trim()
+      audience       = $audienceBox.Text.Trim()
+      addressing     = $addressingBox.Text.Trim()
+      style          = $styleBox.Text.Trim()
+      qr_owner_id    = $qrOwnerBox.Text.Trim()
+      telegram_token = $tokenBox.Text.Trim()
+      ai_api_key     = $effectiveApiKey
+      error_detail   = $ErrorDetail
+    }
+    [IO.File]::WriteAllText($script:secretFile, ($payloadObj | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
+
+    $shellPath = Join-Path $PSHOME 'powershell.exe'
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $shellPath
+    $psi.Arguments = '-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
+      $workerCopy + '" -RunManageWorker -WorkerRequestFile "' + $script:secretFile +
+      '" -WorkerPayloadRoot "' + $PayloadRoot + '" -WorkerLogFile "' + $script:safeLog + '"'
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $script:runnerProcess = [Diagnostics.Process]::Start($psi)
+    $script:runnerDeadline = (Get-Date).AddMinutes(45)
+    if (-not [string]::IsNullOrWhiteSpace($apiKeyBox.Text)) {
+      $script:sessionApiKeyFallback = $apiKeyBox.Text.Trim()
+    }
+    $tokenBox.Clear()
+    $apiKeyBox.Clear()
+    $installTimer.Start()
+  } catch {
+    Cleanup-Secret
+    $script:currentManageAction = ''
+    $script:installRunning = $false
+    Set-Buttons
+    Show-Error 'Không thể khởi động tác vụ cập nhật. Hãy kiểm tra quyền thư mục tạm.'
+  }
+}
+
+function Start-Install {
+  if ($script:isManageMode -and -not $script:retryEditor) {
+    if ($script:currentView -eq 'home') {
+      Set-NavActive 'config'
+      return
+    }
+    Start-ManageAction 'update-config'
+    return
+  }
+
+  if ($script:retryEditor) {
+    if ([string]::IsNullOrWhiteSpace($retryKeyPwdBox.Password)) {
+      Show-Error 'Hãy nhập Khóa API để tiếp tục cài đặt Antigravity & Codex.'
+      return
+    }
+  } else {
+    if (-not (Test-FormInputs -ForManageConfig $false)) { return }
+    $ansExec = [System.Windows.MessageBox]::Show($window, 'Các Owner IDs và thành viên trong nhóm Telegram đã chọn có thể yêu cầu đọc, sửa tệp và chạy lệnh trên máy. Bạn có tin tưởng họ?', 'Xác nhận Full Exec', [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
+    if ($ansExec -ne [System.Windows.MessageBoxResult]::Yes) { return }
+    if ($zaloCheck.Checked) {
+      $ansZalo = [System.Windows.MessageBox]::Show($window, 'Zalo dùng danh sách cho phép. Sau khi cài xong, Owner nhắn /zaloqr trong Telegram riêng của bot để quét mã QR. Bạn đồng ý?', 'Xác nhận cài Zalo', [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Question)
+      if ($ansZalo -ne [System.Windows.MessageBoxResult]::Yes) { return }
+    }
+  }
+
+  $script:installRunning = $true
+  $installFailureActions.Visibility = [System.Windows.Visibility]::Collapsed
+  $statusText.Text = 'Đang kiểm tra thông tin cài đặt...'
+  Update-ProgressFromStatus $statusText.Text
+  Set-NavActive 'progress'
+
+  try {
+    $settings = if ($script:retryEditor) {
+      @{ ai_api_key = $retryKeyPwdBox.Password.Trim() }
+    } else {
+      [ordered]@{
+        member = 'emtroly'
+        assistant_name = $assistantBox.Text.Trim()
+        base_url = $baseUrlBox.Text.Trim().TrimEnd('/')
+        model = ([string]$modelBox.SelectedItem).Trim()
+        owner_ids = $ownersBox.Text.Trim()
+        group_id = $groupBox.Text.Trim()
+        gateway_port = $portBox.Text.Trim()
+        audience = $audienceBox.Text.Trim()
+        addressing = $addressingBox.Text.Trim()
+        style = $styleBox.Text.Trim()
+        accept_full_access = [bool]$fullAccessCheck.Checked
+        configure_zalo = [bool]$zaloCheck.Checked
+        skip_editor = [bool]$existingEditorCheck.Checked
+        qr_owner_id = $qrOwnerBox.Text.Trim()
+        telegram_token = $tokenBox.Text
+        ai_api_key = $apiKeyBox.Text
+      }
+    }
+
+    $script:privateDir = Join-Path $env:TEMP ('openclaw-member-' + [guid]::NewGuid().ToString('N'))
+    New-CodexPrivateDirectory $script:privateDir
+    $script:secretFile = Join-Path $script:privateDir 'settings.json'
+    $script:safeLog = Join-Path $script:privateDir 'status.txt'
+    [IO.File]::WriteAllText($script:secretFile, ($settings | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
+
+    $runner = Join-Path $PayloadRoot 'windows-installer\run-native-install.ps1'
+    $shellPath = Join-Path $PSHOME 'powershell.exe'
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $shellPath
+    $startInfo.Arguments = '-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
+      $runner + '" -SettingsFile "' + $script:secretFile +
+      '" -PayloadRoot "' + $PayloadRoot + '" -LogFile "' + $script:safeLog + '"'
+    if ($script:retryEditor) { $startInfo.Arguments += ' -EditorOnly' }
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $script:runnerProcess = [Diagnostics.Process]::Start($startInfo)
+    $script:runnerDeadline = (Get-Date).AddMinutes(90)
+
+    if (-not [string]::IsNullOrWhiteSpace($apiKeyBox.Text)) {
+      $script:sessionApiKeyFallback = $apiKeyBox.Text.Trim()
+      if (-not $script:retryEditor -and -not $settings.skip_editor) {
+        $retryKeyPwdBox.Password = $apiKeyBox.Text.Trim()
+      }
+    }
+    $tokenBox.Clear()
+    $apiKeyBox.Clear()
+    $installTimer.Start()
   } catch {
     Cleanup-Secret
     $script:installRunning = $false
     Set-Buttons
-    Show-Error 'Không thể tạo thư mục tạm hoặc khởi động bộ cài. Hãy kiểm tra quyền của tài khoản Windows.'
+    Show-Error 'Không thể khởi động bộ cài đặt. Hãy kiểm tra quyền ghi vào thư mục tạm.'
   }
 }
 
-$timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 1000
-$timer.Add_Tick({
+$installTimer = New-Object System.Windows.Threading.DispatcherTimer
+$installTimer.Interval = [TimeSpan]::FromMilliseconds(700)
+$installTimer.Add_Tick({
   if (-not $script:installRunning) { return }
-  if (-not $coreLabel.Text -and (Test-Path -LiteralPath $pending -PathType Leaf)) {
-    $coreLabel.Text = 'Trợ lý đã sẵn sàng. Bạn có thể dùng /zaloqr và /zalostatus.'
+  if ([string]::IsNullOrWhiteSpace($coreReadyText.Text) -and (Test-Path -LiteralPath $pending -PathType Leaf)) {
+    $coreReadyText.Visibility = [System.Windows.Visibility]::Visible
+    $coreReadyText.Text = if ($zaloCheck.Checked) {
+      '✓ Trợ lý OpenClaw & Zalo đã sẵn sàng. Đang tiếp tục cài Antigravity & Codex CLI...'
+    } else {
+      '✓ Trợ lý OpenClaw đã sẵn sàng. Đang tiếp tục cài Antigravity & Codex CLI...'
+    }
   }
-  if ($script:safeLog -and (Test-Path -LiteralPath $script:safeLog)) {
-    try { $statusLabel.Text = [IO.File]::ReadAllText($script:safeLog, [Text.Encoding]::UTF8) } catch { }
+  if ($script:safeLog -and (Test-Path -LiteralPath $script:safeLog -PathType Leaf)) {
+    try {
+      $msg = [IO.File]::ReadAllText($script:safeLog, [System.Text.Encoding]::UTF8)
+      if ($msg) {
+        $statusText.Text = $msg
+        Update-ProgressFromStatus $msg
+      }
+    } catch { }
   }
-  if (-not $script:runnerProcess.HasExited -and (Get-Date) -ge $script:runnerDeadline) {
-    try { $script:runnerProcess.Kill() } catch [InvalidOperationException] {}
+  if ($script:runnerProcess -and -not $script:runnerProcess.HasExited -and (Get-Date) -ge $script:runnerDeadline) {
+    Stop-ActiveRunner 'Hết thời gian chờ cài đặt. Dữ liệu đã tạo vẫn được giữ an toàn.'
+    return
   }
-  if ($script:runnerProcess.HasExited) {
-    $timer.Stop()
+  if ($script:runnerProcess -and $script:runnerProcess.HasExited) {
+    $installTimer.Stop()
     $code = $script:runnerProcess.ExitCode
     $script:runnerProcess.Dispose()
     $script:runnerProcess = $null
-    if (Test-Path -LiteralPath $script:safeLog) {
-      try { $statusLabel.Text = [IO.File]::ReadAllText($script:safeLog, [Text.Encoding]::UTF8) } catch {}
+    if ($script:safeLog -and (Test-Path -LiteralPath $script:safeLog -PathType Leaf)) {
+      try { $statusText.Text = [IO.File]::ReadAllText($script:safeLog, [System.Text.Encoding]::UTF8) } catch { }
     }
-    $detail = $statusLabel.Text
+    $detail = $statusText.Text
     if ($code -eq 0 -and -not $detail.StartsWith('Hoàn tất:')) { $code = 1 }
+    $wasManage = $script:currentManageAction
+    $script:currentManageAction = ''
     Cleanup-Secret
     $script:installRunning = $false
+    $installProgressBar.IsIndeterminate = $false
+
+    if ($wasManage) {
+      if ($code -eq 0) {
+        $script:resultCode = 0
+        $installProgressBar.Value = 100
+        $progressPercentText.Text = '100%'
+        $installFailureActions.Visibility = [System.Windows.Visibility]::Collapsed
+        Apply-ManageModeUI
+        [void](Update-CodexAvailability)
+        if ($wasManage -eq 'install-zalo' -or $script:openZaloQrAfterManage) {
+          $script:openZaloQrAfterManage = $false
+          Start-ZaloQrLoginSession
+          return
+        }
+        Show-Info $detail 'Thực hiện thành công'
+        Set-NavActive 'home'
+      } else {
+        $script:openZaloQrAfterManage = $false
+        Show-Error $detail
+        $fallbackView = if ($script:isManageMode) { 'home' } else { 'config' }
+        Set-NavActive $fallbackView
+      }
+      return
+    }
+
     $script:resultCode = $code
     if ($code -eq 0) {
-      $statusLabel.Text = $detail
-      $cliNotice = 'Mở PowerShell mới, sau đó chạy: openclaw status.'
-      $cliInfoPath = Join-Path (Join-Path $env:USERPROFILE 'openclaw') 'windows-cli.json'
-      if (Test-Path -LiteralPath $cliInfoPath) {
-        try {
-          $cliInfo = [IO.File]::ReadAllText($cliInfoPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
-          if (-not $cliInfo.default -and $cliInfo.command -match '^openclaw-member-[a-f0-9]{12}$') {
-            $cliNotice = "Lệnh openclaw cũ được giữ nguyên. Mở PowerShell mới, sau đó chạy: $($cliInfo.command) status."
-          }
-        } catch { $cliNotice = 'Mở PowerShell mới. Nếu đã có lệnh openclaw, xem windows-cli.json để biết tên lệnh riêng.' }
+      $script:installCompleted = $true
+      $script:retryEditor = $false
+      $retryEditorPanel.Visibility = [System.Windows.Visibility]::Collapsed
+      Update-ProgressFromStatus $detail
+      $codexDirBox.Text = Get-CodexDefaultWorkspace
+      Apply-ManageModeUI
+      [void](Update-CodexAvailability)
+      if ($detail -match '/zaloqr') {
+        Show-Info "$detail`n`nTiếp theo: Màn hình sẽ hiển thị ngay mã QR Zalo (và gửi đồng thời vào Telegram Chủ sở hữu) để bạn quét kết nối luôn!" 'Cài đặt hoàn tất'
+        Start-ZaloQrLoginSession
+      } else {
+        Show-Info "$detail`n`nLối tắt Em Trợ Lý đã sẵn sàng trên Desktop để bạn quản lý & dùng Codex bất cứ lúc nào." 'Cài đặt hoàn tất'
+        Set-NavActive 'home'
       }
-      $successMessage = "$detail`n`nNhắn /zaloqr trong Telegram riêng để nhận QR hoặc /zalostatus để kiểm tra kết nối.`n`n$cliNotice"
-      [System.Windows.Forms.MessageBox]::Show($form, $successMessage, 'Cài đặt hoàn tất', 'OK', 'Information') | Out-Null
-      $form.DialogResult = [System.Windows.Forms.DialogResult]::OK
-      $form.Close()
     } elseif ($code -eq 3 -or (Test-Path -LiteralPath $pending -PathType Leaf)) {
       $script:resultCode = 3
       $script:retryEditor = $true
-      $coreLabel.Text = 'Trợ lý đã sẵn sàng. Bạn có thể dùng /zaloqr và /zalostatus.'
-      $statusLabel.Text = if ($code -eq 3) { $detail } else { 'Bước cài Codex đã gián đoạn. Bạn có thể thử lại hoặc đóng cửa sổ này.' }
-      $retryKey.Visible = $true
-      $retryLabel.Visible = $true
+      $coreReadyText.Visibility = [System.Windows.Visibility]::Visible
+      $coreReadyText.Text = '✓ OpenClaw & Telegram đã hoạt động tốt.'
+      $statusText.Text = if ($code -eq 3) { $detail } else { 'Bước cài Codex bị gián đoạn. Nhập khóa API bên dưới rồi bấm Thử lại bước Codex.' }
+      $retryEditorPanel.Visibility = [System.Windows.Visibility]::Visible
+      Set-ChecklistStep 5 'error' 'Chưa xong'
+      Set-Buttons
     } else {
-      $statusLabel.Text = 'Cài đặt chưa thành công. Dữ liệu đã tạo được giữ nguyên.'
-      Show-Error ("Cài đặt chưa thành công. $detail`n`nNếu thư mục đã được tạo một phần, hãy kiểm tra trước khi thử lại.")
+      $script:lastInstallErrorDetail = $detail
+      $installFailureActions.Visibility = [System.Windows.Visibility]::Visible
+      $statusText.Text = "Cài đặt chưa thành công: $detail"
+      Show-Error ("Cài đặt chưa thành công.`n`n$detail`n`nBạn có thể bấm nút `"Tự sửa lỗi bằng Codex`" ngay bên dưới để Codex tự khắc phục.")
+      Set-Buttons
     }
+  }
+})
+
+# Live Zalo QR Login Controller (Displays QR in WPF + Sends to Telegram Owner + Auto-detects Scan)
+function Resolve-EmTroLyNodeBinary([string]$OpenClawRoot) {
+  if ($OpenClawRoot) {
+    $instFile = Join-Path $OpenClawRoot 'installer-instance.json'
+    if (Test-Path -LiteralPath $instFile -PathType Leaf) {
+      try {
+        $inst = [IO.File]::ReadAllText($instFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        if ($inst.node -and (Test-Path -LiteralPath ([string]$inst.node) -PathType Leaf)) {
+          return [string]$inst.node
+        }
+      } catch { }
+    }
+  }
+  $cmd = @(Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1)
+  if ($cmd.Count -gt 0 -and $cmd[0].Source) { return $cmd[0].Source }
+  if ($env:LOCALAPPDATA) {
+    $depNodes = @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'MemberInstaller\dependencies\node-*\node.exe') -ErrorAction SilentlyContinue)
+    if ($depNodes.Count -gt 0) { return $depNodes[0].FullName }
+  }
+  return ''
+}
+
+$zaloQrTimer = New-Object System.Windows.Threading.DispatcherTimer
+$zaloQrTimer.Interval = [TimeSpan]::FromMilliseconds(500)
+$zaloQrTimer.Add_Tick({
+  if (-not $script:zaloQrRunning) { return }
+
+  if ($script:zaloQrPngFile -and (Test-Path -LiteralPath $script:zaloQrPngFile -PathType Leaf)) {
+    try {
+      $itemInfo = Get-Item -LiteralPath $script:zaloQrPngFile -ErrorAction Stop
+      if ($itemInfo.Length -gt 64 -and $itemInfo.LastWriteTimeUtc.Ticks -ne $script:zaloQrLoadedTicks) {
+        $pngBytes = [IO.File]::ReadAllBytes($script:zaloQrPngFile)
+        $pms = New-Object System.IO.MemoryStream(,$pngBytes)
+        $qBmp = New-Object System.Windows.Media.Imaging.BitmapImage
+        $qBmp.BeginInit()
+        $qBmp.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+        $qBmp.StreamSource = $pms
+        $qBmp.EndInit()
+        $qBmp.Freeze()
+        $pms.Dispose()
+        $zaloQrImage.Source = $qBmp
+        $zaloQrImage.Visibility = [System.Windows.Visibility]::Visible
+        $zaloQrLoadingBox.Visibility = [System.Windows.Visibility]::Collapsed
+        $zaloQrSuccessBox.Visibility = [System.Windows.Visibility]::Collapsed
+        $script:zaloQrLoadedTicks = $itemInfo.LastWriteTimeUtc.Ticks
+      }
+    } catch { }
+  }
+
+  if ($script:zaloQrStateFile -and (Test-Path -LiteralPath $script:zaloQrStateFile -PathType Leaf)) {
+    try {
+      $stObj = [IO.File]::ReadAllText($script:zaloQrStateFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+      if ($stObj.message) { $zaloQrStatusText.Text = [string]$stObj.message }
+      if ($stObj.telegramNote) {
+        $zaloQrTgText.Text = [string]$stObj.telegramNote
+        if ($stObj.telegramSent) {
+          $zaloQrTgBanner.Background = New-Brush '#ECFDF5'
+          $zaloQrTgBanner.BorderBrush = New-Brush '#A7F3D0'
+          $zaloQrTgText.Foreground = New-Brush '#065F46'
+        } else {
+          $zaloQrTgBanner.Background = New-Brush '#F8FAFC'
+          $zaloQrTgBanner.BorderBrush = New-Brush '#E2E8F0'
+          $zaloQrTgText.Foreground = New-Brush '#475569'
+        }
+      }
+      if ($stObj.phase -eq 'qr_ready' -and $stObj.expiresAt) {
+        $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+        $remainSec = [Math]::Max(0, [int][Math]::Ceiling(([double]$stObj.expiresAt - $nowMs) / 1000.0))
+        $mins = [int][Math]::Floor($remainSec / 60)
+        $secs = $remainSec % 60
+        $zaloQrTimerText.Text = ('Còn hiệu lực: {0:D2}:{1:D2}' -f $mins, $secs)
+        if ($remainSec -le 30) {
+          $zaloQrTimerPill.Background = New-Brush '#FFFBEB'
+          $zaloQrTimerPill.BorderBrush = New-Brush '#FDE68A'
+          $zaloQrTimerText.Foreground = New-Brush '#B45309'
+        } else {
+          $zaloQrTimerPill.Background = New-Brush '#EFF6FF'
+          $zaloQrTimerPill.BorderBrush = New-Brush '#BFDBFE'
+          $zaloQrTimerText.Foreground = New-Brush '#1D4ED8'
+        }
+      }
+      if ($stObj.connected -eq $true -or $stObj.phase -eq 'connected') {
+        $tgConfirmNote = if ($stObj.telegramNote) { [string]$stObj.telegramNote } else { '✓ Đã đồng bộ kết nối Zalo thành công.' }
+        Stop-ZaloQrSession
+        $script:zaloConnectedState = $true
+        $script:zaloInstalledState = $true
+        Update-DashboardCards
+        Show-ZaloConnectedView -TelegramNote $tgConfirmNote
+        Show-Info 'Chúc mừng! Bạn đã quét mã QR và đăng nhập Zalo cá nhân thành công. Trợ lý OpenClaw đã kết nối Zalo và sẵn sàng hoạt động!' 'Đăng nhập Zalo thành công'
+        return
+      }
+    } catch { }
+  }
+
+  if ($script:zaloQrProcess -and $script:zaloQrProcess.HasExited) {
+    $exitCode = $script:zaloQrProcess.ExitCode
+    if ($script:zaloQrStateFile -and (Test-Path -LiteralPath $script:zaloQrStateFile -PathType Leaf)) {
+      try {
+        $finalObj = [IO.File]::ReadAllText($script:zaloQrStateFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        if ($finalObj.connected -eq $true) { return }
+        if ($finalObj.message) { $zaloQrStatusText.Text = [string]$finalObj.message }
+      } catch { }
+    }
+    Stop-ZaloQrSession
+    $zaloQrRefreshBtn.IsEnabled = $true
+    $zaloQrImage.Visibility = [System.Windows.Visibility]::Collapsed
+    $zaloQrLoadingBox.Visibility = [System.Windows.Visibility]::Visible
+    if ($exitCode -eq 2) {
+      $zaloQrTimerPill.Background = New-Brush '#FFFBEB'
+      $zaloQrTimerPill.BorderBrush = New-Brush '#FDE68A'
+      $zaloQrTimerText.Foreground = New-Brush '#B45309'
+      $zaloQrTimerText.Text = 'Đã hết hạn'
+    } else {
+      $zaloQrTimerPill.Background = New-Brush '#FEF2F2'
+      $zaloQrTimerPill.BorderBrush = New-Brush '#FECACA'
+      $zaloQrTimerText.Foreground = New-Brush '#B91C1C'
+      $zaloQrTimerText.Text = 'Chưa tạo được QR'
+    }
+  }
+})
+
+$liveSyncTimer = New-Object System.Windows.Threading.DispatcherTimer
+$liveSyncTimer.Interval = [TimeSpan]::FromMilliseconds(650)
+$liveSyncTimer.Add_Tick({
+  if ($script:zaloSyncProc) {
+    if ($script:zaloSyncProc.HasExited) {
+      try { $script:zaloSyncProc.Dispose() } catch { }
+      $script:zaloSyncProc = $null
+      $liveSyncTimer.Stop()
+      Update-DashboardCards
+      Set-Buttons
+    }
+  } else {
+    $liveSyncTimer.Stop()
+  }
+})
+
+function Show-ZaloConnectedView([string]$TelegramNote = '') {
+  Stop-ZaloQrSession
+  $script:zaloConnectedState = $true
+  $script:zaloInstalledState = $true
+  Set-NavActive 'zaloqr'
+  $headerTitle.Text = 'Trạng thái kết nối Zalo cá nhân'
+  $headerSubtitle.Text = 'Tài khoản Zalo cá nhân đã kết nối trực tuyến với trợ lý OpenClaw'
+  $zaloQrMainHeading.Text = 'Tài khoản Zalo đã kết nối'
+  $zaloQrFrame.BorderBrush = New-Brush '#34D399'
+  $zaloQrFrame.Background = New-Brush '#F0FDF4'
+  $zaloQrImage.Visibility = [System.Windows.Visibility]::Collapsed
+  $zaloQrLoadingBox.Visibility = [System.Windows.Visibility]::Collapsed
+  $zaloQrSuccessBox.Visibility = [System.Windows.Visibility]::Visible
+  $zaloQrTimerPill.Background = New-Brush '#ECFDF5'
+  $zaloQrTimerPill.BorderBrush = New-Brush '#6EE7B7'
+  $zaloQrTimerText.Foreground = New-Brush '#065F46'
+  $zaloQrTimerText.Text = '✓ Đã kết nối trực tuyến'
+  $zaloQrStatusText.Text = 'Trợ lý OpenClaw đang giữ phiên kết nối Zalo cá nhân ổn định và sẵn sàng nhận/trả lời tin nhắn.'
+  $zaloQrTgBanner.Background = New-Brush '#ECFDF5'
+  $zaloQrTgBanner.BorderBrush = New-Brush '#A7F3D0'
+  $zaloQrTgText.Foreground = New-Brush '#065F46'
+  $zaloQrTgText.Text = if ($TelegramNote) { $TelegramNote } else { '✓ Không cần quét lại mã QR. Chỉ bấm "Đổi tài khoản / Tạo QR mới" nếu bạn muốn đổi sang Zalo khác.' }
+  $zaloQrGuideBox.Visibility = [System.Windows.Visibility]::Collapsed
+  $zaloQrRefreshBtn.Content = 'Đổi tài khoản / Tạo QR mới'
+  $zaloQrRefreshBtn.IsEnabled = $true
+  Update-ZaloGlobalBadges
+}
+
+function Start-ZaloQrLoginSession([switch]$ForceNewQr) {
+  $st = Get-EmTroLyInstalledState
+  if (-not $st.OpenClawInstalled) {
+    Show-Error 'Hãy cài đặt trợ lý OpenClaw trước khi kết nối mã QR Zalo.'
+    return
+  }
+  if (-not $st.ZaloInstalled) {
+    $script:openZaloQrAfterManage = $true
+    Start-ManageAction 'install-zalo'
+    return
+  }
+
+  if (-not $ForceNewQr) {
+    $dashCheck = if (Get-Command Get-EmTroLyLiveDashboardStatus -ErrorAction SilentlyContinue) { Get-EmTroLyLiveDashboardStatus } else { $null }
+    if (($dashCheck -and $dashCheck.ZaloLinked) -or $script:zaloConnectedState) {
+      Show-ZaloConnectedView
+      return
+    }
+  }
+
+  $bridgeScript = Resolve-HelperScript 'zalo-qr-session.mjs'
+  if (-not (Test-Path -LiteralPath $bridgeScript -PathType Leaf)) {
+    Show-Error 'Không tìm thấy công cụ tạo mã QR Zalo (zalo-qr-session.mjs).'
+    return
+  }
+  $nodeExe = Resolve-EmTroLyNodeBinary -OpenClawRoot $st.Root
+  if (-not $nodeExe) {
+    Show-Error 'Không tìm thấy Node.js để khởi tạo phiên mã QR Zalo.'
+    return
+  }
+
+  Stop-ZaloQrSession
+  Set-NavActive 'zaloqr'
+
+  $zaloQrMainHeading.Text = 'Quét mã QR đăng nhập Zalo'
+  $zaloQrFrame.Background = New-Brush '#FFFFFF'
+  $zaloQrFrame.BorderBrush = New-Brush '#BFDBFE'
+  $zaloQrImage.Source = $null
+  $zaloQrImage.Visibility = [System.Windows.Visibility]::Collapsed
+  $zaloQrSuccessBox.Visibility = [System.Windows.Visibility]::Collapsed
+  $zaloQrLoadingBox.Visibility = [System.Windows.Visibility]::Visible
+  $zaloQrTimerPill.Background = New-Brush '#EFF6FF'
+  $zaloQrTimerPill.BorderBrush = New-Brush '#BFDBFE'
+  $zaloQrTimerText.Foreground = New-Brush '#1D4ED8'
+  $zaloQrTimerText.Text = 'Đang khởi tạo...'
+  $zaloQrStatusText.Text = 'Đang tạo mã QR đăng nhập Zalo và gửi tới Telegram Chủ sở hữu...'
+  $zaloQrTgBanner.Background = New-Brush '#F8FAFC'
+  $zaloQrTgBanner.BorderBrush = New-Brush '#E2E8F0'
+  $zaloQrTgText.Foreground = New-Brush '#475569'
+  $zaloQrTgText.Text = 'Chuẩn bị gửi đồng thời mã QR qua Telegram...'
+  $zaloQrGuideBox.Visibility = [System.Windows.Visibility]::Visible
+  $zaloQrRefreshBtn.Content = 'Tạo mã QR mới'
+
+  $targetOwner = $qrOwnerBox.Text.Trim()
+  if ([string]::IsNullOrWhiteSpace($targetOwner) -and $st.OwnerIds) {
+    $targetOwner = (($st.OwnerIds -split ',')[0]).Trim()
+  }
+
+  try {
+    $script:zaloQrDir = Join-Path $env:TEMP ('emtroly-zaloqr-' + [guid]::NewGuid().ToString('N'))
+    New-CodexPrivateDirectory $script:zaloQrDir
+    $script:zaloQrStateFile = Join-Path $script:zaloQrDir 'state.json'
+    $script:zaloQrPngFile = Join-Path $script:zaloQrDir 'qr.png'
+    $script:zaloQrLoadedTicks = 0
+
+    $argList = @(
+      ('"' + $bridgeScript.Replace('"', '\"') + '"'),
+      '--root', ('"' + $st.Root.Replace('"', '\"') + '"'),
+      '--state-file', ('"' + $script:zaloQrStateFile.Replace('"', '\"') + '"'),
+      '--qr-out', ('"' + $script:zaloQrPngFile.Replace('"', '\"') + '"'),
+      '--timeout-seconds', '160'
+    )
+    if ($targetOwner -match '^[1-9][0-9]*$') {
+      $argList += @('--owner-id', $targetOwner)
+    }
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $nodeExe
+    $psi.Arguments = ($argList -join ' ')
+    $psi.WorkingDirectory = $st.Root
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $script:zaloQrProcess = [Diagnostics.Process]::Start($psi)
+    $script:zaloQrRunning = $true
+    $zaloQrTimer.Start()
+  } catch {
+    Stop-ZaloQrSession
+    Show-Error 'Không thể khởi tạo phiên đăng nhập mã QR Zalo.'
+  }
+}
+
+# Codex CLI Interactive Tab Worker
+function Start-CodexTask {
+  if ($script:codexRunning) { return }
+  $info = Update-CodexAvailability
+  if (-not $info.Available) {
+    Show-Error 'Chưa tìm thấy Codex CLI trên máy. Hãy hoàn tất cài đặt hoặc bấm Sửa / Cài lại Codex.'
+    return
+  }
+  $targetDir = $codexDirBox.Text.Trim()
+  if ([string]::IsNullOrWhiteSpace($targetDir) -or -not (Test-Path -LiteralPath $targetDir -PathType Container)) {
+    Show-Error 'Thư mục cần sửa không tồn tại. Hãy bấm "Chọn thư mục..." để chọn thư mục hợp lệ.'
+    return
+  }
+  $promptText = $codexPromptBox.Text.Trim()
+  if ([string]::IsNullOrWhiteSpace($promptText)) {
+    Show-Error 'Hãy nhập yêu cầu tiếng Việt bạn muốn Codex thực hiện.'
+    return
+  }
+  $fallbackKey = if (-not [string]::IsNullOrWhiteSpace($apiKeyBox.Text)) { $apiKeyBox.Text.Trim() } else { $script:sessionApiKeyFallback }
+  if ([string]::IsNullOrWhiteSpace($info.CodexHome) -and [string]::IsNullOrWhiteSpace($fallbackKey)) {
+    Show-Error 'Codex CLI chưa có khóa API. Hãy nhập API Key ở mục Cấu hình trước.'
+    return
+  }
+
+  try {
+    $script:codexPrivateDir = Join-Path $env:TEMP ('emtroly-codex-ui-' + [guid]::NewGuid().ToString('N'))
+    New-CodexPrivateDirectory $script:codexPrivateDir
+    $reqPath = Join-Path $script:codexPrivateDir 'request.json'
+    $script:codexLogFile = Join-Path $script:codexPrivateDir 'output.txt'
+    $script:codexLogOffset = 0
+    [IO.File]::WriteAllText($script:codexLogFile, '', (New-Object System.Text.UTF8Encoding($false)))
+
+    $reqData = [ordered]@{
+      executable = $info.Executable
+      workspace  = $targetDir
+      prompt     = $promptText
+      allow_edit = [bool]$codexWriteCheck.IsChecked
+      codex_home = $info.CodexHome
+      model      = ([string]$modelBox.SelectedItem).Trim()
+      base_url   = $baseUrlBox.Text.Trim()
+      api_key    = if ([string]::IsNullOrWhiteSpace($info.CodexHome)) { $fallbackKey } else { '' }
+    }
+    [IO.File]::WriteAllText($reqPath, ($reqData | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
+
+    $workerPath = Join-Path $script:codexPrivateDir 'codex-worker.ps1'
+    $workerSource = [IO.File]::ReadAllText($codexHelperPath, [System.Text.Encoding]::UTF8)
+    [IO.File]::WriteAllText($workerPath, $workerSource, (New-Object System.Text.UTF8Encoding($true)))
+
+    $shellPath = Join-Path $PSHOME 'powershell.exe'
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $shellPath
+    $psi.Arguments = '-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
+      $workerPath + '" -RunWorker -RequestFile "' + $reqPath + '" -OutputFile "' + $script:codexLogFile + '"'
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+
+    $codexOutputBox.Clear()
+    $script:codexProcess = [Diagnostics.Process]::Start($psi)
+    $script:codexRunning = $true
+    [void](Update-CodexAvailability)
+    $codexStateText.Text = 'Đang thực hiện yêu cầu bằng Codex CLI...'
+    $codexStateText.Foreground = New-Brush '#2563EB'
+    Set-Buttons
+    $codexTimer.Start()
+  } catch {
+    Cleanup-CodexRun
+    $script:codexRunning = $false
+    [void](Update-CodexAvailability)
+    Set-Buttons
+    Show-Error 'Không thể khởi động Codex CLI. Hãy kiểm tra quyền truy cập thư mục tạm.'
+  }
+}
+
+$codexTimer = New-Object System.Windows.Threading.DispatcherTimer
+$codexTimer.Interval = [TimeSpan]::FromMilliseconds(400)
+$codexTimer.Add_Tick({
+  if (-not $script:codexRunning) { return }
+  if ($script:codexLogFile -and (Test-Path -LiteralPath $script:codexLogFile -PathType Leaf)) {
+    try {
+      $fullText = [IO.File]::ReadAllText($script:codexLogFile, [System.Text.Encoding]::UTF8)
+      if ($fullText.Length -gt $script:codexLogOffset) {
+        $codexOutputBox.AppendText($fullText.Substring($script:codexLogOffset))
+        $script:codexLogOffset = $fullText.Length
+        $codexOutputBox.ScrollToEnd()
+      }
+    } catch { }
+  }
+  if ($script:codexProcess -and $script:codexProcess.HasExited) {
+    $codexTimer.Stop()
+    if ($script:codexLogFile -and (Test-Path -LiteralPath $script:codexLogFile -PathType Leaf)) {
+      try {
+        $fullText = [IO.File]::ReadAllText($script:codexLogFile, [System.Text.Encoding]::UTF8)
+        if ($fullText.Length -gt $script:codexLogOffset) {
+          $codexOutputBox.AppendText($fullText.Substring($script:codexLogOffset))
+          $script:codexLogOffset = $fullText.Length
+          $codexOutputBox.ScrollToEnd()
+        }
+      } catch { }
+    }
+    $script:codexProcess.Dispose()
+    $script:codexProcess = $null
+    $script:codexRunning = $false
+    Cleanup-CodexRun
+    [void](Update-CodexAvailability)
     Set-Buttons
   }
 })
 
-$tab.Add_Selecting({ param($sender, $eventArgs)
-  if (($script:installRunning -or $script:retryEditor) -and $eventArgs.TabPage -ne $installPage) { $eventArgs.Cancel = $true }
+# Event Handlers
+$showSecretCheck.Add_Click({
+  $mask = -not [bool]$showSecretCheck.IsChecked
+  $tokenBox.UseSystemPasswordChar = $mask
+  $apiKeyBox.UseSystemPasswordChar = $mask
 })
-$tab.Add_SelectedIndexChanged({ Set-Buttons })
-$backButton.Add_Click({ if ($tab.SelectedIndex -gt 0) { $tab.SelectedIndex-- } })
-$nextButton.Add_Click({ if (Test-Page $tab.SelectedIndex) { $tab.SelectedIndex++ } })
-$installButton.Add_Click({ Start-Install })
-$cancelButton.Add_Click({ Cleanup-Secret; if (-not $script:retryEditor) { $script:resultCode = 2 }; $form.Close() })
-$form.Add_FormClosing({ if ($script:installRunning) { $_.Cancel = $true; Show-Error 'Cài đặt đang chạy; vui lòng đợi đến khi hoàn tất.' } })
+
+$autoFetchIdBtn.Add_Click({
+  $tok = $tokenBox.Text.Trim()
+  if ([string]::IsNullOrWhiteSpace($tok)) {
+    $ocTok = Join-Path $env:USERPROFILE 'openclaw\telegram.token'
+    if (Test-Path -LiteralPath $ocTok -PathType Leaf) {
+      try { $tok = ([IO.File]::ReadAllText($ocTok, [System.Text.Encoding]::UTF8)).Trim() } catch { }
+    }
+  }
+  if ([string]::IsNullOrWhiteSpace($tok)) {
+    Show-Error 'Hãy dán Telegram Bot Token vào ô phía trên trước rồi bấm Lấy ID tự động.'
+    return
+  }
+  $autoFetchIdBtn.IsEnabled = $false
+  $autoFetchIdBtn.Content = 'Đang lấy ID...'
+  $liveCheckBanner.Visibility = [System.Windows.Visibility]::Visible
+  $liveCheckBanner.Background = New-Brush '#EFF6FF'
+  $liveCheckBanner.BorderBrush = New-Brush '#BFDBFE'
+  $liveCheckText.Foreground = New-Brush '#1D4ED8'
+  $liveCheckText.Text = 'Đang đọc tin nhắn gần nhất từ Telegram Bot để lấy Owner ID & Group ID...'
+
+  Start-AsyncUiTask -Params @{ HelperPath = $wizardHelperPath; Token = $tok } -Work {
+    param($HelperPath, $Token)
+    . ([ScriptBlock]::Create([IO.File]::ReadAllText($HelperPath, [System.Text.Encoding]::UTF8)))
+    return (Get-TelegramIdsFromBotUpdates -TelegramToken $Token)
+  } -OnComplete {
+    param($res, $err)
+    $autoFetchIdBtn.IsEnabled = $true
+    $autoFetchIdBtn.Content = 'Lấy ID tự động'
+    if ($err -or -not $res) {
+      $liveCheckBanner.Background = New-Brush '#FEF2F2'
+      $liveCheckBanner.BorderBrush = New-Brush '#FECACA'
+      $liveCheckText.Foreground = New-Brush '#B91C1C'
+      $liveCheckText.Text = 'Không thể lấy ID từ Telegram. Hãy kiểm tra lại kết nối mạng.'
+      return
+    }
+    if ($res.SuggestedOwnerId) {
+      $ownersBox.Text = $res.SuggestedOwnerId
+      if ([string]::IsNullOrWhiteSpace($qrOwnerBox.Text)) {
+        $qrOwnerBox.Text = (($ownersBox.Text -split ',')[0]).Trim()
+      }
+    }
+    if ($res.SuggestedGroupId) { $groupBox.Text = $res.SuggestedGroupId }
+    if ($res.Ok -and ($res.SuggestedOwnerId -or $res.SuggestedGroupId)) {
+      $liveCheckBanner.Background = New-Brush '#ECFDF5'
+      $liveCheckBanner.BorderBrush = New-Brush '#A7F3D0'
+      $liveCheckText.Foreground = New-Brush '#065F46'
+      $liveCheckText.Text = '✓ ' + $res.Message
+    } elseif ($res.Ok) {
+      $liveCheckBanner.Background = New-Brush '#FFFBEB'
+      $liveCheckBanner.BorderBrush = New-Brush '#FDE68A'
+      $liveCheckText.Foreground = New-Brush '#B45309'
+      $liveCheckText.Text = $res.Message
+    } else {
+      $liveCheckBanner.Background = New-Brush '#FEF2F2'
+      $liveCheckBanner.BorderBrush = New-Brush '#FECACA'
+      $liveCheckText.Foreground = New-Brush '#B91C1C'
+      $liveCheckText.Text = $res.Message
+    }
+  }
+})
+
+$testConnBtn.Add_Click({
+  $testConnBtn.IsEnabled = $false
+  $testConnBtn.Content = 'Đang kiểm tra...'
+  $liveCheckBanner.Visibility = [System.Windows.Visibility]::Visible
+  $liveCheckBanner.Background = New-Brush '#EFF6FF'
+  $liveCheckBanner.BorderBrush = New-Brush '#BFDBFE'
+  $liveCheckText.Foreground = New-Brush '#1D4ED8'
+  $liveCheckText.Text = 'Đang kiểm tra Telegram Bot Token và Provider API Key...'
+
+  $ocRoot = Join-Path $env:USERPROFILE 'openclaw'
+  Start-AsyncUiTask -Params @{
+    HelperPath = $wizardHelperPath
+    Token      = $tokenBox.Text.Trim()
+    BaseUrl    = $baseUrlBox.Text.Trim()
+    ApiKey     = $apiKeyBox.Text.Trim()
+    Model      = ([string]$modelBox.SelectedItem).Trim()
+    Root       = $ocRoot
+  } -Work {
+    param($HelperPath, $Token, $BaseUrl, $ApiKey, $Model, $Root)
+    . ([ScriptBlock]::Create([IO.File]::ReadAllText($HelperPath, [System.Text.Encoding]::UTF8)))
+    return (Test-EmTroLyLiveCredentials -TelegramToken $Token -BaseUrl $BaseUrl -ApiKey $ApiKey -Model $Model -OpenClawRoot $Root)
+  } -OnComplete {
+    param($res, $err)
+    $testConnBtn.IsEnabled = $true
+    $testConnBtn.Content = 'Kiểm tra kết nối'
+    if ($err -or -not $res) {
+      $liveCheckBanner.Background = New-Brush '#FEF2F2'
+      $liveCheckBanner.BorderBrush = New-Brush '#FECACA'
+      $liveCheckText.Foreground = New-Brush '#B91C1C'
+      $liveCheckText.Text = 'Không thể thực hiện kiểm tra kết nối.'
+      return
+    }
+    if ($res.AllOk) {
+      $liveCheckBanner.Background = New-Brush '#ECFDF5'
+      $liveCheckBanner.BorderBrush = New-Brush '#A7F3D0'
+      $liveCheckText.Foreground = New-Brush '#065F46'
+      $liveCheckText.Text = '✓ ' + $res.Summary
+    } else {
+      $liveCheckBanner.Background = New-Brush '#FFFBEB'
+      $liveCheckBanner.BorderBrush = New-Brush '#FDE68A'
+      $liveCheckText.Foreground = New-Brush '#B45309'
+      $liveCheckText.Text = '! ' + $res.Summary
+    }
+  }
+})
+
+function Invoke-ExportSupportReportAction {
+  try {
+    $reportPath = Export-EmTroLySupportReport -PayloadRoot $PayloadRoot
+    Show-Info "Đã xuất báo cáo hỗ trợ an toàn (đã ẩn toàn bộ mã bí mật) tại:`n$reportPath" 'Xuất báo cáo thành công'
+    Start-Process -FilePath 'explorer.exe' -ArgumentList ('/select,"' + $reportPath + '"') | Out-Null
+  } catch {
+    Show-Error 'Không thể xuất file báo cáo hỗ trợ.'
+  }
+}
+
+$runPreflightBtn.Add_Click({
+  $runPreflightBtn.IsEnabled = $false
+  $runPreflightBtn.Content = 'Đang quét...'
+  $preflightListPanel.Children.Clear()
+  $tbWait = New-Object System.Windows.Controls.TextBlock
+  $tbWait.Text = 'Đang kiểm tra hệ điều hành, ổ cứng trống và đường truyền mạng...'
+  $tbWait.Foreground = New-Brush '#2563EB'
+  $tbWait.FontFamily = New-Object System.Windows.Media.FontFamily($uiFontFamily)
+  [void]$preflightListPanel.Children.Add($tbWait)
+
+  Start-AsyncUiTask -Params @{ HelperPath = $wizardHelperPath } -Work {
+    param($HelperPath)
+    . ([ScriptBlock]::Create([IO.File]::ReadAllText($HelperPath, [System.Text.Encoding]::UTF8)))
+    return ,(Test-EmTroLyPreflightChecks)
+  } -OnComplete {
+    param($items, $err)
+    $runPreflightBtn.IsEnabled = $true
+    $runPreflightBtn.Content = 'Kiểm tra hệ thống ngay'
+    $preflightListPanel.Children.Clear()
+    foreach ($it in @($items)) {
+      $row = New-Object System.Windows.Controls.DockPanel
+      $row.Margin = New-Object System.Windows.Thickness(0, 0, 0, 8)
+      $icon = New-Object System.Windows.Controls.TextBlock
+      $icon.FontFamily = New-Object System.Windows.Media.FontFamily($uiFontFamily)
+      $icon.FontWeight = [System.Windows.FontWeights]::Bold
+      $icon.Width = 24
+      $icon.Text = if ($it.Ok) { '✓' } else { '!' }
+      $icon.Foreground = if ($it.Ok) { New-Brush '#059669' } else { New-Brush '#DC2626' }
+      [System.Windows.Controls.DockPanel]::SetDock($icon, [System.Windows.Controls.Dock]::Left)
+
+      $det = New-Object System.Windows.Controls.TextBlock
+      $det.FontFamily = New-Object System.Windows.Media.FontFamily($uiFontFamily)
+      $det.FontSize = 12.5
+      $det.Text = $it.Detail
+      $det.Foreground = if ($it.Ok) { New-Brush '#475569' } else { New-Brush '#B91C1C' }
+      [System.Windows.Controls.DockPanel]::SetDock($det, [System.Windows.Controls.Dock]::Right)
+
+      $lbl = New-Object System.Windows.Controls.TextBlock
+      $lbl.FontFamily = New-Object System.Windows.Media.FontFamily($uiFontFamily)
+      $lbl.FontSize = 13
+      $lbl.FontWeight = [System.Windows.FontWeights]::SemiBold
+      $lbl.Text = $it.Name
+      $lbl.Foreground = New-Brush '#0F172A'
+
+      [void]$row.Children.Add($icon)
+      [void]$row.Children.Add($det)
+      [void]$row.Children.Add($lbl)
+      [void]$preflightListPanel.Children.Add($row)
+    }
+  }
+})
+
+# Navigation & Action Wiring
+$navHomeBtn.Add_Click({ Set-NavActive 'home' })
+$navConfigBtn.Add_Click({ Set-NavActive 'config' })
+$navCodexBtn.Add_Click({ Set-NavActive 'codex' })
+$navDiagBtn.Add_Click({ Set-NavActive 'diag' })
+
+$headerQuickBtn.Add_Click({
+  if ($script:installRunning -or $script:retryEditor) { return }
+  if ($script:currentView -eq 'codex') { Set-NavActive 'home' } else { Set-NavActive 'codex' }
+})
+
+$dashOpenWebBtn.Add_Click({
+  if ($script:gatewayDashboardUrl) {
+    Start-Process -FilePath $script:gatewayDashboardUrl | Out-Null
+  }
+})
+$dashRefreshBtn.Add_Click({
+  Start-LiveZaloStatusSync -Force
+  Update-DashboardCards
+})
+$dashRestartBtn.Add_Click({ Start-ManageAction 'health-restart' })
+$dashEditConfigBtn.Add_Click({ Set-NavActive 'config' })
+$dashZaloQrBtn.Add_Click({ Start-ZaloQrLoginSession })
+$dashZaloBtn.Add_Click({ Start-ManageAction 'install-zalo' })
+$dashCodexRepairBtn.Add_Click({ Start-ManageAction 'reinstall-codex' })
+$dashOpenCodexBtn.Add_Click({ Set-NavActive 'codex' })
+$dashAutoHealBtn.Add_Click({ Start-ManageAction 'auto-heal' })
+$dashExportBtn.Add_Click({ Invoke-ExportSupportReportAction })
+
+$diagAutoHealBtn.Add_Click({ Start-ManageAction 'auto-heal' })
+$diagRestartBtn.Add_Click({ Start-ManageAction 'health-restart' })
+$diagZaloQrBtn.Add_Click({ Start-ZaloQrLoginSession })
+$diagZaloBtn.Add_Click({ Start-ManageAction 'install-zalo' })
+
+$sidebarZaloPill.Add_MouseLeftButtonUp({
+  if (-not $script:installRunning -and -not $script:retryEditor) {
+    Start-ZaloQrLoginSession
+  }
+})
+$headerZaloBadge.Add_MouseLeftButtonUp({
+  if (-not $script:installRunning -and -not $script:retryEditor) {
+    Show-ZaloConnectedView
+  }
+})
+
+$zaloQrRefreshBtn.Add_Click({ Start-ZaloQrLoginSession -ForceNewQr })
+$zaloQrBackBtn.Add_Click({
+  Stop-ZaloQrSession
+  Set-NavActive 'home'
+})
+$diagCodexBtn.Add_Click({ Start-ManageAction 'reinstall-codex' })
+$diagExportBtn.Add_Click({ Invoke-ExportSupportReportAction })
+$diagShortcutBtn.Add_Click({
+  $sc = Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot
+  if ($sc.Created) {
+    Show-Info "Đã tạo lối tắt Em Trợ Lý trên Desktop:`n$($sc.Path)" 'Tạo lối tắt thành công'
+  } else {
+    Show-Error 'Chưa tìm thấy tệp ứng dụng để tạo lối tắt trên Desktop.'
+  }
+})
+
+$btnInstallAutoHeal.Add_Click({ Start-ManageAction 'auto-heal' $script:lastInstallErrorDetail })
+$btnProgressExport.Add_Click({ Invoke-ExportSupportReportAction })
+
+$codexBrowseBtn.Add_Click({
+  $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+  $dialog.Description = 'Chọn thư mục bạn muốn Codex CLI chỉnh sửa hoặc kiểm tra'
+  if (Test-Path -LiteralPath $codexDirBox.Text.Trim() -PathType Container) {
+    $dialog.SelectedPath = $codexDirBox.Text.Trim()
+  }
+  if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK -and $dialog.SelectedPath) {
+    $codexDirBox.Text = $dialog.SelectedPath
+  }
+  $dialog.Dispose()
+})
+$codexOpenDirBtn.Add_Click({
+  $dir = $codexDirBox.Text.Trim()
+  if (-not (Test-Path -LiteralPath $dir -PathType Container)) { Show-Error 'Thư mục chưa tồn tại để mở.'; return }
+  Start-Process -FilePath 'explorer.exe' -ArgumentList ('"' + $dir + '"') | Out-Null
+})
+$codexTerminalBtn.Add_Click({
+  try {
+    Start-CodexInteractiveWindow -WorkspaceDir $codexDirBox.Text.Trim() -Model ([string]$modelBox.SelectedItem).Trim()
+  } catch {
+    Show-Error 'Không thể mở cửa sổ Codex CLI. Hãy kiểm tra thư mục đã chọn và trạng thái cài đặt Codex.'
+  }
+})
+$presetConfigBtn.Add_Click({ $codexPromptBox.Text = 'Hãy kiểm tra cấu hình trong thư mục này và chỉnh sửa giúp tôi theo yêu cầu: '; [void]$codexPromptBox.Focus() })
+$presetSkillBtn.Add_Click({ $codexPromptBox.Text = 'Hãy chỉnh sửa nội dung hướng dẫn / kỹ năng của trợ lý theo yêu cầu sau: '; [void]$codexPromptBox.Focus() })
+$presetFixBtn.Add_Click({ $codexPromptBox.Text = 'Hãy kiểm tra các tệp trong thư mục này, nếu có lỗi cấu hình hoặc cú pháp thì sửa giúp tôi và tóm tắt ngắn gọn những gì đã sửa.'; [void]$codexPromptBox.Focus() })
+$codexRefreshBtn.Add_Click({ [void](Update-CodexAvailability) })
+$codexRunBtn.Add_Click({ Start-CodexTask })
+$codexStopBtn.Add_Click({
+  Stop-CodexRun
+  $codexOutputBox.AppendText("`r`n[Đã gửi yêu cầu dừng lệnh Codex CLI]`r`n")
+})
+$codexClearBtn.Add_Click({ $codexOutputBox.Text = $codexGuideText })
+
+$primaryActionBtn.Add_Click({ Start-Install })
+$stopTaskButton.Add_Click({
+  if (-not $script:installRunning) { return }
+  $ans = [System.Windows.MessageBox]::Show($window, 'Bạn có muốn dừng tiến trình đang chạy không?', 'Xác nhận dừng tác vụ', [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Question)
+  if ($ans -ne [System.Windows.MessageBoxResult]::Yes) { return }
+  Stop-ActiveRunner 'Đã dừng tiến trình theo yêu cầu của bạn. Bạn có thể chỉnh sửa lại thông tin hoặc bấm Thoát.'
+})
+$cancelButton.Add_Click({ $window.Close() })
+
+$window.Add_Closing({
+  param($sender, $e)
+  if ($script:installRunning) {
+    $ans = [System.Windows.MessageBox]::Show($window, 'Tiến trình đang chạy. Bạn có muốn dừng ngay tiến trình này và thoát giao diện không?', 'Xác nhận dừng và thoát', [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
+    if ($ans -ne [System.Windows.MessageBoxResult]::Yes) {
+      $e.Cancel = $true
+      return
+    }
+    Stop-ActiveRunner ''
+  }
+  if ($script:codexRunning) {
+    $ansC = [System.Windows.MessageBox]::Show($window, 'Codex CLI đang thực hiện yêu cầu của bạn. Bạn có muốn dừng lệnh và thoát giao diện không?', 'Xác nhận dừng và thoát', [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Question)
+    if ($ansC -ne [System.Windows.MessageBoxResult]::Yes) {
+      $e.Cancel = $true
+      return
+    }
+    Stop-CodexRun
+    Cleanup-CodexRun
+  }
+  Stop-ZaloQrSession
+  if ($liveSyncTimer) { $liveSyncTimer.Stop() }
+  if ($script:zaloSyncProc) {
+    try { if (-not $script:zaloSyncProc.HasExited) { $script:zaloSyncProc.Kill() } } catch { }
+    try { $script:zaloSyncProc.Dispose() } catch { }
+    $script:zaloSyncProc = $null
+  }
+  Cleanup-Secret
+  $script:sessionApiKeyFallback = ''
+  if (-not $script:retryEditor -and -not $script:installCompleted) {
+    $script:resultCode = 2
+  }
+})
+
+# Initialize Mode (Pending Retry / Existing Installed / Fresh Install)
+$installedSnapshot = Get-EmTroLyInstalledState
+$hasExistingInstall = $installedSnapshot.OpenClawInstalled -or
+  ($env:LOCALAPPDATA -and (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex\auth.json') -PathType Leaf))
 
 if (Test-Path -LiteralPath $pending -PathType Leaf) {
-  $retryEditor = $true
-  $resultCode = 3
-  $tab.SelectedTab = $installPage
-  $coreLabel.Text = 'OpenClaw và Zalo đã hoàn tất ở lần cài trước.'
-  $statusLabel.Text = 'Nhập khóa API và chọn Thử lại bước Codex để tiếp tục. Bot sẽ không bị cài lại.'
-  $retryLabel.Visible = $true
-  $retryKey.Visible = $true
+  $script:retryEditor = $true
+  $script:resultCode = 3
+  $coreReadyText.Visibility = [System.Windows.Visibility]::Visible
+  $coreReadyText.Text = '✓ OpenClaw và Zalo đã hoàn tất ở lần cài trước.'
+  $statusText.Text = 'Nhập khóa API bên dưới và bấm Thử lại bước Codex để hoàn tất.'
+  $retryEditorPanel.Visibility = [System.Windows.Visibility]::Visible
+  Set-NavActive 'progress'
+} elseif ($installedSnapshot.OpenClawInstalled) {
+  Apply-ManageModeUI
+  if ($CodexMode) { Set-NavActive 'codex' } else { Set-NavActive 'home' }
+} elseif ($CodexMode -or $hasExistingInstall) {
+  $script:resultCode = 0
+  $script:installCompleted = $true
+  Set-NavActive 'codex'
+} else {
+  Set-NavActive 'home'
 }
-Set-Buttons
-[void]$form.ShowDialog()
+
+[void](Update-CodexAvailability)
+if ($SmokeTest) {
+  $window.Close()
+  $script:resultCode = 0
+  exit 0
+}
+
+$window.Add_ContentRendered({
+  $window.Activate()
+})
+[void]$window.ShowDialog()
+Stop-ZaloQrSession
+Stop-CodexRun
+Cleanup-CodexRun
 Cleanup-Secret
 exit $script:resultCode

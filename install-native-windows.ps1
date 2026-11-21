@@ -5,7 +5,7 @@ param(
   [string]$GroupId = '',
   [string]$AssistantName = 'Trợ lý OpenClaw',
   [string]$BaseUrl = 'https://codex.anhlaptrinh.vn/v1',
-  [string]$Model = 'gpt-6.1-sol',
+  [string]$Model = 'gpt-6.2-sol',
   [string]$Profile = 'basic-assistant-full',
   [string]$Audience = '',
   [string]$Addressing = '',
@@ -130,7 +130,7 @@ $runtimePackage = @{ name='member-openclaw-runtime'; version='1.0.0'; private=$t
 $previousErrorAction = $ErrorActionPreference
 try {
   $ErrorActionPreference = 'Continue'
-  & npm.cmd install --prefix $runtime "openclaw@$OpenClawVersion"
+  & npm.cmd install --prefix $runtime "openclaw@$OpenClawVersion" --no-audit --no-fund --prefer-offline --loglevel=error
   $npmExitCode = $LASTEXITCODE
 } finally { $ErrorActionPreference = $previousErrorAction }
 if ($npmExitCode -ne 0) { throw 'Private OpenClaw installation failed.' }
@@ -192,7 +192,7 @@ $env:OPENCLAW_WORKSPACE_DIR = $workspace
 if ($LASTEXITCODE -ne 0) { throw 'Unable to protect config.' }
 Invoke-OpenClaw config validate --json
 if ($LASTEXITCODE -ne 0) { throw 'Generated OpenClaw config is invalid. Check the preceding validator output.' }
-$status = 'Đang cài các kỹ năng Zalo và tiện ích QR…'
+$status = if ($zaloSelected) { 'Đang cài các kỹ năng trợ lý, Zalo và tiện ích QR…' } else { 'Đang cài các kỹ năng trợ lý, tạo ảnh và xử lý tài liệu…' }
 Write-NativeInstallStatus $status
 $managerInstaller = Join-Path $PSScriptRoot 'native\install-module-manager-windows.ps1'
 & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $managerInstaller -OpenClawRoot $root

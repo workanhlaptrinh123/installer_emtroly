@@ -6,7 +6,7 @@ function Test-MemberInstallerSettings {
   if ([string]$Settings.group_id -notmatch '^-[1-9][0-9]*$') { throw 'invalid-group' }
   if ([string]$Settings.telegram_token -notmatch '^[0-9]{5,}:[A-Za-z0-9_-]{20,}$') { throw 'invalid-telegram-token' }
   if ([string]::IsNullOrWhiteSpace([string]$Settings.ai_api_key)) { throw 'missing-api-key' }
-  if ([string]$Settings.model -notin @('gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-astra')) { throw 'invalid-model' }
+  if ([string]$Settings.model -notin @('gpt-6.2-sol', 'GPT-6.1-terra', 'gpt-6.2-astra')) { throw 'invalid-model' }
   $uri = $null
   if (-not [uri]::TryCreate([string]$Settings.base_url, [UriKind]::Absolute, [ref]$uri) -or
       $uri.Scheme -ne 'https' -or -not $uri.Host -or $uri.UserInfo -or $uri.Query -or $uri.Fragment) { throw 'invalid-base-url' }
@@ -14,7 +14,6 @@ function Test-MemberInstallerSettings {
   if (-not [int]::TryParse([string]$Settings.gateway_port, [ref]$port) -or
       ($port -ne 0 -and ($port -lt 1024 -or $port -gt 65000))) { throw 'invalid-port' }
   if (-not [bool]$Settings.accept_full_access) { throw 'full-access-consent-required' }
-  if (-not [bool]$Settings.configure_zalo) { throw 'zalo-required' }
   if ([bool]$Settings.configure_zalo) {
     $qrOwner = [string]$Settings.qr_owner_id
     if ($qrOwner -notmatch '^[1-9][0-9]*$' -or $qrOwner -notin ([string]$Settings.owner_ids -split ',')) { throw 'invalid-qr-owner' }

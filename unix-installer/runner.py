@@ -70,13 +70,16 @@ def install(values, source, progress=lambda message: None):
     entry, env = runtime.install(root, home, node, npm, extra_bins=(python_binary.parent, ffmpeg_binary.parent))
     progress("Đang cài các skill...")
     payload.install(root, source)
-    progress("Đang cấu hình quyền Telegram và Zalo...")
-    zalo_setup.configure(root, home, node, entry, env, values_checked["member"], values_checked["owner_ids"], source)
+    enable_zalo = values_checked.get("configure_zalo", True)
+    progress("Đang cấu hình quyền Telegram và Zalo..." if enable_zalo else "Đang cấu hình quyền Telegram...")
+    zalo_setup.configure(root, home, node, entry, env, values_checked["member"], values_checked["owner_ids"], source,
+                         enable_zalo=enable_zalo)
     try:
         progress("Đang khởi động và kiểm tra Gateway...")
         service.install_and_verify(node, entry, env, port)
-        progress("Đang đăng ký lệnh Telegram...")
-        telegram.ensure_menu(values_checked["telegram_token"])
+        if enable_zalo:
+            progress("Đang đăng ký lệnh Telegram...")
+            telegram.ensure_menu(values_checked["telegram_token"])
         helper_path = source / "native/install_unix_cli.py"
         spec = importlib.util.spec_from_file_location("installer_unix_cli", helper_path)
         if spec is None or spec.loader is None:

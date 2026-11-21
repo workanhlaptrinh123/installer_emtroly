@@ -10,6 +10,18 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $expectedVersion = '2026.11.4'
 . (Join-Path $PayloadRoot 'windows-installer\validation.ps1')
+$codexHelperScript = Join-Path $PayloadRoot 'windows-installer\codex-cli.ps1'
+if (Test-Path -LiteralPath $codexHelperScript -PathType Leaf) {
+  . ([ScriptBlock]::Create([IO.File]::ReadAllText($codexHelperScript, [System.Text.Encoding]::UTF8)))
+}
+$autoHealScript = Join-Path $PayloadRoot 'windows-installer\auto-heal-codex.ps1'
+if (Test-Path -LiteralPath $autoHealScript -PathType Leaf) {
+  . ([ScriptBlock]::Create([IO.File]::ReadAllText($autoHealScript, [System.Text.Encoding]::UTF8)))
+}
+$wizardHelperScript = Join-Path $PayloadRoot 'windows-installer\wizard-helpers.ps1'
+if (Test-Path -LiteralPath $wizardHelperScript -PathType Leaf) {
+  . ([ScriptBlock]::Create([IO.File]::ReadAllText($wizardHelperScript, [System.Text.Encoding]::UTF8)))
+}
 
 function Write-SafeStatus([string]$Text) {
   [IO.File]::WriteAllText($LogFile, $Text, (New-Object Text.UTF8Encoding($false)))
@@ -108,8 +120,10 @@ $locked = $false
 $mutex = $null
 $stage = 'input'
 $settings = $null
+$lastAutoHealSummary = ''
 $zaloStageFile = "$LogFile.zalo-stage"
 $zaloDetailFile = "$zaloStageFile.detail"
+$installCaptureFile = "$LogFile.capture"
 try {
   try {
     $settings = [IO.File]::ReadAllText($SettingsFile, [Text.Encoding]::UTF8) | ConvertFrom-Json
@@ -148,7 +162,8 @@ try {
     $installer = Join-Path $PayloadRoot 'install-native-windows.ps1'
     if (-not (Test-Path -LiteralPath $installer)) { throw 'missing-payload' }
     $modules = @()
-    if ([bool]$settings.configure_zalo) { $modules = @('zalo-qr-basic') }
+    $zaloEnabled = [bool]$settings.configure_zalo
+    if ($zaloEnabled) { $modules = @('zalo-qr-basic') }
     $arguments = @{
       Name = [string]$settings.member; OwnerIds = [string]$settings.owner_ids
       GroupId = [string]$settings.group_id; AssistantName = [string]$settings.assistant_name
@@ -158,59 +173,123 @@ try {
       Audience = [string]$settings.audience; Addressing = [string]$settings.addressing
       Style = [string]$settings.style; UserInstall = $true; CredentialData = $settings
     }
-    $global:LASTEXITCODE = 0
-    $env:MEMBER_INSTALL_ZALO_STAGE_FILE = $zaloStageFile
-    $env:MEMBER_INSTALL_STATUS_FILE = $LogFile
-    & $installer @arguments *> $null
-    if ($LASTEXITCODE -ne 0) { throw 'installer-failed' }
-    foreach ($required in @(
-      'openclaw.json', 'installer-instance.json', 'openclaw-instance.ps1', 'windows-cli.json',
-      'workspace\skills\openclaw-telegram-zalo-qr-delivery\SKILL.md',
-      'workspace\skills\telegram-zalo-owner-login\SKILL.md',
-      'workspace\skills\core-openclaw-zalo\SKILL.md',
-      'workspace\skills\openclaw-zalo-qr-login\SKILL.md',
-      'workspace\skills\core-openclaw-telegram\SKILL.md',
-      'workspace\skills\cap-full-quyen-telegram-openclaw\SKILL.md',
-      'workspace\skills\reliable-media-delivery\SKILL.md',
-      'workspace\skills\imagegen\SKILL.md',
-      'workspace\skills\core-openclaw-media\SKILL.md',
-      'workspace\skills\openclaw-docx-reader\SKILL.md',
-      'workspace\skills\openclaw-python-docx-telegram\SKILL.md'
-    )) {
-      if (-not (Test-Path -LiteralPath (Join-Path $root $required))) { throw 'incomplete-installation' }
+    if (-not $zaloEnabled) { $arguments.Profile = 'installer-core' }
+
+    function Invoke-CorePostInstallChecks {
+      $requiredItems = @(
+        'openclaw.json', 'installer-instance.json', 'openclaw-instance.ps1', 'windows-cli.json',
+        'workspace\skills\core-openclaw-telegram\SKILL.md',
+        'workspace\skills\cap-full-quyen-telegram-openclaw\SKILL.md',
+        'workspace\skills\reliable-media-delivery\SKILL.md',
+        'workspace\skills\imagegen\SKILL.md',
+        'workspace\skills\core-openclaw-media\SKILL.md',
+        'workspace\skills\openclaw-docx-reader\SKILL.md',
+        'workspace\skills\openclaw-python-docx-telegram\SKILL.md'
+      )
+      if ($zaloEnabled) {
+        $requiredItems += @(
+          'workspace\skills\openclaw-telegram-zalo-qr-delivery\SKILL.md',
+          'workspace\skills\telegram-zalo-owner-login\SKILL.md',
+          'workspace\skills\core-openclaw-zalo\SKILL.md',
+          'workspace\skills\openclaw-zalo-qr-login\SKILL.md'
+        )
+      }
+      foreach ($required in $requiredItems) {
+        if (-not (Test-Path -LiteralPath (Join-Path $root $required))) { throw 'incomplete-installation' }
+      }
+      $instance = Get-Content -LiteralPath (Join-Path $root 'installer-instance.json') -Encoding UTF8 -Raw | ConvertFrom-Json
+      $cliEntry = Join-Path $root ("runtime\$expectedVersion\node_modules\openclaw\openclaw.mjs")
+      if (-not (Test-Path -LiteralPath $cliEntry)) { throw 'runtime-version-mismatch' }
+      $env:OPENCLAW_STATE_DIR = $root
+      $env:OPENCLAW_CONFIG_PATH = Join-Path $root 'openclaw.json'
+      $env:OPENCLAW_PROFILE = [string]$instance.profile
+      $versionText = (& node $cliEntry --version | Out-String)
+      if ($LASTEXITCODE -ne 0 -or $versionText -notmatch [regex]::Escape($expectedVersion)) { throw 'runtime-version-mismatch' }
+      $approvalState = (& node $cliEntry approvals get --json | Out-String) | ConvertFrom-Json
+      if ($LASTEXITCODE -ne 0 -or $approvalState.file.agents.main.security -ne 'full' -or $approvalState.file.agents.main.ask -ne 'off') { throw 'approval-check-failed' }
+      $config = [IO.File]::ReadAllText((Join-Path $root 'openclaw.json'), [Text.Encoding]::UTF8) | ConvertFrom-Json
+      Test-MemberInstallerPermissions -Settings $settings -Config $config -ApprovalState $approvalState
+      $script:stage = 'command'
+      Write-SafeStatus 'Đang kiểm tra lệnh openclaw trong PowerShell mới...'
+      Test-FreshOpenClawCommand -Root $root -Version $expectedVersion
+      $script:stage = 'zalo-verify'
+      $verifyGatewayMsg = if ($zaloEnabled) { 'Đang kiểm tra Gateway và lệnh Zalo...' } else { 'Đang kiểm tra kết nối Gateway...' }
+      Write-SafeStatus $verifyGatewayMsg
+      $health = (& node $cliEntry gateway health --json | Out-String) | ConvertFrom-Json
+      if ($LASTEXITCODE -ne 0 -or -not $health.ok) { throw 'gateway-health-failed' }
+      if ($zaloEnabled) {
+        if ('zalouser' -notin @($health.plugins.loaded)) { throw 'zalo-plugin-not-loaded' }
+        if ('telegram-zalo-owner-login' -notin @($health.plugins.loaded)) { throw 'zalo-qr-plugin-not-loaded' }
+        $inspection = (& node $cliEntry plugins inspect telegram-zalo-owner-login --runtime --json | Out-String) | ConvertFrom-Json
+        $qrTools = @($inspection.plugin.toolNames)
+        foreach ($tool in @($inspection.tools)) { $qrTools += @($tool.names) }
+        if ($LASTEXITCODE -ne 0 -or $inspection.plugin.status -ne 'loaded' -or $inspection.plugin.enabled -ne $true -or
+            'zaloqr' -notin @($inspection.commands) -or 'zalostatus' -notin @($inspection.commands) -or
+            'telegram_zalo_login_qr' -notin $qrTools) { throw 'zalo-qr-command-not-registered' }
+        $script:stage = 'telegram-menu'
+        Write-SafeStatus 'Đang đồng bộ menu Telegram: /zaloqr và /zalostatus...'
+        Ensure-TelegramCommandMenu -Token ([string]$settings.telegram_token)
+      }
     }
-    $instance = Get-Content -LiteralPath (Join-Path $root 'installer-instance.json') -Encoding UTF8 -Raw | ConvertFrom-Json
-    $cliEntry = Join-Path $root ("runtime\$expectedVersion\node_modules\openclaw\openclaw.mjs")
-    if (-not (Test-Path -LiteralPath $cliEntry)) { throw 'runtime-version-mismatch' }
-    $env:OPENCLAW_STATE_DIR = $root
-    $env:OPENCLAW_CONFIG_PATH = Join-Path $root 'openclaw.json'
-    $env:OPENCLAW_PROFILE = [string]$instance.profile
-    $versionText = (& node $cliEntry --version | Out-String)
-    if ($LASTEXITCODE -ne 0 -or $versionText -notmatch [regex]::Escape($expectedVersion)) { throw 'runtime-version-mismatch' }
-    $approvalState = (& node $cliEntry approvals get --json | Out-String) | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0 -or $approvalState.file.agents.main.security -ne 'full' -or $approvalState.file.agents.main.ask -ne 'off') { throw 'approval-check-failed' }
-    $config = [IO.File]::ReadAllText((Join-Path $root 'openclaw.json'), [Text.Encoding]::UTF8) | ConvertFrom-Json
-    Test-MemberInstallerPermissions -Settings $settings -Config $config -ApprovalState $approvalState
-    $stage = 'command'
-    Write-SafeStatus 'Đang kiểm tra lệnh openclaw trong PowerShell mới...'
-    Test-FreshOpenClawCommand -Root $root -Version $expectedVersion
-    $stage = 'zalo-verify'
-    Write-SafeStatus 'Đang kiểm tra Gateway và lệnh Zalo...'
-    $health = (& node $cliEntry gateway health --json | Out-String) | ConvertFrom-Json
-    if ($LASTEXITCODE -ne 0 -or -not $health.ok) { throw 'gateway-health-failed' }
-    if ('zalouser' -notin @($health.plugins.loaded)) { throw 'zalo-plugin-not-loaded' }
-    if ('telegram-zalo-owner-login' -notin @($health.plugins.loaded)) { throw 'zalo-qr-plugin-not-loaded' }
-    $inspection = (& node $cliEntry plugins inspect telegram-zalo-owner-login --runtime --json | Out-String) | ConvertFrom-Json
-    $qrTools = @($inspection.plugin.toolNames)
-    foreach ($tool in @($inspection.tools)) { $qrTools += @($tool.names) }
-    if ($LASTEXITCODE -ne 0 -or $inspection.plugin.status -ne 'loaded' -or $inspection.plugin.enabled -ne $true -or
-        'zaloqr' -notin @($inspection.commands) -or 'zalostatus' -notin @($inspection.commands) -or
-        'telegram_zalo_login_qr' -notin $qrTools) { throw 'zalo-qr-command-not-registered' }
-    $stage = 'telegram-menu'
-    Write-SafeStatus 'Đang đồng bộ menu Telegram: /zaloqr và /zalostatus...'
-    Ensure-TelegramCommandMenu -Token ([string]$settings.telegram_token)
+
+    try {
+      $global:LASTEXITCODE = 0
+      $env:MEMBER_INSTALL_ZALO_STAGE_FILE = $zaloStageFile
+      $env:MEMBER_INSTALL_STATUS_FILE = $LogFile
+      & $installer @arguments *> $installCaptureFile
+      if ($LASTEXITCODE -ne 0) { throw 'installer-failed' }
+      Invoke-CorePostInstallChecks
+    } catch {
+      $coreErr = [string]$_.Exception.Message
+      $canHeal = (Get-Command Invoke-CodexAutoHeal -ErrorAction SilentlyContinue) -and
+        (Get-Command Test-IsAutoHealableError -ErrorAction SilentlyContinue) -and
+        (Test-IsAutoHealableError -ErrorCode $coreErr -Stage $stage)
+      if (-not $canHeal) { throw }
+
+      $healedCore = $false
+      for ($healTry = 1; $healTry -le 2; $healTry++) {
+        $captureDetail = if (Test-Path -LiteralPath $installCaptureFile -PathType Leaf) {
+          try { ([IO.File]::ReadAllText($installCaptureFile, [Text.Encoding]::UTF8)) } catch { '' }
+        } else { '' }
+        if (Test-Path -LiteralPath $zaloStageFile -PathType Leaf) {
+          try {
+            $zStage = ([IO.File]::ReadAllText($zaloStageFile, [Text.Encoding]::ASCII)).Trim()
+            if ($zStage) { $captureDetail = "Zalo stage=$zStage`n" + $captureDetail }
+          } catch { }
+        }
+        $healResult = Invoke-CodexAutoHeal -Stage $stage -ErrorCode $coreErr -ErrorDetail $captureDetail -OpenClawRoot $root -PayloadRoot $PayloadRoot -Settings $settings -StatusFile $LogFile -Attempt $healTry
+        if (-not $healResult.Invoked) { break }
+        if ($healResult.Summary) { $lastAutoHealSummary = $healResult.Summary }
+        Write-SafeStatus "Codex CLI đã xử lý sự cố (lần $healTry/2). Đang kiểm tra nghiệm thu lại..."
+        try {
+          if (-not (Test-Path -LiteralPath (Join-Path $root 'openclaw.json') -PathType Leaf) -and -not (Test-Path -LiteralPath $root)) {
+            Remove-Item -LiteralPath $zaloStageFile -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $zaloDetailFile -Force -ErrorAction SilentlyContinue
+            $global:LASTEXITCODE = 0
+            & $installer @arguments *> $installCaptureFile
+            if ($LASTEXITCODE -ne 0) { throw 'installer-failed' }
+          }
+          Invoke-CorePostInstallChecks
+          Remove-Item -LiteralPath $zaloStageFile -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $zaloDetailFile -Force -ErrorAction SilentlyContinue
+          $healedCore = $true
+          break
+        } catch {
+          $coreErr = [string]$_.Exception.Message
+          if (-not (Test-IsAutoHealableError -ErrorCode $coreErr -Stage $stage)) { throw }
+        }
+      }
+      if (-not $healedCore) { throw $coreErr }
+    }
     if ($settings.skip_editor) {
-      Write-SafeStatus 'Hoàn tất: OpenClaw, /zaloqr, /zalostatus, tạo ảnh và kỹ năng DOCX/Excel/PowerPoint cơ bản đã sẵn sàng.'
+      if (Get-Command Install-EmTroLyAppShortcut -ErrorAction SilentlyContinue) {
+        try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot) } catch { }
+      }
+      if ($zaloEnabled) {
+        Write-SafeStatus 'Hoàn tất: OpenClaw, /zaloqr, /zalostatus, tạo ảnh và kỹ năng DOCX/Excel/PowerPoint cơ bản đã sẵn sàng.'
+      } else {
+        Write-SafeStatus 'Hoàn tất: OpenClaw, Telegram, tạo ảnh và kỹ năng DOCX/Excel/PowerPoint cơ bản đã sẵn sàng (không cài Zalo).'
+      }
       exit 0
     }
     $botReady = $true
@@ -221,7 +300,7 @@ try {
   }
   $stage = 'editor'
   $job = [IO.File]::ReadAllText($pending) | ConvertFrom-Json
-  if ($job.id -cnotmatch '^[a-f0-9]{32}$' -or $job.model -notin @('gpt-6.1-sol','gpt-6.1-terra','gpt-6-astra')) { throw 'invalid-editor-job' }
+  if ($job.id -cnotmatch '^[a-f0-9]{32}$' -or $job.model -notin @('gpt-6.2-sol','GPT-6.1-terra','gpt-6.2-astra')) { throw 'invalid-editor-job' }
   $botReady = $true
   $mutex = New-Object Threading.Mutex($false, ('EmTroLy-Codex-' + $job.id))
   try { $locked = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
@@ -230,10 +309,50 @@ try {
   $editorInstaller = Join-Path $PayloadRoot 'windows-installer\install-antigravity-codex.ps1'
   if (-not (Test-Path -LiteralPath $editorInstaller -PathType Leaf)) { throw 'editor-module-missing' }
   $editorSettings = [pscustomobject]@{ model=$job.model; base_url='https://codex.anhlaptrinh.vn/v1'; ai_api_key=$settings.ai_api_key; job_id=$job.id }
-  Write-SafeStatus 'Trợ lý đã sẵn sàng. Đang chuẩn bị Antigravity và Codex...'
-  & $editorInstaller -Settings $editorSettings -StatusFile $LogFile *> $null
+  Write-SafeStatus 'Trợ lý đã sẵn sàng. Đang cài đặt Antigravity IDE và Codex CLI...'
+  try {
+    & $editorInstaller -Settings $editorSettings -StatusFile $LogFile *> $installCaptureFile
+  } catch {
+    $edErr = [string]$_.Exception.Message
+    $canHealEd = (Get-Command Invoke-CodexAutoHeal -ErrorAction SilentlyContinue) -and
+      (Get-Command Test-IsAutoHealableError -ErrorAction SilentlyContinue) -and
+      (Test-IsAutoHealableError -ErrorCode $edErr -Stage 'editor')
+    if (-not $canHealEd) { throw }
+
+    $healedEd = $false
+    for ($edTry = 1; $edTry -le 2; $edTry++) {
+      $edDetail = if (Test-Path -LiteralPath $installCaptureFile -PathType Leaf) {
+        try { [IO.File]::ReadAllText($installCaptureFile, [Text.Encoding]::UTF8) } catch { '' }
+      } else { '' }
+      $edHealRes = Invoke-CodexAutoHeal -Stage 'editor' -ErrorCode $edErr -ErrorDetail $edDetail -OpenClawRoot $root -PayloadRoot $PayloadRoot -Settings $editorSettings -StatusFile $LogFile -Attempt $edTry
+      if (-not $edHealRes.Invoked) { break }
+      if ($edHealRes.Summary) { $lastAutoHealSummary = $edHealRes.Summary }
+      Write-SafeStatus "Codex CLI đã xử lý sự cố bước Antigravity/Codex (lần $edTry/2). Đang kiểm tra lại..."
+      try {
+        & $editorInstaller -Settings $editorSettings -StatusFile $LogFile *> $installCaptureFile
+        $healedEd = $true
+        break
+      } catch {
+        $edErr = [string]$_.Exception.Message
+        if (-not (Test-IsAutoHealableError -ErrorCode $edErr -Stage 'editor')) { throw }
+      }
+    }
+    if (-not $healedEd) { throw $edErr }
+  }
+  if (Get-Command Register-EmTroLyCodexCli -ErrorAction SilentlyContinue) {
+    Write-SafeStatus 'Đang đăng ký lệnh Codex CLI và lối tắt giao diện Em Trợ Lý...'
+    [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot)
+  }
+  if (Get-Command Install-EmTroLyAppShortcut -ErrorAction SilentlyContinue) {
+    try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot) } catch { }
+  }
   Remove-Item -LiteralPath $pending -ErrorAction Stop
-  Write-SafeStatus 'Hoàn tất: OpenClaw, /zaloqr, /zalostatus, tạo ảnh và kỹ năng DOCX/Excel/PowerPoint cơ bản đã sẵn sàng. Mở lối tắt EmTroLy - Antigravity để dùng Codex riêng.'
+  $hasZaloInstalled = Test-Path -LiteralPath (Join-Path $root 'workspace\skills\telegram-zalo-owner-login\SKILL.md') -PathType Leaf
+  if ($hasZaloInstalled) {
+    Write-SafeStatus 'Hoàn tất: Đã cài trọn gói từ A–Z gồm OpenClaw, Zalo (/zaloqr, /zalostatus), tạo ảnh, DOCX/Excel/PowerPoint, Antigravity IDE và Codex CLI.'
+  } else {
+    Write-SafeStatus 'Hoàn tất: Đã cài trọn gói từ A–Z gồm OpenClaw, Telegram, tạo ảnh, DOCX/Excel/PowerPoint, Antigravity IDE và Codex CLI (đã bỏ qua Zalo theo lựa chọn).'
+  }
   exit 0
 } catch {
   $code = [string]$_.Exception.Message
@@ -317,6 +436,9 @@ try {
   }
   $message = if ($safeMessages.ContainsKey($code)) { $safeMessages[$code] } else { "Chưa hoàn tất bước $stage. Dữ liệu đã tạo được giữ nguyên." }
   if ($safeMessages.ContainsKey($code) -and $code -cmatch '^[a-z0-9-]+$') { $message += " Mã chẩn đoán: $code." }
+  if (-not [string]::IsNullOrWhiteSpace($lastAutoHealSummary)) {
+    $message += " Ghi chú từ Codex tự sửa lỗi: $lastAutoHealSummary"
+  }
   if ($stage -eq 'install' -and (Test-Path -LiteralPath $zaloStageFile)) {
     $zaloStep = [IO.File]::ReadAllText($zaloStageFile, [Text.Encoding]::ASCII).Trim()
     if ($zaloStep -in @('preflight','version','plugin-inspect','plugin-install','plugin-enable','plugin-doctor','plugin-source','gateway-stop','zalo-config','qr-install','mention-patch','gateway-start','verify')) {
@@ -341,6 +463,7 @@ try {
   Remove-Item -LiteralPath $SettingsFile -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $zaloStageFile -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $zaloDetailFile -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $installCaptureFile -Force -ErrorAction SilentlyContinue
   Remove-Item Env:MEMBER_INSTALL_ZALO_STAGE_FILE -ErrorAction SilentlyContinue
   $settings = $null
   $headers = $null

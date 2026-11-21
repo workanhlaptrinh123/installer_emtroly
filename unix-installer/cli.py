@@ -83,7 +83,7 @@ def collect():
         "telegram_token": prompt("Telegram bot token"),
         "base_url": DEFAULT_BASE_URL,
         "ai_api_key": prompt("Provider API key"),
-        "model": "gpt-6.1-sol",
+        "model": "gpt-6.2-sol",
         "gateway_port": "0",
         "audience": "",
         "addressing": "",

@@ -38,16 +38,45 @@ mkdir -p "$payload/windows-installer"
 
 cp "$BASE/install-native-windows.ps1" "$payload/"
 cp "$BASE/configure.py" "$payload/"
+cp "$BASE/alt.png" "$payload/"
+cp "$BASE/MANIFEST.txt" "$payload/"
 cp -a "$BASE/native" "$payload/"
 cp -a "$BASE/modules" "$payload/"
 cp -a "$BASE/profiles" "$payload/"
 cp -a "$BASE/zalo" "$payload/"
 cp "$BASE/windows-installer/run-native-install.ps1" "$payload/windows-installer/"
 cp "$BASE/windows-installer/wizard.ps1" "$payload/windows-installer/"
+cp "$BASE/windows-installer/wizard-helpers.ps1" "$payload/windows-installer/"
+cp "$BASE/windows-installer/zalo-qr-session.mjs" "$payload/windows-installer/"
+cp "$BASE/windows-installer/codex-cli.ps1" "$payload/windows-installer/"
+cp "$BASE/windows-installer/auto-heal-codex.ps1" "$payload/windows-installer/"
+cp "$BASE/windows-installer/manage-instance.ps1" "$payload/windows-installer/"
+cp "$BASE/windows-installer/alt.ico" "$payload/windows-installer/"
+cp "$BASE/windows-installer/EmTroLyHost.cs" "$payload/windows-installer/"
 cp "$BASE/windows-installer/validation.ps1" "$payload/windows-installer/"
 cp "$BASE/windows-installer/verify-openclaw-command.ps1" "$payload/windows-installer/"
 cp "$BASE/windows-installer/install-antigravity-codex.ps1" "$payload/windows-installer/"
 cp -a "$BASE/windows-installer/activation-probe" "$payload/windows-installer/"
+
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "
+      \$ErrorActionPreference = 'Stop'
+      \$csc = Join-Path \$env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+      \$sma = ([PSObject].Assembly.Location)
+      \$winDir = (Resolve-Path '$payload/windows-installer').Path
+      \$ico = Join-Path \$winDir 'alt.ico'
+      \$cs  = Join-Path \$winDir 'EmTroLyHost.cs'
+      \$out = Join-Path \$winDir 'EmTroLyHost.exe'
+      & \$csc /nologo /target:winexe /utf8output (\"/win32icon:\$ico\") (\"/r:\$sma\") /r:System.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll (\"/out:\$out\") \$cs
+      if (\$LASTEXITCODE -ne 0) { throw 'EmTroLyHost compilation failed' }
+      Remove-Item -LiteralPath \$cs -Force
+    "
+    ;;
+  *)
+    rm -f "$payload/windows-installer/EmTroLyHost.cs"
+    ;;
+esac
 
 find "$payload" -type d -name '__pycache__' -prune -exec rm -rf {} +
 find "$payload" -type f -name '*.pyc' -delete
@@ -71,6 +100,7 @@ nsis_args=(
   -D"OUTFILE=$OUT" \
   -D"RELEASE_VERSION=$RELEASE_VERSION" \
   -D"FILE_VERSION=$file_version" \
+  -D"ICON_FILE=$BASE/windows-installer/alt.ico" \
   "$BASE/windows-installer/member-vps-installer.nsi"
 )
 case "$(uname -s)" in

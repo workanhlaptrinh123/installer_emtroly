@@ -19,6 +19,7 @@ NAME="caidattroly-$PLATFORM-$ARCH-PREVIEW"
   --hidden-import datetime --hidden-import dataclasses --hidden-import stat --hidden-import typing \
   --add-data "$OUTPUT/payload/native:native" --add-data "$OUTPUT/payload/modules:modules" \
   --add-data "$OUTPUT/payload/profiles:profiles" --add-data "$OUTPUT/payload/zalo:zalo" \
+  --add-data "$BASE/alt.png:." \
   "$BASE/unix-installer/gui.py"
 if [[ "$SYSTEM" == Darwin ]]; then
   ditto -c -k --sequesterRsrc --keepParent "$OUTPUT/dist/$NAME.app" "$OUTPUT/$NAME.zip"

@@ -15,6 +15,120 @@ PWSH = os.environ.get('PWSH') or shutil.which('pwsh')
 
 
 class EditorContractTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Requires Windows PowerShell and WScript.Shell')
+    def test_reuses_existing_antigravity_to_install_codex_extension_and_shortcut(self):
+        with tempfile.TemporaryDirectory(prefix='emtroly-reuse-ide-') as temporary:
+            temp = Path(temporary)
+            staged = temp / 'install-antigravity-codex.ps1'
+            text = MODULE.read_text(encoding='utf-8-sig')
+            desktop = "([Environment]::GetFolderPath('Desktop'))"
+            self.assertEqual(text.count(desktop), 1)
+            text = text.replace(desktop, '$env:TEST_DESKTOP')
+            transport = 'Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Path -TimeoutSec 900'
+            self.assertEqual(text.count(transport), 1)
+            text = text.replace(transport, "[IO.File]::WriteAllText($Path, 'fixture')")
+            digest = hashlib.sha256(b'fixture').hexdigest()
+            text, count = re.subn(
+                r"(?m)^(\$(?:ide|extension)Hash = ')[0-9a-f]{64}'$",
+                lambda m: m.group(1) + digest + "'",
+                text,
+            )
+            self.assertEqual(count, 2)
+            staged.write_text(text, encoding='utf-8-sig')
+            shutil.copytree(ROOT / 'windows-installer/activation-probe', temp / 'activation-probe')
+
+            staged_repair = temp / 'repair-antigravity-shortcut.ps1'
+            staged_repair.write_text(
+                REPAIR.read_text(encoding='utf-8-sig').replace(desktop, '$env:TEST_DESKTOP'),
+                encoding='utf-8-sig',
+            )
+
+            driver = temp / 'driver.ps1'
+            driver.write_text(
+                r"""
+param($ModulePath, $RepairPath, $Directory)
+$ErrorActionPreference = 'Stop'
+$env:LOCALAPPDATA = Join-Path $Directory 'local'
+$env:TEMP = Join-Path $Directory 'temp'
+$env:TEST_DESKTOP = Join-Path $Directory 'desktop'
+$env:ProgramFiles = Join-Path $Directory 'progfiles'
+${env:ProgramFiles(x86)} = ''
+$existingIde = Join-Path $env:LOCALAPPDATA 'Programs\Antigravity IDE'
+foreach ($p in @($env:TEMP, $env:TEST_DESKTOP, $env:ProgramFiles, (Join-Path $existingIde 'bin'), (Join-Path $existingIde 'resources\app'))) {
+  [void](New-Item -ItemType Directory -Force -Path $p)
+}
+[IO.File]::WriteAllText((Join-Path $existingIde 'Antigravity IDE.exe'), 'existing-ide-binary')
+[IO.File]::WriteAllText((Join-Path $existingIde 'bin\antigravity-ide.cmd'), '@echo off')
+[IO.File]::WriteAllText((Join-Path $existingIde 'resources\app\product.json'), '{"applicationName":"antigravity-ide","version":"1.109.2"}')
+[IO.File]::WriteAllText((Join-Path $existingIde 'personal-marker.txt'), 'untouched')
+
+$global:fixtureRegistry = @()
+function global:Get-ItemProperty { param($Path, $ErrorAction) return $global:fixtureRegistry }
+function global:Start-Process {
+  param($FilePath, $ArgumentList, $WindowStyle, [switch]$PassThru)
+  if ($FilePath -match 'antigravity-ide-setup\.exe$') { throw 'should-not-download-or-run-ide-installer' }
+  if ($FilePath -match 'cmd\.exe$') {
+    if (-not $ArgumentList.Contains((Join-Path $existingIde 'bin\antigravity-ide.cmd'))) { throw 'did-not-use-existing-ide-cli' }
+    $ext = Join-Path $env:LOCALAPPDATA 'EmTroLy\Antigravity\Extensions\openai.chatgpt-26.51111.21308'
+    [void](New-Item -ItemType Directory -Force -Path (Join-Path $ext 'bin\windows-x86_64'))
+    [IO.File]::WriteAllText((Join-Path $ext 'package.json'), '{"publisher":"openai","name":"chatgpt","version":"26.51111.21308"}')
+    [IO.File]::WriteAllText((Join-Path $ext 'bin\windows-x86_64\codex.exe'), 'fixture')
+  }
+  if ($FilePath -eq (Join-Path $existingIde 'Antigravity IDE.exe')) {
+    [IO.File]::WriteAllText($env:EMTROLY_CODEX_ACTIVATION_MARKER, 'ok')
+  }
+  $proc = [pscustomobject]@{ ExitCode = 0 }
+  $proc | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { param($Ms) return $true }
+  return $proc
+}
+
+$settings = [pscustomobject]@{
+  job_id = '0123456789abcdef0123456789abcdef'
+  base_url = 'https://codex.anhlaptrinh.vn/v1'
+  model = 'gpt-6.2-sol'
+  ai_api_key = 'sk-reuse-fixture'
+}
+$status = Join-Path $Directory 'status.txt'
+& $ModulePath -Settings $settings -StatusFile $status
+
+if ([IO.File]::ReadAllText((Join-Path $existingIde 'personal-marker.txt')) -cne 'untouched') { throw 'existing-ide-modified' }
+$base = Join-Path $env:LOCALAPPDATA 'EmTroLy'
+if ([IO.File]::ReadAllText((Join-Path $base 'editor-app-path.txt')).Trim() -cne $existingIde) { throw 'wrong-recorded-app-path' }
+$lnk = Join-Path $env:TEST_DESKTOP 'EmTroLy - Antigravity.lnk'
+if (-not (Test-Path -LiteralPath $lnk)) { throw 'shortcut-missing' }
+$vbs = [IO.File]::ReadAllText((Join-Path $base 'launch-antigravity.vbs'), [Text.Encoding]::Unicode)
+if ($vbs -notmatch [regex]::Escape((Join-Path $existingIde 'Antigravity IDE.exe'))) { throw 'launcher-not-pointing-to-existing-ide' }
+
+# Verify shortcut repair also works when reusing existing Antigravity IDE
+Remove-Item -LiteralPath $lnk -Force
+& $RepairPath
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $lnk)) { throw 'repair-failed-for-reused-ide' }
+""",
+                encoding='utf-8-sig',
+            )
+            shell = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+            res = subprocess.run(
+                [
+                    str(shell),
+                    '-NoLogo',
+                    '-NoProfile',
+                    '-ExecutionPolicy',
+                    'Bypass',
+                    '-File',
+                    str(driver),
+                    '-ModulePath',
+                    str(staged),
+                    '-RepairPath',
+                    str(staged_repair),
+                    '-Directory',
+                    str(temp),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=45,
+            )
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+
     def test_component_is_packaged_and_required_for_success(self):
         build = (ROOT / 'build-windows-installer.sh').read_text(encoding='utf-8')
         runner = (ROOT / 'windows-installer/run-native-install.ps1').read_text(encoding='utf-8')
@@ -45,6 +159,11 @@ class EditorContractTests(unittest.TestCase):
         script = MODULE.read_text(encoding='utf-8')
         self.assertIn("'EmTroLy - Antigravity.lnk'", script)
         self.assertIn("if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }", script)
+        self.assertIn('procEnv.Remove name', script)
+        self.assertNotIn('("ELECTRON_RUN_AS_NODE") = ""', script)
+        self.assertNotIn('("OPENAI_API_KEY") = ""', script)
+        self.assertNotIn('("VSCODE_IPC_HOOK_CLI") = ""', script)
+        self.assertNotIn('("NODE_OPTIONS") = ""', script)
         self.assertIn('shell.CurrentDirectory', script)
         self.assertIn('command = Chr(34)', script)
         self.assertIn('shell.Run command, 1, False', script)
@@ -56,8 +175,59 @@ class EditorContractTests(unittest.TestCase):
         script = REPAIR.read_text(encoding='utf-8')
         for item in ('installer-codex-pending.json', 'Codex\\config.toml', 'Codex\\auth.json',
                      'Antigravity\\UserData\\User\\settings.json', 'package.json',
-                     'bin\\windows-x86_64\\codex.exe', 'shell.CurrentDirectory = "$($appRoot.Replace'):
+                     'bin\\windows-x86_64\\codex.exe', 'shell.CurrentDirectory = "$($appRoot.Replace',
+                     'procEnv.Remove name'):
             self.assertIn(item, script)
+        self.assertNotIn('("ELECTRON_RUN_AS_NODE") = ""', script)
+
+    @unittest.skipUnless(os.name == 'nt', 'Requires Windows Script Host')
+    def test_vbs_launcher_removes_electron_run_as_node_instead_of_setting_empty_string(self):
+        cscript = Path(os.environ['SystemRoot']) / 'System32/cscript.exe'
+        for ps1_path in (MODULE, REPAIR):
+            source = ps1_path.read_text(encoding='utf-8')
+            match = re.search(r'\$script = @"\r?\n(.*?)\r?\n"@', source, re.DOTALL)
+            self.assertIsNotNone(match, f'Missing VBScript block in {ps1_path.name}')
+            with tempfile.TemporaryDirectory(prefix='emtroly-vbs-env-') as temporary:
+                vbs_body = re.sub(
+                    r'\$\(\$\w+\.Replace\([^\r\n]+?\)\)',
+                    lambda _: temporary.replace('"', '""'),
+                    match.group(1),
+                )
+                probe_call = (
+                    'Dim execObj\n'
+                    'Set execObj = shell.Exec("cmd.exe /d /c if defined ELECTRON_RUN_AS_NODE (exit 9) '
+                    'else if defined OPENAI_API_KEY (exit 8) '
+                    'else if defined VSCODE_IPC_HOOK_CLI (exit 7) '
+                    'else if defined NODE_OPTIONS (exit 6) '
+                    'else if defined VSCODE_DEV (exit 5) '
+                    'else (echo ENV_CLEAN)")\n'
+                    'WScript.Echo execObj.StdOut.ReadAll()\n'
+                    'Do While execObj.Status = 0\n'
+                    '  WScript.Sleep 10\n'
+                    'Loop\n'
+                    'WScript.Quit execObj.ExitCode'
+                )
+                self.assertIn('shell.Run command, 1, False', vbs_body)
+                vbs_probe = vbs_body.replace('shell.Run command, 1, False', probe_call)
+                vbs = Path(temporary) / 'probe.vbs'
+                vbs.write_text(vbs_probe, encoding='utf-16')
+                env = dict(
+                    os.environ,
+                    ELECTRON_RUN_AS_NODE='1',
+                    OPENAI_API_KEY='leak',
+                    VSCODE_IPC_HOOK_CLI='hook',
+                    NODE_OPTIONS='--inspect',
+                    VSCODE_DEV='1',
+                )
+                result = subprocess.run(
+                    [str(cscript), '//Nologo', str(vbs)],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                self.assertEqual(result.returncode, 0, f'{ps1_path.name}: {result.stdout}{result.stderr}')
+                self.assertIn('ENV_CLEAN', result.stdout)
 
     @unittest.skipUnless(shutil.which('node'), 'Node.js is unavailable')
     def test_activation_marker_requires_an_active_codex_sidebar(self):
@@ -176,7 +346,13 @@ $global:fixtureRegistry = @([pscustomobject]@{DisplayName='Antigravity IDE'; Ins
 if (-not (Test-Path -LiteralPath (Join-Path $old 'keep.txt'))) { throw 'old-files-changed' }
 if (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'EmTroLy')) { throw 'preflight-created-files' }
 $global:fixtureRegistry = @([pscustomobject]@{DisplayName='Antigravity IDE'; InstallLocation=$selected; DisplayIcon=''; UninstallString=''; PSChildName='fixture'})
-try { & $ModulePath -Settings $settings -StatusFile $status -CheckOnly; throw 'did-not-detect-existing' } catch { if ($_.Exception.Message -ne 'editor-select-existing') { throw } }
+& $ModulePath -Settings $settings -StatusFile $status -CheckOnly
+if (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'EmTroLy')) { throw 'preflight-created-files-on-reuse' }
+$broken = Join-Path $Directory 'broken\Antigravity IDE'
+[void](New-Item -ItemType Directory -Force -Path $broken)
+[IO.File]::WriteAllText((Join-Path $broken 'Antigravity IDE.exe'), 'fixture')
+$global:fixtureRegistry = @([pscustomobject]@{DisplayName='Antigravity IDE'; InstallLocation=$broken; DisplayIcon=''; UninstallString=''; PSChildName='fixture'})
+try { & $ModulePath -Settings $settings -StatusFile $status -CheckOnly; throw 'did-not-detect-broken-existing' } catch { if ($_.Exception.Message -ne 'editor-version-unsupported') { throw } }
 $global:fixtureRegistry = @([pscustomobject]@{DisplayName='Antigravity IDE'; InstallLocation=''; DisplayIcon=''; UninstallString=''; PSChildName='fixture'})
 try { & $ModulePath -Settings $settings -StatusFile $status -CheckOnly; throw 'did-not-detect-ambiguous' } catch { if ($_.Exception.Message -ne 'editor-registry-ambiguous') { throw } }
 ''', encoding='utf-8-sig')
@@ -253,9 +429,7 @@ try {
   & $ModulePath -Settings $settings -StatusFile $status -CheckOnly
   if (-not (Test-Path -LiteralPath (Join-Path $oldFolder 'leftover.txt'))) { throw 'deleted-old-files' }
   $global:fixtureRegistry = @([pscustomobject]@{ DisplayName='Antigravity IDE'; InstallLocation=$editorFolder; DisplayIcon=''; UninstallString=''; PSChildName='fixture' })
-  try { & $ModulePath -Settings $settings -StatusFile $status -CheckOnly; throw 'existing-not-detected' } catch {
-    if ($_.Exception.Message -ne 'editor-select-existing') { throw }
-  }
+  & $ModulePath -Settings $settings -StatusFile $status -CheckOnly
   $global:fixtureRegistry = @([pscustomobject]@{ DisplayName='Antigravity IDE'; InstallLocation=''; DisplayIcon=''; UninstallString=''; PSChildName='fixture' })
   try { & $ModulePath -Settings $settings -StatusFile $status -CheckOnly; throw 'ambiguous-not-detected' } catch {
     if ($_.Exception.Message -ne 'editor-registry-ambiguous') { throw }

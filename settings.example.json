@@ -7,7 +7,7 @@
   "base_url": "https://codex.anhlaptrinh.vn/v1",
   "api_key": "ENTER_PRIVATELY",
   "api": "openai-completions",
-  "model": "gpt-6.1-sol",
+  "model": "gpt-6.2-sol",
   "profile": "basic-assistant-full",
   "modules": []
 }

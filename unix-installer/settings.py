@@ -4,7 +4,7 @@ import re
 from urllib.parse import urlsplit
 
 
-MODELS = {"gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra"}
+MODELS = {"gpt-6.2-sol", "gpt-6.1-terra", "gpt-6.2-astra"}
 
 
 def validate(settings):
@@ -55,13 +55,18 @@ def validate(settings):
         raise ValueError("invalid-port")
     if settings.get("accept_full_access") is not True:
         raise ValueError("full-access-consent-required")
+    configure_zalo = settings.get("configure_zalo", True) is not False
     qr_owner = text("qr_owner_id")
-    if qr_owner not in owners:
-        raise ValueError("invalid-qr-owner")
+    if configure_zalo:
+        if not qr_owner and settings.get("configure_zalo") is True:
+            qr_owner = owners[0]
+        if qr_owner not in owners:
+            raise ValueError("invalid-qr-owner")
     return {
         "member": member, "assistant_name": assistant_name, "owner_ids": owners,
         "group_id": group, "telegram_token": telegram, "ai_api_key": api_key,
         "model": model, "base_url": base_url.rstrip("/"), "gateway_port": int(raw_port),
-        "qr_owner_id": qr_owner, "audience": text("audience"),
+        "qr_owner_id": qr_owner if configure_zalo else "", "configure_zalo": configure_zalo,
+        "audience": text("audience"),
         "addressing": text("addressing"), "style": text("style"),
     }

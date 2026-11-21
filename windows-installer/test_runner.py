@@ -21,7 +21,7 @@ function global:Invoke-RestMethod {
     if ($MaximumRedirection -ne 0) { throw 'unexpected-redirect-policy' }
     if ($Uri -eq 'https://provider.example/v1/models') {
         if ($env:TEST_MODE -eq 'missing-model') { return @{ data = @(@{ id = 'different-model' }) } }
-        return @{ data = @(@{ id = 'GPT-6.1-SOL' }) }
+        return @{ data = @(@{ id = 'GPT-6.2-SOL' }) }
     }
     if ($Uri -match '^https://api\.telegram\.org/bot') {
         if ($Uri -match '/getMe$') { return @{ ok = $true; result = @{ is_bot = $true } } }
@@ -54,7 +54,8 @@ FAKE_INSTALLER = r"""
 param($Name, $OwnerIds, $GroupId, $AssistantName, $BaseUrl, $Model, $Profile,
       $Modules, $QrOwnerId, $OpenClawVersion, $InstallMode, $InstallRoot, $GatewayPort,
       $Audience, $Addressing, $Style, [switch]$UserInstall, $CredentialData)
-if (-not $UserInstall -or $InstallMode -ne 'new' -or $Model -cne 'GPT-6.1-SOL' -or $Profile -cne 'installer-basic') { throw 'invalid-installer-arguments' }
+$expectedProfile = if ([bool]$CredentialData.configure_zalo) { 'installer-basic' } else { 'installer-core' }
+if (-not $UserInstall -or $InstallMode -ne 'new' -or $Model -cne 'GPT-6.2-SOL' -or $Profile -cne $expectedProfile) { throw 'invalid-installer-arguments' }
 if ($OwnerIds -ne $CredentialData.owner_ids) { throw 'invalid-owner-arguments' }
 if ([bool]$CredentialData.configure_zalo) {
     if ($Modules.Count -ne 1 -or $Modules[0] -ne 'zalo-qr-basic' -or $QrOwnerId -ne $CredentialData.qr_owner_id) { throw 'invalid-zalo-arguments' }
@@ -168,7 +169,7 @@ class RunnerTests(unittest.TestCase):
             driver.write_text(DRIVER, encoding="utf-8")
             settings = {
                 "member": "fixture", "assistant_name": "Fixture", "base_url": "https://provider.example/v1",
-                "model": "gpt-6.1-sol", "owner_ids": "123456789,987654321", "group_id": "-1001234567890",
+                "model": "gpt-6.2-sol", "owner_ids": "123456789,987654321", "group_id": "-1001234567890",
                 "gateway_port": "0", "audience": "", "addressing": "", "style": "",
                 "accept_full_access": True, "configure_zalo": True, "qr_owner_id": "123456789",
                 "telegram_token": TOKEN, "ai_api_key": API_KEY,
@@ -313,11 +314,11 @@ class RunnerTests(unittest.TestCase):
             process = subprocess.run(
                 [PWSH, "-NoLogo", "-NoProfile", "-File", str(RELEASE / "install-native-windows.ps1"),
                  "-Name", "fixture", "-OwnerIds", "123456789", "-GroupId", "-1001234567890",
-                 "-InstallMode", "new", "-UserInstall", "-DryRun", "-Model", "GPT-6.1-SOL"],
+                 "-InstallMode", "new", "-UserInstall", "-DryRun", "-Model", "GPT-6.2-SOL"],
                 env=environment, capture_output=True, text=True, timeout=30,
             )
             self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
-            self.assertIn("model: GPT-6.1-SOL", process.stdout)
+            self.assertIn("model: GPT-6.2-SOL", process.stdout)
             self.assertFalse((Path(temporary) / ".openclaw-member-fixture").exists())
 
     def test_provider_must_advertise_selected_model(self):
@@ -357,11 +358,13 @@ class RunnerTests(unittest.TestCase):
         self.assertFalse(created)
         self.assertIn("qr owner", text.lower())
 
-    def test_zalo_cannot_be_disabled(self):
+    def test_zalo_is_optional_and_can_be_unchecked_while_still_installing_everything_else(self):
         code, text, created = self.execute(overrides={"configure_zalo": False, "qr_owner_id": ""})
-        self.assertNotEqual(code, 0)
-        self.assertFalse(created)
-        self.assertIn("plugin Zalo", text)
+        self.assertEqual(code, 0, text)
+        self.assertTrue(created)
+        self.assertIn("Hoàn tất", text)
+        self.assertIn("Codex CLI", text)
+        self.assertNotIn("/zaloqr", text)
 
     def test_incomplete_owner_permissions_never_report_success(self):
         for mode in ("missing-owner", "missing-approver", "missing-plugin-target", "bad-binding"):

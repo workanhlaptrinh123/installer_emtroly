@@ -36,7 +36,7 @@ class TerminalInstallerTests(unittest.TestCase):
     def test_advanced_settings_remain_editable(self):
         inputs = iter(["", "", "12345,67890", "-12345", "123456:" + "x" * 30,
                        "test-only-key", "y", "67890",
-                       "https://example.com/v1", "gpt-6.1-terra", "19888",
+                       "https://example.com/v1", "GPT-6.1-terra", "19888",
                        "", "", "", "DONGY"])
         with patch("builtins.input", side_effect=lambda _: next(inputs)), \
                 redirect_stdout(io.StringIO()):

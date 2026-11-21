@@ -6,7 +6,7 @@ import settings
 def sample():
     return {"member": "member01", "assistant_name": "Assistant", "owner_ids": "12345,67890",
             "group_id": "-12345", "telegram_token": "123456:" + "x" * 30,
-            "ai_api_key": "test-only-key", "model": "gpt-6.1-sol",
+            "ai_api_key": "test-only-key", "model": "gpt-6.2-sol",
             "base_url": "https://example.com/v1", "gateway_port": "0",
             "qr_owner_id": "12345", "accept_full_access": True}
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
-NAME=""; OWNER_IDS=""; GROUP_ID=""; ASSISTANT_NAME="Trợ lý OpenClaw"; BASE_URL="https://codex.anhlaptrinh.vn/v1"; MODEL="gpt-6.1-sol"; PROFILE="basic-assistant-full"; MODULES=(); DRY_RUN=0; FULL_BUNDLE=0
+NAME=""; OWNER_IDS=""; GROUP_ID=""; ASSISTANT_NAME="Trợ lý OpenClaw"; BASE_URL="https://codex.anhlaptrinh.vn/v1"; MODEL="gpt-6.2-sol"; PROFILE="basic-assistant-full"; MODULES=(); DRY_RUN=0; FULL_BUNDLE=0
 AUDIENCE=""; ADDRESSING=""; STYLE=""; CREDENTIAL_FILE=""
 while (($#)); do case "$1" in
   --name) NAME="$2"; shift 2;; --owner-ids) OWNER_IDS="$2"; shift 2;; --group-id) GROUP_ID="$2"; shift 2;; --assistant-name) ASSISTANT_NAME="$2"; shift 2;;
