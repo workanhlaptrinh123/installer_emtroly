@@ -13,13 +13,16 @@ mkdir -p "$OUTPUT"
 "$PYTHON" "$BASE/unix-installer/stage_payload.py" "$BASE" "$OUTPUT/payload"
 NAME="caidattroly-$PLATFORM-$ARCH-PREVIEW"
 "$PYTHON" -m PyInstaller --noconfirm --onefile --windowed --name "$NAME" \
+  --paths "$BASE/unix-installer" \
   --distpath "$OUTPUT/dist" --workpath "$OUTPUT/work" --specpath "$OUTPUT" \
   --hidden-import sqlite3 --hidden-import runpy --hidden-import contextlib \
   --hidden-import shlex --hidden-import uuid --hidden-import argparse --hidden-import copy \
   --hidden-import datetime --hidden-import dataclasses --hidden-import stat --hidden-import typing \
+  --hidden-import codex_setup --hidden-import license_gate --hidden-import runner \
   --add-data "$OUTPUT/payload/native:native" --add-data "$OUTPUT/payload/modules:modules" \
   --add-data "$OUTPUT/payload/profiles:profiles" --add-data "$OUTPUT/payload/zalo:zalo" \
-  --add-data "$BASE/alt.png:." \
+  --add-data "$BASE/windows-installer/zalo-qr-session.mjs:windows-installer" \
+  --add-data "$BASE/alt.png:." --add-data "$BASE/MANIFEST.txt:." \
   "$BASE/unix-installer/gui.py"
 if [[ "$SYSTEM" == Darwin ]]; then
   ditto -c -k --sequesterRsrc --keepParent "$OUTPUT/dist/$NAME.app" "$OUTPUT/$NAME.zip"

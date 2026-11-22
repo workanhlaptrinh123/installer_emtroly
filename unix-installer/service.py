@@ -29,7 +29,7 @@ def _json(node, entry, env, arguments):
         raise RuntimeError("Gateway returned invalid status") from None
 
 
-def install_and_verify(node, entry, env, port, wait_seconds=90):
+def install_and_verify(node, entry, env, port, wait_seconds=90, enable_zalo=True):
     _run([node, entry, "gateway", "install", "--port", str(port)], env, 120, "Gateway service installation")
     _run([node, entry, "gateway", "start"], env, 120, "Gateway start")
     deadline = time.monotonic() + wait_seconds
@@ -37,13 +37,16 @@ def install_and_verify(node, entry, env, port, wait_seconds=90):
         try:
             health = _json(node, entry, env, ["gateway", "health", "--json"])
             loaded = set(health.get("plugins", {}).get("loaded") or [])
-            if health.get("ok") is True and {"zalouser", "telegram-zalo-owner-login"}.issubset(loaded):
+            required_plugins = {"zalouser", "telegram-zalo-owner-login"} if enable_zalo else set()
+            if health.get("ok") is True and required_plugins.issubset(loaded):
                 break
         except RuntimeError:
             pass
         if time.monotonic() >= deadline:
             raise RuntimeError("Gateway or required plugins did not become healthy")
         time.sleep(2)
+    if not enable_zalo:
+        return health
     inspection = _json(node, entry, env, ["plugins", "inspect", "telegram-zalo-owner-login", "--runtime", "--json"])
     plugin = inspection.get("plugin", {})
     tools = set(plugin.get("toolNames") or [])

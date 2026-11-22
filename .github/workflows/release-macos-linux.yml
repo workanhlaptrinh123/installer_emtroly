@@ -1,0 +1,157 @@
+name: Build macOS and Linux Installers
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x64
+            os: ubuntu-22.04
+            deb_arch: amd64
+            glibc: '2.35'
+          - target: macos-arm64
+            os: macos-15
+          - target: macos-x64
+            os: macos-15-intel
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Linux Tk libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-tk
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" == v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(sed -n 's/^installer_version=//p' MANIFEST.txt | head -n 1)"
+          fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "Invalid release version: $version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building version $version for ${{ matrix.target }}"
+
+      - name: Install PyInstaller build tools
+        shell: bash
+        run: |
+          python3 -c 'import tkinter, sqlite3'
+          python3 -m pip install 'pyinstaller==6.17.0'
+
+      - name: Run Unix installer unit tests
+        shell: bash
+        run: |
+          python3 -m unittest discover -s unix-installer -p 'test_*.py'
+          python3 -m unittest discover -s native -p test_install_unix_cli.py
+
+      - name: Build official installer package
+        shell: bash
+        env:
+          OUTPUT: ${{ runner.temp }}/emtroly-build
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: bash ./build-unix-installer.sh
+
+      - name: Package Debian / Ubuntu .deb installer
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          OUTPUT: ${{ runner.temp }}/emtroly-build
+        run: |
+          python3 unix-installer/build-ubuntu-deb.py \
+            "$OUTPUT/dist/emtroly" \
+            "$OUTPUT/emtroly-${{ matrix.target }}.deb" \
+            --version "${{ steps.version.outputs.version }}" \
+            --architecture "${{ matrix.deb_arch }}" \
+            --minimum-glibc "${{ matrix.glibc }}"
+
+      - name: Smoke-test packaged standalone executable
+        shell: bash
+        env:
+          OUTPUT: ${{ runner.temp }}/emtroly-build
+        run: |
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            executable="$OUTPUT/dist/EmTroLy.app/Contents/MacOS/EmTroLy"
+          else
+            executable="$OUTPUT/dist/emtroly"
+          fi
+          "$executable" --run-python-script "$GITHUB_WORKSPACE/unix-installer/frozen_smoke.py"
+
+      - name: Smoke-test .deb package on clean Ubuntu 22.04 container
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          OUTPUT: ${{ runner.temp }}/emtroly-build
+        run: |
+          docker run --rm --memory=1g --pids-limit=192 \
+            -v "$OUTPUT:/pkg:ro" \
+            -v "$GITHUB_WORKSPACE/unix-installer/frozen_smoke.py:/tmp/frozen_smoke.py:ro" \
+            ubuntu:22.04 /bin/bash -euc '
+              apt-get update -qq
+              DEBIAN_FRONTEND=noninteractive apt-get install -y -qq /pkg/emtroly-${{ matrix.target }}.deb
+              /usr/bin/emtroly --run-python-script /tmp/frozen_smoke.py
+            '
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: emtroly-${{ matrix.target }}-${{ steps.version.outputs.version }}-${{ github.run_number }}
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/emtroly-build/emtroly-${{ matrix.target }}.zip
+            ${{ runner.temp }}/emtroly-build/emtroly-${{ matrix.target }}.zip.sha256
+            ${{ runner.temp }}/emtroly-build/emtroly-${{ matrix.target }}.tar.gz
+            ${{ runner.temp }}/emtroly-build/emtroly-${{ matrix.target }}.tar.gz.sha256
+            ${{ runner.temp }}/emtroly-build/emtroly-${{ matrix.target }}.deb
+            ${{ runner.temp }}/emtroly-build/emtroly-${{ matrix.target }}.deb.sha256
+
+      - name: Publish macOS / Linux assets to GitHub Release
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OUTPUT: ${{ runner.temp }}/emtroly-build
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "installer_emtroly ${{ steps.version.outputs.version }}" \
+            --generate-notes 2>/dev/null || true
+          shopt -s nullglob
+          assets=(
+            "$OUTPUT"/emtroly-${{ matrix.target }}.zip
+            "$OUTPUT"/emtroly-${{ matrix.target }}.zip.sha256
+            "$OUTPUT"/emtroly-${{ matrix.target }}.tar.gz
+            "$OUTPUT"/emtroly-${{ matrix.target }}.tar.gz.sha256
+            "$OUTPUT"/emtroly-${{ matrix.target }}.deb
+            "$OUTPUT"/emtroly-${{ matrix.target }}.deb.sha256
+          )
+          if [[ "${#assets[@]}" -eq 0 ]]; then
+            echo "No built assets found for ${{ matrix.target }}" >&2
+            exit 1
+          fi
+          gh release upload "$GITHUB_REF_NAME" --clobber "${assets[@]}"

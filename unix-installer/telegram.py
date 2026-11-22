@@ -14,11 +14,13 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 def api(token, method, body=None):
     if not re.fullmatch(r"[0-9]{5,}:[A-Za-z0-9_-]{20,}", token):
         raise ValueError("Invalid Telegram token")
-    if method not in {"getMe", "getMyCommands", "setMyCommands"}:
+    if method not in {"getMe", "getMyCommands", "setMyCommands", "getUpdates"}:
         raise ValueError("Unsupported Telegram operation")
+    url = "https://api.telegram.org/bot" + token + "/" + method
+    if method == "getUpdates":
+        url += "?limit=50"
     payload = None if body is None else json.dumps(body).encode("utf-8")
-    request = urllib.request.Request("https://api.telegram.org/bot" + token + "/" + method, data=payload,
-                                     headers={"Content-Type": "application/json"})
+    request = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     try:
         with urllib.request.build_opener(_NoRedirect()).open(request, timeout=45) as response:
             result = json.loads(response.read(1024 * 1024))
@@ -33,6 +35,54 @@ def verify_bot(token):
     result = api(token, "getMe")
     if not isinstance(result, dict) or result.get("is_bot") is not True:
         raise RuntimeError("Telegram did not confirm a bot")
+    return result
+
+
+def fetch_ids_from_updates(token):
+    me = verify_bot(token)
+    bot_name = ("@" + me["username"]) if me.get("username") else str(me.get("first_name", "Bot"))
+    updates = api(token, "getUpdates") or []
+    owners = []
+    groups = []
+    seen_owners = set()
+    seen_groups = set()
+    for upd in updates if isinstance(updates, list) else []:
+        if not isinstance(upd, dict):
+            continue
+        candidates = [
+            upd.get(k)
+            for k in ("message", "edited_message", "channel_post", "my_chat_member", "chat_member")
+            if isinstance(upd.get(k), dict)
+        ]
+        cbq = upd.get("callback_query")
+        if isinstance(cbq, dict):
+            if isinstance(cbq.get("from"), dict):
+                candidates.append({"from": cbq["from"]})
+            if isinstance(cbq.get("message"), dict):
+                candidates.append(cbq["message"])
+        for item in candidates:
+            frm = item.get("from")
+            if isinstance(frm, dict) and not frm.get("is_bot"):
+                uid = str(frm.get("id", ""))
+                if re.fullmatch(r"[1-9][0-9]*", uid) and uid not in seen_owners:
+                    seen_owners.add(uid)
+                    owners.append(uid)
+            chat = item.get("chat")
+            if isinstance(chat, dict):
+                cid = str(chat.get("id", ""))
+                if re.fullmatch(r"-[1-9][0-9]*", cid) and cid not in seen_groups:
+                    seen_groups.add(cid)
+                    groups.append(cid)
+                elif re.fullmatch(r"[1-9][0-9]*", cid) and chat.get("type") == "private" and cid not in seen_owners:
+                    seen_owners.add(cid)
+                    owners.append(cid)
+    return {
+        "bot_username": bot_name,
+        "owner_id": owners[0] if owners else "",
+        "group_id": groups[0] if groups else "",
+        "owners": owners,
+        "groups": groups,
+    }
 
 
 def ensure_menu(token):

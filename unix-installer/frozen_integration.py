@@ -20,7 +20,7 @@ def main():
     source = Path(sys._MEIPASS).resolve(strict=True)
     settings = {"member": "member01", "assistant_name": "Assistant", "owner_ids": "12345,67890",
                 "qr_owner_id": "12345", "group_id": "-12345", "telegram_token": "123456:" + "x" * 30,
-                "base_url": "https://example.com/v1", "ai_api_key": "fake-key", "model": "gpt-6.1-sol",
+                "base_url": "https://example.com/v1", "ai_api_key": "fake-key", "model": "gpt-6.2-sol",
                 "gateway_port": "0", "accept_full_access": True}
     with tempfile.TemporaryDirectory(prefix="installer-frozen-live-") as temporary:
         home = Path(temporary).resolve()

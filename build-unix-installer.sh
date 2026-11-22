@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON="${PYTHON:-python3}"
+SYSTEM="$(uname -s)"
+ARCH="$(uname -m)"
+
+case "$ARCH" in
+  x86_64|amd64) ARCH=x64 ;;
+  arm64|aarch64) ARCH=arm64 ;;
+  *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
+esac
+
+case "$SYSTEM" in
+  Darwin) PLATFORM=macos ;;
+  Linux)  PLATFORM=linux ;;
+  *) echo "Unsupported build platform: $SYSTEM" >&2; exit 1 ;;
+esac
+
+RELEASE_VERSION="${RELEASE_VERSION:-$(sed -n 's/^installer_version=//p' "$BASE/MANIFEST.txt" | head -n 1)}"
+[[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || {
+  echo "Invalid release version: $RELEASE_VERSION" >&2
+  exit 1
+}
+
+"$PYTHON" -c 'import tkinter, PyInstaller, sqlite3' || {
+  echo 'Python tkinter, sqlite3 and PyInstaller are required on the build machine.' >&2
+  exit 1
+}
+
+OUTPUT="${OUTPUT:-$BASE/build/emtroly-$PLATFORM-$ARCH}"
+[[ "$OUTPUT" = /* && ! -e "$OUTPUT" ]] || {
+  echo "OUTPUT must be a new absolute directory: $OUTPUT" >&2
+  exit 1
+}
+mkdir -p "$OUTPUT"
+
+"$PYTHON" "$BASE/unix-installer/stage_payload.py" "$BASE" "$OUTPUT/payload"
+
+ICON_ARGS=()
+if [[ "$SYSTEM" == Darwin && -f "$BASE/alt.png" ]] && command -v sips >/dev/null 2>&1 && command -v iconutil >/dev/null 2>&1; then
+  iconset="$OUTPUT/EmTroLy.iconset"
+  mkdir -p "$iconset"
+  for sz in 16 32 128 256 512; do
+    sips -z "$sz" "$sz" "$BASE/alt.png" --out "$iconset/icon_${sz}x${sz}.png" >/dev/null 2>&1 || true
+    sz2=$((sz * 2))
+    sips -z "$sz2" "$sz2" "$BASE/alt.png" --out "$iconset/icon_${sz}x${sz}@2x.png" >/dev/null 2>&1 || true
+  done
+  if iconutil -c icns "$iconset" -o "$OUTPUT/EmTroLy.icns" >/dev/null 2>&1; then
+    ICON_ARGS=(--icon "$OUTPUT/EmTroLy.icns")
+  fi
+fi
+
+APP_NAME="emtroly"
+if [[ "$SYSTEM" == Darwin ]]; then
+  APP_NAME="EmTroLy"
+fi
+
+"$PYTHON" -m PyInstaller --noconfirm --onefile --windowed --name "$APP_NAME" \
+  "${ICON_ARGS[@]}" \
+  --paths "$BASE/unix-installer" \
+  --distpath "$OUTPUT/dist" --workpath "$OUTPUT/work" --specpath "$OUTPUT" \
+  --hidden-import sqlite3 --hidden-import runpy --hidden-import contextlib \
+  --hidden-import shlex --hidden-import uuid --hidden-import argparse --hidden-import copy \
+  --hidden-import datetime --hidden-import dataclasses --hidden-import stat --hidden-import typing \
+  --hidden-import codex_setup --hidden-import license_gate --hidden-import runner \
+  --hidden-import dependencies --hidden-import ffmpeg --hidden-import instance \
+  --hidden-import payload --hidden-import provider --hidden-import python_exec \
+  --hidden-import python_runtime --hidden-import runtime --hidden-import service \
+  --hidden-import settings --hidden-import telegram --hidden-import zalo_setup \
+  --add-data "$OUTPUT/payload/native:native" \
+  --add-data "$OUTPUT/payload/modules:modules" \
+  --add-data "$OUTPUT/payload/profiles:profiles" \
+  --add-data "$OUTPUT/payload/zalo:zalo" \
+  --add-data "$BASE/windows-installer/zalo-qr-session.mjs:windows-installer" \
+  --add-data "$BASE/alt.png:." \
+  --add-data "$BASE/MANIFEST.txt:." \
+  "$BASE/unix-installer/gui.py"
+
+ARTIFACT_BASE="emtroly-$PLATFORM-$ARCH"
+
+if [[ "$SYSTEM" == Darwin ]]; then
+  if command -v codesign >/dev/null 2>&1; then
+    codesign --force --deep --sign - "$OUTPUT/dist/$APP_NAME.app"
+  fi
+  ditto -c -k --sequesterRsrc --keepParent "$OUTPUT/dist/$APP_NAME.app" "$OUTPUT/$ARTIFACT_BASE.zip"
+  (cd "$OUTPUT" && shasum -a 256 "$ARTIFACT_BASE.zip" > "$ARTIFACT_BASE.zip.sha256")
+  printf 'Built macOS release: %s/%s.zip\n' "$OUTPUT" "$ARTIFACT_BASE"
+else
+  (cd "$OUTPUT/dist" && tar -czf "$OUTPUT/$ARTIFACT_BASE.tar.gz" "$APP_NAME")
+  (cd "$OUTPUT" && sha256sum "$ARTIFACT_BASE.tar.gz" > "$ARTIFACT_BASE.tar.gz.sha256")
+  printf 'Built Linux portable archive: %s/%s.tar.gz\n' "$OUTPUT" "$ARTIFACT_BASE"
+fi

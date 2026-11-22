@@ -1,4 +1,4 @@
-"""Desktop entry point for the experimental macOS and Ubuntu installer."""
+"""Desktop entry point for the official macOS and Linux installer (Em Trợ Lý)."""
 
 import json
 import os
@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 
 def run_helper():
@@ -39,6 +40,14 @@ def strip_ansi(text, secret=""):
 
 
 def find_codex_binary():
+    try:
+        import codex_setup
+
+        found = codex_setup.find_codex_binary()
+        if found:
+            return found
+    except Exception:
+        pass
     binary = shutil.which("codex")
     if binary:
         return Path(binary)
@@ -55,7 +64,34 @@ def find_codex_binary():
     return None
 
 
+def find_installed_instance_root(preferred_member="emtroly"):
+    home = Path.home()
+    preferred = home / f".openclaw-member-{preferred_member}"
+    if (preferred / "openclaw.json").is_file():
+        return preferred
+    for candidate in sorted(home.glob(".openclaw-member-*")):
+        if (candidate / "openclaw.json").is_file():
+            return candidate
+    if (home / "openclaw/openclaw.json").is_file():
+        return home / "openclaw"
+    return None
+
+
+def find_node_binary():
+    home = Path.home()
+    dep_root = home / ".local/share/installer_emtroly/dependencies"
+    if dep_root.is_dir():
+        for cand in sorted(dep_root.glob("node-v*/bin/node"), reverse=True):
+            if cand.is_file() and os.access(cand, os.X_OK):
+                return cand
+    which_node = shutil.which("node")
+    return Path(which_node) if which_node else None
+
+
 def default_workspace_dir():
+    inst = find_installed_instance_root()
+    if inst:
+        return str(inst)
     home = Path.home()
     for candidate in sorted(home.glob(".openclaw-member-*")):
         if candidate.is_dir():
@@ -74,20 +110,34 @@ def pick_uniform_font_family(available_families):
     return "TkDefaultFont"
 
 
+def read_installer_version(source: Path) -> str:
+    manifest = source / "MANIFEST.txt"
+    if manifest.is_file():
+        for line in manifest.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.startswith("installer_version="):
+                return line.split("=", 1)[1].strip()
+    return "2026.11.22"
+
+
 def main():
     import tkinter as tk
     from tkinter import filedialog, font as tkfont, messagebox, ttk
 
+    import codex_setup
     import license_gate
+    import provider
     import runner
+    import telegram
 
     source = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    app_ver = read_installer_version(source)
     events = queue.Queue()
     codex_events = queue.Queue()
+    qr_events = queue.Queue()
 
     window = tk.Tk()
-    window.title("Em Trợ Lý - Cài đặt & Codex CLI")
-    window.minsize(780, 680)
+    window.title(f"Em Trợ Lý v{app_ver} - Cài đặt, Zalo QR & Codex CLI")
+    window.minsize(840, 710)
     window.configure(bg="#F3F6FB")
 
     family = pick_uniform_font_family(tkfont.families(window))
@@ -110,6 +160,7 @@ def main():
     style.configure("HeaderSub.TLabel", font=font_hint, foreground="#475569", background="#FFFFFF")
     style.configure("Section.TLabel", font=font_section, foreground="#0F172A", background="#FFFFFF")
     style.configure("Hint.TLabel", font=font_hint, foreground="#475569", background="#F8FAFC")
+    style.configure("BannerOk.TLabel", font=font_bold, foreground="#065F46", background="#ECFDF5")
     style.configure("StatusOk.TLabel", font=font_bold, foreground="#059669", background="#FFFFFF")
     style.configure("StatusWarn.TLabel", font=font_bold, foreground="#B45309", background="#FFFFFF")
     style.configure("TNotebook", background="#F3F6FB", borderwidth=0)
@@ -139,36 +190,41 @@ def main():
             logo_img = None
 
     ttk.Label(header, text="Em Trợ Lý", style="HeaderTitle.TLabel").grid(row=0, column=1, sticky="w")
-    subtitle_var = tk.StringVar(value="Giao diện đơn giản, thân thiện · Cài đặt trợ lý và chỉnh sửa nhanh bằng Codex CLI")
+    subtitle_var = tk.StringVar(
+        value=f"v{app_ver} (macOS & Linux) · Ưu tiên cài Codex CLI → Antigravity → OpenClaw & Zalo"
+    )
     ttk.Label(header, textvariable=subtitle_var, style="HeaderSub.TLabel").grid(row=1, column=1, sticky="w", pady=(2, 0))
 
     notebook = ttk.Notebook(window)
     notebook.grid(row=1, column=0, sticky="nsew", padx=16, pady=(12, 16))
 
-    tab_connect = ttk.Frame(notebook, style="Card.TFrame", padding=22)
-    tab_profile = ttk.Frame(notebook, style="Card.TFrame", padding=22)
-    tab_codex = ttk.Frame(notebook, style="Card.TFrame", padding=22)
+    tab_connect = ttk.Frame(notebook, style="Card.TFrame", padding=20)
+    tab_profile = ttk.Frame(notebook, style="Card.TFrame", padding=20)
+    tab_zalo_qr = ttk.Frame(notebook, style="Card.TFrame", padding=20)
+    tab_codex = ttk.Frame(notebook, style="Card.TFrame", padding=20)
     notebook.add(tab_connect, text="1. Kết nối & Bảo mật")
-    notebook.add(tab_profile, text="2. Hồ sơ & Cài đặt")
+    notebook.add(tab_profile, text="2. Tùy chọn & Cài đặt")
+    notebook.add(tab_zalo_qr, text="Quét QR Zalo")
     notebook.add(tab_codex, text="Codex CLI")
 
     quick_btn = ttk.Button(
         header,
         text="Mở Codex CLI",
         style="Secondary.TButton",
-        command=lambda: notebook.select(tab_connect if notebook.index("current") == 2 else tab_codex),
+        command=lambda: notebook.select(tab_connect if notebook.index("current") == 3 else tab_codex),
     )
     quick_btn.grid(row=0, column=2, rowspan=2, sticky="e")
 
     variables = {}
+    secret_entries = []
 
     def add_fields(parent, title_text, field_specs):
         parent.columnconfigure(1, weight=1)
         ttk.Label(parent, text=title_text, style="Section.TLabel").grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 12)
+            row=0, column=0, columnspan=3, sticky="w", pady=(0, 10)
         )
         for idx, (key, label, default, secret) in enumerate(field_specs, start=1):
-            ttk.Label(parent, text=label).grid(row=idx, column=0, sticky="w", pady=5, padx=(0, 14))
+            ttk.Label(parent, text=label).grid(row=idx, column=0, sticky="w", pady=4, padx=(0, 12))
             variable = tk.StringVar(value=default)
             variables[key] = variable
             if key == "model":
@@ -180,57 +236,299 @@ def main():
                 )
             else:
                 widget = ttk.Entry(parent, textvariable=variable, show="*" if secret else "")
-            widget.grid(row=idx, column=1, sticky="ew", pady=5)
+                if secret:
+                    secret_entries.append(widget)
+            widget.grid(row=idx, column=1, sticky="ew", pady=4)
         return len(field_specs) + 1
 
     connect_fields = [
-        ("member", "Tên định danh (chữ thường/số)", "member01", False),
-        ("assistant_name", "Tên hiển thị trợ lý", "Trợ lý", False),
+        ("member", "Tên định danh (chữ thường/số)", "emtroly", False),
+        ("assistant_name", "Tên hiển thị trợ lý", "Trợ lý OpenClaw", False),
+        ("telegram_token", "Telegram Bot Token", "", True),
+        ("ai_api_key", "Provider API Key", "", True),
         ("owner_ids", "Telegram Owner IDs (dấu phẩy)", "", False),
         ("qr_owner_id", "Owner ID nhận QR Zalo", "", False),
         ("group_id", "Telegram Group ID (số âm)", "", False),
-        ("telegram_token", "Telegram Bot Token", "", True),
         ("base_url", "Địa chỉ Provider (HTTPS)", "https://codex.anhlaptrinh.vn/v1", False),
-        ("ai_api_key", "Provider API Key", "", True),
         ("model", "Mô hình AI (Model)", "gpt-6.2-sol", False),
         ("gateway_port", "Cổng Gateway (0 = tự động)", "0", False),
     ]
-    next_row = add_fields(tab_connect, "Thông tin kết nối & mã bảo mật", connect_fields)
+    next_row = add_fields(tab_connect, "1. Thông tin kết nối & mã bảo mật", connect_fields)
+
+    live_banner_var = tk.StringVar(value="")
+
+    def do_auto_fetch_ids():
+        tok = variables["telegram_token"].get().strip()
+        if not tok:
+            messagebox.showwarning("Thiếu Bot Token", "Hãy dán Telegram Bot Token trước rồi bấm Lấy ID tự động.")
+            return
+        fetch_btn.state(["disabled"])
+        live_banner_var.set("Đang đọc tin nhắn gần nhất từ Telegram Bot để lấy Owner ID & Group ID...")
+
+        def _bg():
+            try:
+                info = telegram.fetch_ids_from_updates(tok)
+
+                def _ok():
+                    fetch_btn.state(["!disabled"])
+                    if info["owner_id"]:
+                        variables["owner_ids"].set(info["owner_id"])
+                        if not variables["qr_owner_id"].get().strip():
+                            variables["qr_owner_id"].set(info["owner_id"])
+                    if info["group_id"]:
+                        variables["group_id"].set(info["group_id"])
+                    if info["owner_id"] or info["group_id"]:
+                        live_banner_var.set(
+                            f"✓ Bot {info['bot_username']}: Đã điền Owner={info['owner_id'] or '—'}, Group={info['group_id'] or '—'}."
+                        )
+                    else:
+                        live_banner_var.set(
+                            f"Bot {info['bot_username']} hợp lệ nhưng chưa có tin nhắn mới — hãy nhắn 1 tin cho bot rồi bấm lại."
+                        )
+
+                window.after(0, _ok)
+            except Exception as exc:
+                window.after(
+                    0,
+                    lambda: (
+                        fetch_btn.state(["!disabled"]),
+                        live_banner_var.set("Không lấy được ID từ Telegram: " + strip_ansi(str(exc), tok)),
+                    ),
+                )
+
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def do_test_connection():
+        tok = variables["telegram_token"].get().strip()
+        key = variables["ai_api_key"].get().strip()
+        url = variables["base_url"].get().strip().rstrip("/")
+        mdl = variables["model"].get().strip()
+        test_btn.state(["disabled"])
+        live_banner_var.set("Đang kiểm tra kết nối Telegram Bot và máy chủ AI...")
+
+        def _bg():
+            try:
+                me = telegram.verify_bot(tok)
+                resolved_model = provider.verify(url, key, mdl)
+                bot_u = ("@" + me["username"]) if isinstance(me, dict) and me.get("username") else "Bot hợp lệ"
+                window.after(
+                    0,
+                    lambda: (
+                        test_btn.state(["!disabled"]),
+                        live_banner_var.set(f"✓ Kết nối tốt! Telegram ({bot_u}) & Model ({resolved_model}) đều sẵn sàng."),
+                    ),
+                )
+            except Exception as exc:
+                msg = codex_setup.scrub_secrets(str(exc), (tok, key))
+                window.after(0, lambda: (test_btn.state(["!disabled"]), live_banner_var.set("! Kiểm tra chưa đạt: " + msg)))
+
+        threading.Thread(target=_bg, daemon=True).start()
+
+    fetch_btn = ttk.Button(tab_connect, text="Lấy ID tự động", style="Secondary.TButton", command=do_auto_fetch_ids)
+    fetch_btn.grid(row=3, column=2, padx=(8, 0), pady=4, sticky="ew")
+    test_btn = ttk.Button(tab_connect, text="Kiểm tra kết nối", style="Secondary.TButton", command=do_test_connection)
+    test_btn.grid(row=4, column=2, padx=(8, 0), pady=4, sticky="ew")
+
+    show_secret_var = tk.BooleanVar(value=False)
+
+    def toggle_secrets():
+        ch = "" if show_secret_var.get() else "*"
+        for ent in secret_entries:
+            ent.configure(show=ch)
+
+    ctrl_bar = ttk.Frame(tab_connect, style="Card.TFrame")
+    ctrl_bar.grid(row=next_row, column=0, columnspan=3, sticky="ew", pady=(8, 4))
+    ttk.Checkbutton(ctrl_bar, text="Hiện mã bí mật", variable=show_secret_var, command=toggle_secrets).pack(side="left")
+
+    def clear_saved_draft():
+        license_gate.clear_saved_setup_draft()
+        for k in ("telegram_token", "owner_ids", "qr_owner_id", "group_id", "audience", "addressing", "style"):
+            variables[k].set("")
+        live_banner_var.set("Đã xóa các thông số lưu nháp trên máy.")
+
+    ttk.Button(ctrl_bar, text="Xóa thông số đã lưu", style="Secondary.TButton", command=clear_saved_draft).pack(
+        side="left", padx=(12, 0)
+    )
     ttk.Button(
-        tab_connect,
+        ctrl_bar,
         text="Tiếp theo →",
         style="Primary.TButton",
         command=lambda: notebook.select(tab_profile),
-    ).grid(row=next_row, column=1, sticky="e", pady=(16, 0))
+    ).pack(side="right")
+
+    ttk.Label(tab_connect, textvariable=live_banner_var, style="Hint.TLabel", wraplength=740, padding=8).grid(
+        row=next_row + 1, column=0, columnspan=3, sticky="ew", pady=(6, 0)
+    )
 
     profile_fields = [
         ("audience", "Đối tượng phục vụ (tùy chọn)", "", False),
         ("addressing", "Cách xưng hô (tùy chọn)", "", False),
         ("style", "Phong cách trả lời (tùy chọn)", "", False),
     ]
-    p_row = add_fields(tab_profile, "Phong cách giao tiếp & xác nhận cài đặt", profile_fields)
+    p_row = add_fields(tab_profile, "2. Tùy chọn cài đặt trọn gói A–Z & Bảo vệ tự sửa lỗi", profile_fields)
+
+    ttk.Label(
+        tab_profile,
+        text="✓ Ưu tiên cài đặt Codex CLI → Antigravity IDE & Codex Extension trước tiên: nếu phát sinh sự cố khi cài môi trường hay OpenClaw/Zalo, Codex CLI sẽ tự động chẩn đoán và khắc phục ngay!",
+        style="BannerOk.TLabel",
+        wraplength=740,
+        padding=10,
+    ).grid(row=p_row, column=0, columnspan=3, sticky="ew", pady=(10, 6))
+
     zalo_var = tk.BooleanVar(value=True)
     ttk.Checkbutton(
         tab_profile,
-        text="Tích chọn để cài thêm Zalo cá nhân và lệnh quét mã /zaloqr (bỏ tích nếu không cần).",
+        text="Cài đặt Zalo cá nhân & lệnh quét mã /zaloqr, /zalostatus (bỏ tích nếu không dùng Zalo).",
         variable=zalo_var,
-    ).grid(row=p_row, column=0, columnspan=2, sticky="w", pady=(12, 4))
+    ).grid(row=p_row + 1, column=0, columnspan=3, sticky="w", pady=(4, 4))
+
+    skip_editor_var = tk.BooleanVar(value=False)
+    ttk.Checkbutton(
+        tab_profile,
+        text="Bỏ qua cấu hình Antigravity IDE (vẫn luôn cài đặt Codex CLI để tự sửa lỗi cài đặt).",
+        variable=skip_editor_var,
+    ).grid(row=p_row + 2, column=0, columnspan=3, sticky="w", pady=(2, 4))
+
     consent = tk.BooleanVar(value=False)
     ttk.Checkbutton(
         tab_profile,
-        text="Tôi đồng ý cấp quyền Full Exec: Owner và nhóm đã chọn có thể đọc/sửa tệp và chạy lệnh.",
+        text="Tôi đồng ý cấp quyền Full Exec: Owner và nhóm Telegram đã chọn có thể đọc/sửa tệp và chạy lệnh.",
         variable=consent,
-    ).grid(row=p_row + 1, column=0, columnspan=2, sticky="w", pady=(6, 8))
+    ).grid(row=p_row + 3, column=0, columnspan=3, sticky="w", pady=(4, 8))
 
-    status = tk.StringVar(value="Sẵn sàng cài đặt trọn gói từ A–Z. Cần kết nối Internet; không cần quét mã QR trong lúc cài.")
-    status_box = ttk.Label(tab_profile, textvariable=status, style="Hint.TLabel", wraplength=700, padding=12)
-    status_box.grid(row=p_row + 2, column=0, columnspan=2, sticky="ew", pady=(6, 14))
+    status = tk.StringVar(
+        value="Sẵn sàng cài đặt trọn gói từ A–Z (Codex CLI → Antigravity → OpenClaw & Zalo). Không cần quét QR trong lúc cài."
+    )
+    status_box = ttk.Label(tab_profile, textvariable=status, style="Hint.TLabel", wraplength=740, padding=12)
+    status_box.grid(row=p_row + 4, column=0, columnspan=3, sticky="ew", pady=(6, 14))
 
     busy = False
     codex_busy = False
     codex_proc = None
+    qr_proc = None
+    qr_temp_dir = None
+    qr_photo_ref = {"img": None, "mtime": 0.0}
 
-    # Giao diện Codex CLI chỉnh sửa trực tiếp
+    # =========================================================================
+    # TAB 3: LIVE ZALO QR LOGIN (GUI + Simultaneous Telegram Owner Delivery)
+    # =========================================================================
+    tab_zalo_qr.columnconfigure(1, weight=1)
+    ttk.Label(tab_zalo_qr, text="Quét mã QR đăng nhập Zalo cá nhân", style="Section.TLabel").grid(
+        row=0, column=0, columnspan=2, sticky="w", pady=(0, 10)
+    )
+    qr_canvas_lbl = tk.Label(
+        tab_zalo_qr,
+        text="Bấm 'Tạo & Gửi mã QR Zalo'\nđể hiển thị mã QR tại đây\nvà gửi đồng thời qua Telegram",
+        width=32,
+        height=14,
+        bg="#F8FAFC",
+        fg="#475569",
+        relief="solid",
+        bd=1,
+    )
+    qr_canvas_lbl.grid(row=1, column=0, padx=(0, 18), pady=6, sticky="nw")
+
+    qr_right = ttk.Frame(tab_zalo_qr, style="Card.TFrame")
+    qr_right.grid(row=1, column=1, sticky="nsew", pady=6)
+    qr_status_var = tk.StringVar(value="Chưa khởi tạo phiên quét mã QR.")
+    qr_tg_var = tk.StringVar(value="Mã QR sẽ được tạo trực tiếp qua Gateway RPC (~5 giây) và gửi thẳng vào Telegram Owner.")
+    ttk.Label(qr_right, textvariable=qr_status_var, font=font_bold, wraplength=440).pack(anchor="w", pady=(0, 8))
+    ttk.Label(qr_right, textvariable=qr_tg_var, style="Hint.TLabel", wraplength=440, padding=10).pack(
+        fill="x", pady=(0, 12)
+    )
+    ttk.Label(
+        qr_right,
+        text=(
+            "Hướng dẫn:\n"
+            "1. Mở ứng dụng Zalo trên điện thoại (hoặc mở ảnh gửi trong Telegram).\n"
+            "2. Chọn biểu tượng Quét mã QR và bấm Đăng nhập.\n"
+            "3. Phần mềm sẽ tự động xác nhận ngay khi kết nối thành công!"
+        ),
+        wraplength=440,
+    ).pack(anchor="w", pady=(0, 14))
+
+    def stop_qr_session():
+        nonlocal qr_proc, qr_temp_dir
+        if qr_proc and qr_proc.poll() is None:
+            try:
+                qr_proc.terminate()
+            except OSError:
+                pass
+        qr_proc = None
+        if qr_temp_dir and qr_temp_dir.exists():
+            shutil.rmtree(qr_temp_dir, ignore_errors=True)
+        qr_temp_dir = None
+
+    def start_qr_session():
+        nonlocal qr_proc, qr_temp_dir
+        stop_qr_session()
+        inst_root = find_installed_instance_root(variables["member"].get().strip() or "emtroly")
+        if not inst_root:
+            messagebox.showwarning("Chưa cài đặt", "Hãy hoàn tất cài đặt trợ lý OpenClaw trước khi quét QR Zalo.")
+            return
+        node_bin = find_node_binary()
+        bridge_mjs = source / "windows-installer/zalo-qr-session.mjs"
+        if not node_bin or not bridge_mjs.is_file():
+            messagebox.showwarning("Thiếu thành phần", "Không tìm thấy Node.js hoặc công cụ tạo mã QR (zalo-qr-session.mjs).")
+            return
+        qr_temp_dir = Path(tempfile.mkdtemp(prefix="emtroly-unix-zaloqr-"))
+        os.chmod(qr_temp_dir, 0o700)
+        state_file = qr_temp_dir / "state.json"
+        png_file = qr_temp_dir / "qr.png"
+        qr_photo_ref["mtime"] = 0.0
+        qr_canvas_lbl.configure(image="", text="Đang tạo mã QR Zalo (~5 giây)...")
+        qr_status_var.set("Đang khởi tạo mã QR từ Gateway và gửi vào Telegram Owner...")
+
+        owner_target = variables["qr_owner_id"].get().strip() or (
+            variables["owner_ids"].get().split(",")[0].strip() if variables["owner_ids"].get().strip() else ""
+        )
+        cmd = [
+            str(node_bin),
+            str(bridge_mjs),
+            "--root",
+            str(inst_root),
+            "--state-file",
+            str(state_file),
+            "--qr-out",
+            str(png_file),
+            "--force",
+            "--timeout-seconds",
+            "160",
+        ]
+        if re.fullmatch(r"[1-9][0-9]*", owner_target):
+            cmd.extend(["--owner-id", owner_target])
+        qr_proc = subprocess.Popen(cmd, cwd=str(inst_root), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        def _watch_qr(local_dir: Path, st_path: Path, img_path: Path, proc_ref: subprocess.Popen):
+            while proc_ref.poll() is None and local_dir.exists():
+                if st_path.is_file():
+                    try:
+                        st = json.loads(st_path.read_text(encoding="utf-8"))
+                        qr_events.put(("state", (st, img_path)))
+                        if st.get("connected") is True:
+                            break
+                    except Exception:
+                        pass
+                time.sleep(0.5)
+            if st_path.is_file():
+                try:
+                    qr_events.put(("state", (json.loads(st_path.read_text(encoding="utf-8")), img_path)))
+                except Exception:
+                    pass
+            qr_events.put(("done", proc_ref.returncode))
+
+        threading.Thread(target=_watch_qr, args=(qr_temp_dir, state_file, png_file, qr_proc), daemon=True).start()
+
+    qr_btns = ttk.Frame(qr_right, style="Card.TFrame")
+    qr_btns.pack(anchor="w")
+    ttk.Button(qr_btns, text="Tạo & Gửi mã QR Zalo", style="Primary.TButton", command=start_qr_session).pack(
+        side="left", padx=(0, 8)
+    )
+    ttk.Button(qr_btns, text="Dừng phiên QR", style="Secondary.TButton", command=stop_qr_session).pack(side="left")
+
+    # =========================================================================
+    # TAB 4: CODEX CLI WORKSPACE & MANUAL AUTO-HEAL
+    # =========================================================================
     tab_codex.columnconfigure(1, weight=1)
     tab_codex.rowconfigure(6, weight=1)
 
@@ -290,9 +588,11 @@ def main():
     ).pack(side="left", padx=(0, 6))
     ttk.Button(
         preset_frame,
-        text="Kiểm tra & tự sửa lỗi",
+        text="Tự tìm & sửa lỗi",
         style="Secondary.TButton",
-        command=lambda: set_preset("Hãy kiểm tra các tệp trong thư mục này, sửa lỗi nếu có và tóm tắt dễ hiểu."),
+        command=lambda: set_preset(
+            "Hãy kiểm tra toàn bộ cấu hình, trạng thái Gateway và plugin Zalo trong thư mục này; nếu có lỗi thì sửa trực tiếp và tóm tắt dễ hiểu."
+        ),
     ).pack(side="left")
 
     ttk.Label(tab_codex, text="Nhập yêu cầu chỉnh sửa (bằng tiếng Việt tự nhiên):", font=font_bold).grid(
@@ -353,7 +653,7 @@ def main():
             if not codex_busy:
                 run_codex_btn.state(["!disabled"])
         else:
-            codex_status_var.set("○ Chưa tìm thấy lệnh codex trên máy")
+            codex_status_var.set("○ Sẽ tự động cài Codex CLI ở Bước 2 khi bắt đầu cài đặt")
             codex_status_lbl.configure(style="StatusWarn.TLabel")
             run_codex_btn.state(["disabled"])
         stop_codex_btn.state(["!disabled"] if codex_busy else ["disabled"])
@@ -388,7 +688,7 @@ def main():
         clear_codex_output(f"Đang gửi yêu cầu tới Codex CLI...\nThư mục: {workspace}\n" + "-" * 56 + "\n")
         refresh_codex_state()
         allow_write = allow_write_var.get()
-        api_key = variables["ai_api_key"].get().strip()
+        api_key = variables["ai_api_key"].get().strip() or license_gate.get_saved_license_key()
         selected_model = variables["model"].get().strip()
         selected_url = variables["base_url"].get().strip().rstrip("/")
 
@@ -397,10 +697,16 @@ def main():
             temp_home = None
             try:
                 env = dict(os.environ, NO_COLOR="1", PYTHONUTF8="1")
+                node_b = find_node_binary()
+                if node_b:
+                    env["PATH"] = str(node_b.parent) + os.pathsep + env.get("PATH", "")
                 for key in ("ELECTRON_RUN_AS_NODE", "VSCODE_IPC_HOOK_CLI", "NODE_OPTIONS", "VSCODE_DEV"):
                     env.pop(key, None)
-                default_home = Path.home() / ".codex"
-                if not default_home.is_dir() and api_key:
+                em_codex_home = codex_setup.codex_home_dir()
+                if (em_codex_home / "auth.json").is_file() and (em_codex_home / "config.toml").is_file():
+                    env["CODEX_HOME"] = str(em_codex_home)
+                    env.pop("OPENAI_API_KEY", None)
+                elif api_key:
                     temp_home = Path(tempfile.mkdtemp(prefix="emtroly-codex-"))
                     os.chmod(temp_home, 0o700)
                     (temp_home / "config.toml").write_text(
@@ -473,7 +779,7 @@ def main():
     run_codex_btn.pack(side="right")
 
     def on_tab_changed(_event=None):
-        on_codex = notebook.index("current") == 2
+        on_codex = notebook.index("current") == 3
         quick_btn.configure(text="← Về phần Cài đặt" if on_codex else "Mở Codex CLI")
         if on_codex:
             refresh_codex_state()
@@ -484,6 +790,7 @@ def main():
         vals = {key: variable.get() for key, variable in variables.items()}
         vals["accept_full_access"] = consent.get()
         vals["configure_zalo"] = zalo_var.get()
+        vals["skip_editor"] = skip_editor_var.get()
         return vals
 
     def persist_unix_draft():
@@ -499,6 +806,7 @@ def main():
 
     def close():
         persist_unix_draft()
+        stop_qr_session()
         if busy:
             if not messagebox.askyesno(
                 "Xác nhận dừng và thoát",
@@ -555,7 +863,7 @@ def main():
                     if isinstance(error, (ValueError, RuntimeError, FileExistsError))
                     else "Lỗi không xác định. Kiểm tra môi trường và thử lại."
                 )
-                events.put(("failure", message))
+                events.put(("failure", codex_setup.scrub_secrets(message, (values.get("telegram_token"), values.get("ai_api_key")))))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -568,13 +876,14 @@ def main():
                 break
             if kind == "progress":
                 status.set(value)
+                refresh_codex_state()
             else:
                 busy = False
                 button.state(["!disabled"])
                 exit_btn.configure(text="Thoát")
+                refresh_codex_state()
                 if kind == "success":
                     variables["telegram_token"].set("")
-                    variables["ai_api_key"].set("")
                     command = value["cli"]["command"]
                     shell = value["cli"].get("shell_path", {})
                     if value["cli"]["path_present"]:
@@ -584,21 +893,24 @@ def main():
                     else:
                         extra = "\nThêm thư mục " + value["cli"]["directory"] + " vào PATH trước khi dùng lệnh."
                     codex_dir_var.set(value["root"])
-                    status.set("Cài đặt hoàn tất. Đăng nhập Zalo sau bằng /zaloqr.")
+                    status.set("Hoàn tất cài đặt trọn gói! Chuyển sang tab 'Quét QR Zalo' nếu muốn kết nối Zalo ngay.")
                     messagebox.showinfo(
-                        "Thành công",
-                        "Gateway và lệnh Zalo đã được kiểm tra.\nThư mục: "
+                        "Cài đặt hoàn tất",
+                        "Đã cài đặt thành công Codex CLI, OpenClaw và Gateway!\nThư mục: "
                         + value["root"]
                         + "\nLệnh: "
                         + command
                         + " status"
                         + extra,
                     )
+                    if zalo_var.get():
+                        notebook.select(tab_zalo_qr)
+                        start_qr_session()
                 else:
-                    status.set("Cài đặt chưa hoàn tất; không xóa thư mục đã tạo.")
+                    status.set("Cài đặt chưa hoàn tất: " + value)
                     messagebox.showerror(
                         "Chưa hoàn tất",
-                        value + "\nNếu thư mục instance đã được tạo, kiểm tra trước khi thử lại.",
+                        value + "\nBạn có thể mở tab 'Codex CLI' để cho Codex kiểm tra và sửa tiếp.",
                     )
 
         while True:
@@ -611,19 +923,43 @@ def main():
             elif ckind == "done":
                 codex_busy = False
                 append_codex_output(
-                    "\n" + "-" * 56 + "\n"
-                    + (
-                        "Hoàn tất yêu cầu Codex CLI thành công.\n"
-                        if cval == 0
-                        else f"Codex CLI kết thúc với mã {cval}.\n"
-                    )
+                    "\n"
+                    + "-" * 56
+                    + "\n"
+                    + ("Hoàn tất yêu cầu Codex CLI thành công.\n" if cval == 0 else f"Codex CLI kết thúc với mã {cval}.\n")
                 )
                 refresh_codex_state()
+
+        while True:
+            try:
+                qkind, qval = qr_events.get_nowait()
+            except queue.Empty:
+                break
+            if qkind == "state":
+                st, img_path = qval
+                if st.get("message"):
+                    qr_status_var.set(st["message"])
+                if st.get("telegramNote"):
+                    qr_tg_var.set(st["telegramNote"])
+                if img_path.is_file():
+                    try:
+                        mt = img_path.stat().st_mtime
+                        if mt != qr_photo_ref["mtime"] and img_path.stat().st_size > 64:
+                            photo = tk.PhotoImage(file=str(img_path))
+                            qr_photo_ref["img"] = photo
+                            qr_photo_ref["mtime"] = mt
+                            qr_canvas_lbl.configure(image=photo, text="", width=240, height=240)
+                    except tk.TclError:
+                        pass
+                if st.get("connected") is True:
+                    qr_canvas_lbl.configure(image="", text="✓ ĐÃ KẾT NỐI ZALO\nTRỰC TUYẾN!", fg="#065F46", bg="#ECFDF5")
+                    stop_qr_session()
+                    messagebox.showinfo("Đăng nhập Zalo thành công", "Trợ lý OpenClaw đã kết nối Zalo cá nhân thành công!")
 
         window.after(200, poll)
 
     install_actions = ttk.Frame(tab_profile, style="Card.TFrame")
-    install_actions.grid(row=p_row + 3, column=0, columnspan=2, sticky="ew")
+    install_actions.grid(row=p_row + 5, column=0, columnspan=3, sticky="ew")
     ttk.Button(
         install_actions,
         text="← Quay lại",
@@ -632,7 +968,7 @@ def main():
     ).pack(side="left")
     exit_btn = ttk.Button(install_actions, text="Thoát", style="Secondary.TButton", command=close)
     exit_btn.pack(side="left", padx=(8, 0))
-    button = ttk.Button(install_actions, text="Bắt đầu cài đặt", style="Primary.TButton", command=start)
+    button = ttk.Button(install_actions, text="Cài đặt trọn gói A–Z", style="Primary.TButton", command=start)
     button.pack(side="right")
 
     # Restore previously entered form parameters (encrypted per-machine draft)
@@ -644,6 +980,8 @@ def main():
                 variable.set(val.strip())
         if "configure_zalo" in saved_unix_draft:
             zalo_var.set(bool(saved_unix_draft["configure_zalo"]))
+        if "skip_editor" in saved_unix_draft:
+            skip_editor_var.set(bool(saved_unix_draft["skip_editor"]))
         if "accept_full_access" in saved_unix_draft:
             consent.set(bool(saved_unix_draft["accept_full_access"]))
         status.set("✓ Đã tự động điền lại các thông số bạn đã nhập ở lần trước (lưu mã hóa an toàn trên máy).")

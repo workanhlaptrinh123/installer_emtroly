@@ -34,17 +34,19 @@ ERROR_MESSAGES = {
 
 
 def preflight(interactive):
-    if platform.system() != "Linux":
-        raise RuntimeError("Bộ cài terminal chỉ hỗ trợ Ubuntu Linux.")
+    sys_name = platform.system()
+    if sys_name not in {"Linux", "Darwin"}:
+        raise RuntimeError("Bộ cài terminal chỉ hỗ trợ macOS và Linux.")
     if hasattr(os, "geteuid") and os.geteuid() == 0:
-        raise RuntimeError("Không chạy bằng root hoặc sudo; hãy đăng nhập bằng user Ubuntu thường.")
+        raise RuntimeError("Không chạy bằng root hoặc sudo; hãy đăng nhập bằng tài khoản người dùng thường.")
     if interactive and (not sys.stdin.isatty() or not sys.stdout.isatty()):
         raise RuntimeError("Cần terminal tương tác để nhập thông tin an toàn.")
-    try:
-        service.check_linux_user_service()
-    except RuntimeError:
-        raise RuntimeError("Không có systemd user service. Đăng nhập SSH trực tiếp bằng user thường; "
-                           "kiểm tra 'systemctl --user status'.") from None
+    if sys_name == "Linux":
+        try:
+            service.check_linux_user_service()
+        except RuntimeError:
+            raise RuntimeError("Không có systemd user service. Đăng nhập SSH trực tiếp bằng user thường; "
+                               "kiểm tra 'systemctl --user status'.") from None
 
 
 def bootstrap_python():
@@ -66,7 +68,8 @@ def prompt(label, default=""):
 
 
 def collect():
-    print("\nCài Em Trợ Lý cho Ubuntu (bản thử nghiệm)")
+    os_title = "macOS" if platform.system() == "Darwin" else "Linux / Ubuntu"
+    print(f"\nCài Em Trợ Lý trọn gói cho {os_title} (Ưu tiên cài Codex CLI & tự sửa lỗi)")
     print("Cần Internet và một bot Telegram riêng. Không cần quét QR trong lúc cài.")
     values = {
         "member": prompt("Tên instance", "member01"),

@@ -1,13 +1,18 @@
 # installer_emtroly
 
-## Ubuntu Terminal Installer — Preview
+## Cross-Platform Installers (Windows, macOS & Linux)
 
-For an Ubuntu VPS without a desktop, use `./install-ubuntu.sh --check` and
-then `source install-ubuntu.sh` from an interactive Bash session as a non-root
-user, so the current shell receives the command PATH after installation.
-This is a development preview, not the existing Docker `install.sh` and not a
-browser dashboard. See `unix-installer/README.md` for prerequisites, systemd
-user services, owner Full Exec risks and the separate Zalo acceptance test.
+Official GitHub Releases publish synchronized `emtroly` installers for all three desktop/server platforms:
+
+- **Windows x64**: `emtroly.exe` (+ `emtroly.exe.sha256`)
+- **macOS Apple Silicon (M1/M2/M3/M4)**: `emtroly-macos-arm64.zip` (+ `emtroly-macos-arm64.zip.sha256`, containing `EmTroLy.app`)
+- **macOS Intel (x64)**: `emtroly-macos-x64.zip` (+ `emtroly-macos-x64.zip.sha256`, containing `EmTroLy.app`)
+- **Linux Ubuntu / Debian (x64)**: `emtroly-linux-x64.deb` (+ `emtroly-linux-x64.deb.sha256`) and portable `emtroly-linux-x64.tar.gz` (+ `emtroly-linux-x64.tar.gz.sha256`)
+- **Headless Terminal Installers (macOS & Ubuntu VPS)**:
+  - Ubuntu / Linux: `./install-ubuntu.sh --check` then `source install-ubuntu.sh`
+  - macOS Terminal: `./install-macos.sh --check` then `source install-macos.sh`
+
+All platforms share the same priority architecture: **Codex CLI is always installed and configured first**, followed by **Antigravity IDE & Codex Extension** setup, and then **OpenClaw + Gateway + Zalo (`/zaloqr`, `/zalostatus`)** with automatic **Codex CLI Auto-Heal** if any technical error occurs during installation. See `unix-installer/README.md` for macOS and Linux details.
 
 ## Native image API key — 2026-10-23
 

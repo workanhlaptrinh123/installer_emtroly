@@ -67,6 +67,7 @@ def validate(settings):
         "group_id": group, "telegram_token": telegram, "ai_api_key": api_key,
         "model": model, "base_url": base_url.rstrip("/"), "gateway_port": int(raw_port),
         "qr_owner_id": qr_owner if configure_zalo else "", "configure_zalo": configure_zalo,
+        "skip_editor": bool(settings.get("skip_editor", False)),
         "audience": text("audience"),
         "addressing": text("addressing"), "style": text("style"),
     }

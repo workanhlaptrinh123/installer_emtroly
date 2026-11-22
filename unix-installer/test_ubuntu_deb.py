@@ -18,22 +18,24 @@ class UbuntuDebTests(unittest.TestCase):
             directory = Path(temporary)
             executable = directory / "source"
             executable.write_bytes(b"fake-binary")
-            package = directory / "preview.deb"
-            ubuntu_deb.build(executable, package, "0.20261119~preview1", "amd64", "2.35")
+            package = directory / "emtroly-linux-x64.deb"
+            ubuntu_deb.build(executable, package, "2026.11.22.9", "amd64", "2.35")
             output = subprocess.check_output(["dpkg-deb", "--contents", str(package)], text=True)
-            self.assertIn("usr/lib/installer-emtroly/caidattroly", output)
-            self.assertIn("usr/share/applications/installer-emtroly-preview.desktop", output)
+            self.assertIn("usr/lib/emtroly/emtroly", output)
+            self.assertIn("usr/bin/emtroly", output)
+            self.assertIn("usr/share/applications/emtroly.desktop", output)
             self.assertNotIn("/home/", output)
             control = directory / "control"
             subprocess.run(["dpkg-deb", "--control", str(package), str(control)], check=True)
             self.assertEqual({item.name for item in control.iterdir()}, {"control"})
-            metadata = (control / "control").read_text()
+            metadata = (control / "control").read_text(encoding="utf-8")
+            self.assertIn("Package: emtroly", metadata)
             self.assertIn("libc6 (>= 2.35)", metadata)
             self.assertIn("libsqlite3-0", metadata)
             self.assertIn("ca-certificates", metadata)
             self.assertTrue(package.with_suffix(".deb.sha256").is_file())
             with self.assertRaises(ValueError):
-                ubuntu_deb.build(executable, package, "0.20261119~preview1", "amd64", "2.35")
+                ubuntu_deb.build(executable, package, "2026.11.22.9", "amd64", "2.35")
 
     def test_invalid_version_and_architecture_are_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

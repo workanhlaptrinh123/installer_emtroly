@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package an already-built Ubuntu preview without touching user data."""
+"""Package an already-built Linux Em Tro Ly binary into an official Debian/Ubuntu .deb package."""
 
 import argparse
 import hashlib
@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 
 
-def build(executable, output, version, architecture, minimum_glibc):
+def build(executable, output, version, architecture, minimum_glibc, icon_path=None):
     executable = Path(executable).resolve(strict=True)
     output = Path(output).absolute()
     if not executable.is_file() or not output.parent.is_dir() or output.exists() or output.is_symlink():
@@ -24,31 +24,57 @@ def build(executable, output, version, architecture, minimum_glibc):
     if output.suffix != ".deb":
         raise ValueError("Output must have a .deb extension")
 
+    repo_icon = Path(icon_path) if icon_path else (Path(__file__).resolve().parent.parent / "alt.png")
+
     with tempfile.TemporaryDirectory(prefix="emtroly-deb-") as temporary:
         staging = Path(temporary) / "package"
         control = staging / "DEBIAN"
-        binary_dir = staging / "usr/lib/installer-emtroly"
+        binary_dir = staging / "usr/lib/emtroly"
+        usr_bin = staging / "usr/bin"
         desktop_dir = staging / "usr/share/applications"
-        for directory in (control, binary_dir, desktop_dir):
+        pixmap_dir = staging / "usr/share/pixmaps"
+        for directory in (control, binary_dir, usr_bin, desktop_dir, pixmap_dir):
             directory.mkdir(parents=True, mode=0o755)
-        binary = binary_dir / "caidattroly"
+
+        binary = binary_dir / "emtroly"
         shutil.copyfile(executable, binary)
         binary.chmod(0o755)
+        (usr_bin / "emtroly").symlink_to("../lib/emtroly/emtroly")
+
+        icon_name = "applications-system"
+        if repo_icon.is_file():
+            dst_icon = pixmap_dir / "emtroly.png"
+            shutil.copyfile(repo_icon, dst_icon)
+            dst_icon.chmod(0o644)
+            icon_name = "emtroly"
+
         (control / "control").write_text(
-            "Package: installer-emtroly-preview\n"
+            "Package: emtroly\n"
             f"Version: {version}\n"
-            "Section: utils\nPriority: optional\n"
+            "Section: utils\n"
+            "Priority: optional\n"
             f"Architecture: {architecture}\n"
-            "Maintainer: installer_emtroly\n"
+            "Replaces: installer-emtroly-preview\n"
+            "Conflicts: installer-emtroly-preview\n"
+            "Maintainer: Anh Lap Trinh <support@anhlaptrinh.vn>\n"
             f"Depends: libc6 (>= {minimum_glibc}), libx11-6, libxext6, libxft2, libsqlite3-0, zlib1g, ca-certificates\n"
-            "Description: Em Tro Ly installer (testing preview)\n"
-            " This preview is not an official customer release.\n", encoding="utf-8")
-        (desktop_dir / "installer-emtroly-preview.desktop").write_text(
-            "[Desktop Entry]\nType=Application\nName=Em Tro Ly (ban thu)\n"
-            "Comment=Bo cai dat tro ly thu nghiem\n"
-            "Exec=/usr/lib/installer-emtroly/caidattroly\n"
-            "Icon=applications-system\nTerminal=false\nCategories=Utility;\n", encoding="utf-8")
+            "Description: Anh Lap Trinh - Em Tro Ly (OpenClaw, Zalo QR & Codex CLI)\n"
+            " Bo cai dat va quan ly tro ly AI ca nhan tron goi cho Ubuntu / Debian Linux.\n",
+            encoding="utf-8",
+        )
+        (desktop_dir / "emtroly.desktop").write_text(
+            "[Desktop Entry]\n"
+            "Type=Application\n"
+            "Name=Em Trợ Lý\n"
+            "Comment=Cài đặt & Quản lý trợ lý AI OpenClaw, Zalo QR và Codex CLI\n"
+            "Exec=/usr/bin/emtroly\n"
+            f"Icon={icon_name}\n"
+            "Terminal=false\n"
+            "Categories=Utility;Development;\n",
+            encoding="utf-8",
+        )
         subprocess.run(["dpkg-deb", "--root-owner-group", "--build", str(staging), str(output)], check=True)
+
     checksum = hashlib.sha256()
     with output.open("rb") as package:
         for block in iter(lambda: package.read(1024 * 1024), b""):
@@ -62,7 +88,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("executable", type=Path)
     parser.add_argument("output", type=Path)
-    parser.add_argument("--version", default="0.20261119~preview1")
+    parser.add_argument("--version", default="2026.11.22")
     parser.add_argument("--architecture", choices=("amd64", "arm64"), required=True)
     parser.add_argument("--minimum-glibc", required=True)
     args = parser.parse_args()

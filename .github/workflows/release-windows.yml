@@ -103,10 +103,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
+            --title "installer_emtroly ${{ steps.version.outputs.version }}" \
+            --generate-notes 2>/dev/null || true
+          gh release upload "$GITHUB_REF_NAME" --clobber \
             emtroly.exe \
             emtroly.exe.sha256 \
             native-full-bundle.tar.gz \
             native-full-bundle.sha256 \
-            MANIFEST.txt \
-            --title "installer_emtroly ${{ steps.version.outputs.version }}" \
-            --generate-notes
+            MANIFEST.txt

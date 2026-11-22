@@ -7,7 +7,7 @@ import subprocess
 from python_exec import command as python_command
 
 
-def install(root, source):
+def install(root, source, enable_zalo=True):
     root, source = Path(root), Path(source)
     if (not root.is_absolute() or root.resolve() != root or not (root / "openclaw.json").is_file() or
             not source.is_absolute() or source.resolve() != source):
@@ -28,14 +28,21 @@ def install(root, source):
     shutil.copy2(source / "native" / "module-skills.json", catalog / "module-skills.json")
     manager = source / "native" / "module-manager.py"
     shutil.copy2(manager, root / "module-manager.py")
+    profile_name = "basic-assistant-full" if enable_zalo else "installer-core"
     command = python_command(root / "module-manager.py", "install", "--openclaw-root", root,
                              "--catalog-root", catalog, "--skills-source", catalog / "skills",
-                             "--profile", "basic-assistant-full")
+                             "--profile", profile_name)
     try:
         subprocess.run(command, check=True, capture_output=True, timeout=300)
     except (OSError, subprocess.SubprocessError):
         raise RuntimeError("Module and skill installation failed") from None
-    for skill in ("telegram-zalo-owner-login", "openclaw-telegram-zalo-qr-delivery",
-                  "openclaw-zalo-reply-mention", "cap-full-quyen-telegram-openclaw"):
+    expected_skills = ["cap-full-quyen-telegram-openclaw"]
+    if enable_zalo:
+        expected_skills.extend([
+            "telegram-zalo-owner-login",
+            "openclaw-telegram-zalo-qr-delivery",
+            "openclaw-zalo-reply-mention",
+        ])
+    for skill in expected_skills:
         if not (root / "workspace" / "skills" / skill / "SKILL.md").is_file():
             raise RuntimeError("Required skill was not installed: " + skill)

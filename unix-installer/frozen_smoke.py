@@ -16,6 +16,7 @@ def main():
     source = Path(sys._MEIPASS).resolve(strict=True)
     assert (source / "native/skills/telegram-zalo-owner-login/SKILL.md").is_file()
     assert (source / "zalo/configure-zalo.py").is_file()
+    assert (source / "windows-installer/zalo-qr-session.mjs").is_file()
     tkinter.Tcl().eval("info patchlevel")
     with tempfile.TemporaryDirectory(prefix="installer-frozen-smoke-") as temporary:
         home = Path(temporary).resolve()
@@ -51,7 +52,7 @@ def main():
         runner.telegram.ensure_menu = lambda token: None
         settings = {"member": "member01", "assistant_name": "Assistant", "owner_ids": "12345",
                     "qr_owner_id": "12345", "group_id": "-12345", "telegram_token": "123456:" + "x" * 30,
-                    "base_url": "https://example.com/v1", "ai_api_key": "fake-key", "model": "gpt-6.1-sol",
+                    "base_url": "https://example.com/v1", "ai_api_key": "fake-key", "model": "gpt-6.2-sol",
                     "gateway_port": "0", "accept_full_access": True}
         result = runner.install(settings, source)
         assert result["gateway_port"] == 19789
