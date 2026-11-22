@@ -7,7 +7,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(root, 'installer-instance.
 const pidFile = path.join(root, 'user-gateway.pid.json');
 const action = process.argv[2];
 if (action !== 'start') throw new Error('Only the validated instance helper may manage the gateway.');
-fs.writeFileSync(pidFile, JSON.stringify({pid: null, cli_entry: manifest.cli_entry}), {mode: 0o600, flag: 'wx'});
+fs.writeFileSync(pidFile, JSON.stringify({pid: null, startedAt: Date.now(), cli_entry: manifest.cli_entry}), {mode: 0o600, flag: 'wx'});
 const environment = {...process.env, HOME: manifest.home, OPENCLAW_PROFILE: manifest.profile,
   OPENCLAW_STATE_DIR: root, OPENCLAW_CONFIG_PATH: path.join(root, 'openclaw.json'),
   OPENCLAW_WORKSPACE_DIR: path.join(root, 'workspace'), PATH: manifest.path};
@@ -19,7 +19,7 @@ const child = spawn(manifest.node, [manifest.cli_entry, 'gateway', 'run', '--por
   {cwd: root, env: environment, detached: true, windowsHide: true, stdio: ['ignore', log, log]});
 child.once('error', () => { fs.unlinkSync(pidFile); process.stderr.write('User gateway could not start.\n'); process.exitCode = 1; });
 child.once('spawn', () => {
-  fs.writeFileSync(pidFile, JSON.stringify({pid: child.pid, cli_entry: manifest.cli_entry}), {mode: 0o600});
+  fs.writeFileSync(pidFile, JSON.stringify({pid: child.pid, startedAt: Date.now(), cli_entry: manifest.cli_entry}), {mode: 0o600});
   child.unref();
 });
 fs.closeSync(log);

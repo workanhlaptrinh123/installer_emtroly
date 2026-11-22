@@ -58,8 +58,24 @@ function New-PrivateDirectory([string]$Path) {
 }
 
 function Get-VerifiedDownload([string]$Url, [string]$Path, [string]$Hash) {
-  try { Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Path -TimeoutSec 900 } catch { throw 'editor-download-failed' }
-  if ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ine $Hash) { throw 'editor-download-checksum' }
+  $maxAttempts = if ($env:EMTROLY_DOWNLOAD_RETRIES -match '^[1-5]$') { [int]$env:EMTROLY_DOWNLOAD_RETRIES } else { 3 }
+  $downloaded = $false
+  for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    try {
+      if (Test-Path -LiteralPath $Path -PathType Leaf) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
+      Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Path -TimeoutSec 900
+      $downloaded = $true
+      break
+    } catch {
+      if (Test-Path -LiteralPath $Path -PathType Leaf) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
+      if ($attempt -lt $maxAttempts) { Start-Sleep -Milliseconds (400 * $attempt) }
+    }
+  }
+  if (-not $downloaded) { throw 'editor-download-failed' }
+  if ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ine $Hash) {
+    Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    throw 'editor-download-checksum'
+  }
 }
 
 function Invoke-HiddenProcess([string]$Executable, [string]$Arguments, [int]$TimeoutSeconds) {
@@ -444,7 +460,7 @@ requires_openai_auth = true
   Write-EditorStatus 'Đang cài Codex Extension vào thư mục riêng...'
   $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
   $extLog = Join-Path $downloadDir 'ext-install.log'
-  $cliArgs = '/d /v:off /s /c "' + (Quote-Cmd $editorCli) + ' --user-data-dir ' + (Quote-Cmd $userData) + ' --extensions-dir ' + (Quote-Cmd $extensions) + ' --install-extension ' + (Quote-Cmd $vsix) + ' --force --do-not-include-pack-dependencies > ' + (Quote-Cmd $extLog) + ' 2>&1"'
+  $cliArgs = '/d /v:off /s /c "chcp 65001 >nul && ' + (Quote-Cmd $editorCli) + ' --user-data-dir ' + (Quote-Cmd $userData) + ' --extensions-dir ' + (Quote-Cmd $extensions) + ' --install-extension ' + (Quote-Cmd $vsix) + ' --force --do-not-include-pack-dependencies > ' + (Quote-Cmd $extLog) + ' 2>&1"'
   $extInstalledOk = $false
   for ($extAttempt = 1; $extAttempt -le 3; $extAttempt++) {
     if ((Invoke-HiddenProcess $cmd $cliArgs 900) -eq 0) {
@@ -510,8 +526,18 @@ Set shell = Nothing
   $shortcut.IconLocation = $editor + ',0'
   $shortcut.Description = 'Em Trợ Lý - Antigravity IDE và Codex riêng'
   $shortcut.Save()
-  if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }
-  [IO.File]::Move($temporaryShortcut, $shortcutPath)
+  $shortcutMoved = $false
+  for ($scTry = 1; $scTry -le 3; $scTry++) {
+    try {
+      if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }
+      [IO.File]::Move($temporaryShortcut, $shortcutPath)
+      $shortcutMoved = $true
+      break
+    } catch {
+      if ($scTry -lt 3) { Start-Sleep -Milliseconds (400 * $scTry) }
+    }
+  }
+  if (-not $shortcutMoved) { throw 'editor-shortcut-failed' }
   $saved = $shell.CreateShortcut($shortcutPath)
   if ($saved.TargetPath -ine (Join-Path $env:SystemRoot 'System32\wscript.exe') -or
       $saved.Arguments -cne ('//B //Nologo ' + (Quote-Cmd $launchPath)) -or

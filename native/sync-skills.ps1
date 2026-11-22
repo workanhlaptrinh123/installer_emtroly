@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$OpenClawRoot, [string]$BundleDir = "$PSScriptRoot\skills")
 $ErrorActionPreference = 'Stop'
 $destination = Join-Path $OpenClawRoot 'workspace\skills'

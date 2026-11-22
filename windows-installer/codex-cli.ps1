@@ -253,6 +253,7 @@ function Register-EmTroLyCodexCli {
 
   $shimLines = @(
     '@echo off',
+    '"%SystemRoot%\System32\chcp.com" 65001 >nul',
     'setlocal',
     'set "OPENAI_API_KEY="',
     'set "ELECTRON_RUN_AS_NODE="',
@@ -333,7 +334,7 @@ shell.Run command, 0, False
 Set shell = Nothing
 "@
         [IO.File]::WriteAllText($uiVbs, $codexVbsBody, [System.Text.Encoding]::Unicode)
-        $uiBody = "@echo off`r`n`"%SystemRoot%\System32\wscript.exe`" //B //Nologo `"$uiVbs`"`r`n"
+        $uiBody = "@echo off`r`n`"%SystemRoot%\System32\chcp.com`" 65001 >nul`r`n`"%SystemRoot%\System32\wscript.exe`" //B //Nologo `"$uiVbs`"`r`n"
         [IO.File]::WriteAllText($uiLauncher, $uiBody, $shimEnc)
       }
     } catch { }

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$ExistingRoot, [string]$OpenClawVersion = '2026.11.4', [switch]$DryRun)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'windows-instance.ps1')

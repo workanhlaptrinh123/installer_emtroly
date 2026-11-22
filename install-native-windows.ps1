@@ -72,7 +72,12 @@ $env:OPENCLAW_ROOT = $root
 $env:OPENCLAW_CONFIG_PATH = $configPath
 $env:OPENCLAW_WORKSPACE_DIR = $workspace
 foreach ($selector in @('OPENCLAW_GATEWAY_TOKEN','OPENCLAW_GATEWAY_PASSWORD','OPENCLAW_GATEWAY_PORT','OPENCLAW_SYSTEMD_UNIT','OPENCLAW_LAUNCHD_LABEL','OPENCLAW_WINDOWS_TASK_NAME','OPENCLAW_SERVICE_KIND','OPENCLAW_SERVICE_MARKER')) { Remove-Item "Env:$selector" -ErrorAction SilentlyContinue }
-$occupied = @(Get-NetTCPConnection -State Listen -ErrorAction Stop | Select-Object -ExpandProperty LocalPort)
+$occupied = @()
+try {
+  $occupied = @(Get-NetTCPConnection -State Listen -ErrorAction Stop | Select-Object -ExpandProperty LocalPort)
+} catch {
+  $occupied = @([System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() | Select-Object -ExpandProperty Port)
+}
 if ($GatewayPort -ne 0 -and ($GatewayPort -lt 1024 -or $GatewayPort -gt 65000)) { throw 'GatewayPort must be between 1024 and 65000.' }
 $automaticPort = $GatewayPort -eq 0
 if ($automaticPort) { $GatewayPort = 19789 }

@@ -1,4 +1,4 @@
-function Install-UserGateway {
+﻿function Install-UserGateway {
   param([string]$Root, [string]$CliEntry, [int]$Port)
   $manifestPath = Join-Path $Root 'installer-instance.json'
   $manifest = Get-Content -LiteralPath $manifestPath -Encoding UTF8 -Raw | ConvertFrom-Json
@@ -25,7 +25,29 @@ exit $LASTEXITCODE
   $startupFile = Join-Path $startup ("OpenClaw-$($manifest.profile).vbs")
   $command = '"' + (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') + '" -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + (Join-Path $Root 'openclaw-instance.ps1') + '" gateway start'
   $body = 'CreateObject("WScript.Shell").Run "' + $command.Replace('"','""') + '", 0, False'
-  [IO.File]::WriteAllText($startupFile, $body, [Text.UTF8Encoding]::new($false))
+  [IO.File]::WriteAllText($startupFile, $body, [Text.Encoding]::Unicode)
+}
+
+function Test-StaleGatewayPidRecord {
+  param(
+    [Parameter(Mandatory=$true)][string]$PidPath,
+    [psobject]$Record = $null,
+    [int]$StaleSeconds = 60
+  )
+  if ($env:EMTROLY_STALE_PID_SECONDS -match '^[1-9][0-9]*$') {
+    $StaleSeconds = [int]$env:EMTROLY_STALE_PID_SECONDS
+  }
+  $ageSec = 0.0
+  try {
+    $ageSec = ([DateTime]::UtcNow - (Get-Item -LiteralPath $PidPath).LastWriteTimeUtc).TotalSeconds
+  } catch { }
+  if ($Record -and $Record.PSObject.Properties['startedAt'] -and $Record.startedAt) {
+    try {
+      $startedUtc = [DateTimeOffset]::FromUnixTimeMilliseconds([long]$Record.startedAt).UtcDateTime
+      $ageSec = [Math]::Max($ageSec, ([DateTime]::UtcNow - $startedUtc).TotalSeconds)
+    } catch { }
+  }
+  return ($ageSec -ge $StaleSeconds)
 }
 
 function Invoke-InstanceCli {
@@ -45,11 +67,45 @@ function Invoke-InstanceCli {
   $pidPath = Join-Path $Root 'user-gateway.pid.json'
   $target = $null
   if (Test-Path $pidPath) {
-    $record = Get-Content -LiteralPath $pidPath -Raw | ConvertFrom-Json
-    if (-not $record.pid) { throw 'Gateway startup is still in progress. Wait before retrying.' }
-    $target = Get-CimInstance Win32_Process -Filter "ProcessId = $($record.pid)" -ErrorAction Stop
-    if ($target -and ($target.CommandLine -notlike "*$CliEntry*" -or $target.CommandLine -notmatch '\bgateway\s+run\b')) { throw 'Saved PID belongs to another process. Nothing was stopped.' }
-    if (-not $target) { Remove-Item -LiteralPath $pidPath }
+    $record = $null
+    try {
+      $record = Get-Content -LiteralPath $pidPath -Raw | ConvertFrom-Json
+    } catch {
+      if (Test-StaleGatewayPidRecord -PidPath $pidPath) {
+        Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue
+      } else {
+        throw 'Gateway PID file is corrupted or being written.'
+      }
+    }
+    if ($record) {
+      if (-not $record.pid) {
+        $launcherRunning = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue | Where-Object {
+          $_.CommandLine -like '*user-gateway.cjs*' -and $_.CommandLine -like "*$Root*"
+        }).Count -gt 0
+        if (-not $launcherRunning -and (Test-StaleGatewayPidRecord -PidPath $pidPath -Record $record)) {
+          Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue
+        } else {
+          throw 'Gateway startup is still in progress. Wait before retrying.'
+        }
+      } else {
+        $target = Get-CimInstance Win32_Process -Filter "ProcessId = $($record.pid)" -ErrorAction Stop
+        if ($target -and ($target.CommandLine -notlike "*$CliEntry*" -or $target.CommandLine -notmatch '\bgateway\s+run\b')) {
+          $staleFromPreBoot = $false
+          try {
+            $osBootUtc = (Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime.ToUniversalTime()
+            $pidWriteUtc = (Get-Item -LiteralPath $pidPath).LastWriteTimeUtc
+            if ($pidWriteUtc -lt $osBootUtc) { $staleFromPreBoot = $true }
+          } catch { }
+          if ($staleFromPreBoot -and $action -eq 'start') {
+            Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue
+            $target = $null
+          } else {
+            throw 'Saved PID belongs to another process. Nothing was stopped.'
+          }
+        }
+        if (-not $target -and (Test-Path -LiteralPath $pidPath)) { Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue }
+      }
+    }
   }
   if ($action -in @('stop','restart') -and $target) {
     Stop-Process -Id $record.pid -ErrorAction Stop

@@ -381,6 +381,15 @@ function Export-EmTroLySupportReport {
       if ($savedLicKey) { $secrets += $savedLicKey }
     } catch { }
   }
+  if (Get-Command Get-EmTroLySavedSetupDraft -ErrorAction SilentlyContinue) {
+    try {
+      $savedDraft = Get-EmTroLySavedSetupDraft
+      if ($savedDraft) {
+        if ($savedDraft.telegram_token) { $secrets += [string]$savedDraft.telegram_token }
+        if ($savedDraft.ai_api_key) { $secrets += [string]$savedDraft.ai_api_key }
+      }
+    } catch { }
+  }
 
   $sb = New-Object System.Text.StringBuilder
   [void]$sb.AppendLine('============================================================')
@@ -518,15 +527,22 @@ Set shell = Nothing
         $targets += (Join-Path $startMenuDir 'Em Tro Ly - Anh Lap Trinh.lnk')
       }
       foreach ($lnkPath in $targets) {
-        $sc = $wsh.CreateShortcut($lnkPath)
-        $sc.TargetPath = $wscriptExe
-        $sc.Arguments = '//B //Nologo "' + $vbsPath + '"'
-        $sc.WorkingDirectory = $emUiDir
-        $sc.Description = 'Anh Lap Trinh - Em Tro Ly (Quan ly, Cau hinh & Codex CLI)'
-        if (Test-Path -LiteralPath $icoDst -PathType Leaf) {
-          $sc.IconLocation = "$icoDst,0"
+        for ($scTry = 1; $scTry -le 3; $scTry++) {
+          try {
+            $sc = $wsh.CreateShortcut($lnkPath)
+            $sc.TargetPath = $wscriptExe
+            $sc.Arguments = '//B //Nologo "' + $vbsPath + '"'
+            $sc.WorkingDirectory = $emUiDir
+            $sc.Description = 'Anh Lap Trinh - Em Tro Ly (Quan ly, Cau hinh & Codex CLI)'
+            if (Test-Path -LiteralPath $icoDst -PathType Leaf) {
+              $sc.IconLocation = "$icoDst,0"
+            }
+            $sc.Save()
+            break
+          } catch {
+            if ($scTry -lt 3) { Start-Sleep -Milliseconds (400 * $scTry) }
+          }
         }
-        $sc.Save()
       }
       $createdPath = $targets[0]
     } catch { }
@@ -553,6 +569,91 @@ function Get-EmTroLyMachineBindingId {
 function Get-EmTroLyActivationFilePath {
   if (-not $env:LOCALAPPDATA) { return '' }
   return (Join-Path $env:LOCALAPPDATA 'AnhLapTrinh\EmTroLy\activation.dat')
+}
+
+function Get-EmTroLySetupDraftFilePath {
+  if (-not $env:LOCALAPPDATA) { return '' }
+  return (Join-Path $env:LOCALAPPDATA 'AnhLapTrinh\EmTroLy\setup-draft.dat')
+}
+
+function Save-EmTroLySetupDraft {
+  param([Parameter(Mandatory=$true)]$Draft)
+  $draftFile = Get-EmTroLySetupDraftFilePath
+  if ([string]::IsNullOrWhiteSpace($draftFile)) { return $false }
+  try {
+    Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
+    $machineId = Get-EmTroLyMachineBindingId
+    $payload = [ordered]@{
+      machine            = $machineId
+      savedAt            = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+      telegram_token     = ([string](Get-SafeProp $Draft 'telegram_token')).Trim()
+      ai_api_key         = ([string](Get-SafeProp $Draft 'ai_api_key')).Trim()
+      owner_ids          = ([string](Get-SafeProp $Draft 'owner_ids')).Trim()
+      group_id           = ([string](Get-SafeProp $Draft 'group_id')).Trim()
+      model              = ([string](Get-SafeProp $Draft 'model')).Trim()
+      assistant_name     = ([string](Get-SafeProp $Draft 'assistant_name')).Trim()
+      base_url           = ([string](Get-SafeProp $Draft 'base_url')).Trim().TrimEnd('/')
+      gateway_port       = ([string](Get-SafeProp $Draft 'gateway_port')).Trim()
+      qr_owner_id        = ([string](Get-SafeProp $Draft 'qr_owner_id')).Trim()
+      audience           = ([string](Get-SafeProp $Draft 'audience')).Trim()
+      addressing         = ([string](Get-SafeProp $Draft 'addressing')).Trim()
+      style              = ([string](Get-SafeProp $Draft 'style')).Trim()
+      configure_zalo     = [bool](Get-SafeProp $Draft 'configure_zalo')
+      skip_editor        = [bool](Get-SafeProp $Draft 'skip_editor')
+      accept_full_access = [bool](Get-SafeProp $Draft 'accept_full_access')
+    }
+    $plainJson = $payload | ConvertTo-Json -Depth 4 -Compress
+    $plainBytes = [System.Text.Encoding]::UTF8.GetBytes($plainJson)
+    $entropyBytes = [System.Text.Encoding]::UTF8.GetBytes("EmTroLy-SetupDraft-v1|$machineId")
+    $cipherBytes = [System.Security.Cryptography.ProtectedData]::Protect(
+      $plainBytes,
+      $entropyBytes,
+      [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+    )
+    $encoded = [Convert]::ToBase64String($cipherBytes)
+    $draftDir = Split-Path -Parent $draftFile
+    [void][IO.Directory]::CreateDirectory($draftDir)
+    $tmpFile = "$draftFile.tmp"
+    [IO.File]::WriteAllText($tmpFile, "$encoded`n", [System.Text.Encoding]::ASCII)
+    Set-EmTroLyPrivateFileAcl $tmpFile
+    Move-Item -LiteralPath $tmpFile -Destination $draftFile -Force
+    Set-EmTroLyPrivateFileAcl $draftFile
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Get-EmTroLySavedSetupDraft {
+  $draftFile = Get-EmTroLySetupDraftFilePath
+  if ([string]::IsNullOrWhiteSpace($draftFile) -or -not (Test-Path -LiteralPath $draftFile -PathType Leaf)) {
+    return $null
+  }
+  try {
+    Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
+    $machineId = Get-EmTroLyMachineBindingId
+    $rawCipher = ([IO.File]::ReadAllText($draftFile, [System.Text.Encoding]::ASCII)).Trim()
+    if ([string]::IsNullOrWhiteSpace($rawCipher)) { return $null }
+    $cipherBytes = [Convert]::FromBase64String($rawCipher)
+    $entropyBytes = [System.Text.Encoding]::UTF8.GetBytes("EmTroLy-SetupDraft-v1|$machineId")
+    $plainBytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
+      $cipherBytes,
+      $entropyBytes,
+      [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+    )
+    $obj = [System.Text.Encoding]::UTF8.GetString($plainBytes) | ConvertFrom-Json
+    if ($obj -and ([string]$obj.machine -ceq $machineId)) {
+      return $obj
+    }
+  } catch { }
+  return $null
+}
+
+function Clear-EmTroLySavedSetupDraft {
+  $draftFile = Get-EmTroLySetupDraftFilePath
+  if ($draftFile -and (Test-Path -LiteralPath $draftFile -PathType Leaf)) {
+    Remove-Item -LiteralPath $draftFile -Force -ErrorAction SilentlyContinue
+  }
 }
 
 function Protect-EmTroLyMachineActivationPayload([string]$ApiKey) {
@@ -665,6 +766,7 @@ function Save-EmTroLyLicenseKey {
   $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
   if ($env:LOCALAPPDATA) {
+    $sealedSaved = $false
     $actFile = Get-EmTroLyActivationFilePath
     if ($actFile) {
       try {
@@ -673,14 +775,22 @@ function Save-EmTroLyLicenseKey {
         $sealed = Protect-EmTroLyMachineActivationPayload -ApiKey $cleanKey
         [IO.File]::WriteAllText($actFile, "$sealed`n", [System.Text.Encoding]::ASCII)
         Set-EmTroLyPrivateFileAcl $actFile
+        $sealedSaved = $true
       } catch { }
     }
 
     $uiDir = Join-Path $env:LOCALAPPDATA 'EmTroLyUI'
-    [void][IO.Directory]::CreateDirectory($uiDir)
     $licFile = Join-Path $uiDir 'license.key'
-    [IO.File]::WriteAllText($licFile, "$cleanKey`n", $utf8NoBom)
-    Set-EmTroLyPrivateFileAcl $licFile
+    if ($sealedSaved) {
+      # DPAPI machine-bound activation succeeded: remove legacy plaintext license.key to avoid plain key on disk
+      if (Test-Path -LiteralPath $licFile -PathType Leaf) {
+        Remove-Item -LiteralPath $licFile -Force -ErrorAction SilentlyContinue
+      }
+    } else {
+      [void][IO.Directory]::CreateDirectory($uiDir)
+      [IO.File]::WriteAllText($licFile, "$cleanKey`n", $utf8NoBom)
+      Set-EmTroLyPrivateFileAcl $licFile
+    }
 
     $authFile = Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex\auth.json'
     if (Test-Path -LiteralPath $authFile -PathType Leaf) {

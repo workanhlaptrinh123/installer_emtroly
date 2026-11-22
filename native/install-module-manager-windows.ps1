@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([string]$OpenClawRoot = (Join-Path $env:USERPROFILE '.openclaw'))
 $ErrorActionPreference = 'Stop'
 $base = Split-Path -Parent $PSScriptRoot

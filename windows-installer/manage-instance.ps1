@@ -828,15 +828,36 @@ try {
       if ($lastManageTechDetail) { $techCombined += $lastManageTechDetail }
       if ($posTrace) { $techCombined += ('Vị trí: ' + $posTrace) }
       if ($techCombined.Count -eq 0) { $techCombined += ("Mã chẩn đoán: $errCode") }
+      $secretsToScrub = @()
+      if ($req) {
+        if ($req.PSObject.Properties['telegram_token'] -and $req.telegram_token) { $secretsToScrub += [string]$req.telegram_token }
+        if ($req.PSObject.Properties['ai_api_key'] -and $req.ai_api_key) { $secretsToScrub += [string]$req.ai_api_key }
+      }
+      foreach ($sf in @((Join-Path $root 'telegram.token'), (Join-Path $root 'member-provider.secret'))) {
+        if (Test-Path -LiteralPath $sf -PathType Leaf) {
+          try { $sv = ([IO.File]::ReadAllText($sf, [System.Text.Encoding]::UTF8)).Trim(); if ($sv) { $secretsToScrub += $sv } } catch { }
+        }
+      }
+      if (Get-Command Get-EmTroLySavedLicenseKey -ErrorAction SilentlyContinue) {
+        try { $sl = Get-EmTroLySavedLicenseKey; if ($sl) { $secretsToScrub += $sl } } catch { }
+      }
+      $rawTech = ($techCombined -join "`r`n")
+      $safeFriendly = if (Get-Command Remove-SensitiveStrings -ErrorAction SilentlyContinue) {
+        Remove-SensitiveStrings -Text $friendly -Secrets $secretsToScrub
+      } else { $friendly }
+      $safeTech = if (Get-Command Remove-SensitiveStrings -ErrorAction SilentlyContinue) {
+        Remove-SensitiveStrings -Text $rawTech -Secrets $secretsToScrub
+      } else { $rawTech }
       $diagManage = [ordered]@{
         timestamp       = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
         stage           = $action
         code            = $errCode
-        friendlyMessage = $friendly
+        friendlyMessage = $safeFriendly
         autoHealSummary = ''
-        technicalDetail = ($techCombined -join "`r`n")
+        technicalDetail = $safeTech
       }
       [IO.File]::WriteAllText("$StatusPath.diag.json", ($diagManage | ConvertTo-Json -Depth 5), $utf8NoBom)
+      $friendly = $safeFriendly
     } catch { }
     Write-ManageStatus $StatusPath $friendly
     exit 1

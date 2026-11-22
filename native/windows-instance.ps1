@@ -1,4 +1,4 @@
-function Normalize-OpenClawTaskPath {
+﻿function Normalize-OpenClawTaskPath {
   param([string]$Path)
   $normalized = [Environment]::ExpandEnvironmentVariables($Path.Trim().Trim('"').Trim("'")).Replace('/','\')
   $prefix = if ($normalized.StartsWith('\\')) { '\\' } else { '' }

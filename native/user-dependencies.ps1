@@ -1,4 +1,4 @@
-function Test-SupportedNodeToolchain {
+﻿function Test-SupportedNodeToolchain {
   $nodeCommand = Get-Command node.exe -ErrorAction SilentlyContinue
   $npmCommand = Get-Command npm.cmd -ErrorAction SilentlyContinue
   if (-not $nodeCommand -or -not $npmCommand) { return $false }
@@ -27,29 +27,115 @@ function Test-PythonCandidate {
   }
 }
 
+function Write-DependencyInstallStatus {
+  param([string]$Text)
+  if ($env:MEMBER_INSTALL_STATUS_FILE -and -not [string]::IsNullOrWhiteSpace($Text)) {
+    try {
+      [IO.File]::WriteAllText($env:MEMBER_INSTALL_STATUS_FILE, $Text, (New-Object System.Text.UTF8Encoding($false)))
+    } catch { }
+  }
+}
+
 function Invoke-FastDependencyDownload {
   param(
     [Parameter(Mandatory=$true)][string]$Uri,
     [Parameter(Mandatory=$true)][string]$OutFile,
-    [int]$TimeoutSec = 300
+    [int]$TimeoutSec = 300,
+    [int]$MaxAttempts = 3,
+    [string[]]$FallbackUris = @(),
+    [string]$DisplayName = ''
   )
+  if ($env:EMTROLY_DOWNLOAD_RETRIES -match '^[1-5]$') { $MaxAttempts = [int]$env:EMTROLY_DOWNLOAD_RETRIES }
   $iwr = Get-Command Invoke-WebRequest -ErrorAction SilentlyContinue
   if ($iwr -and $iwr.CommandType -eq 'Function') {
-    Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $OutFile -TimeoutSec $TimeoutSec -ErrorAction Stop
-    return
-  }
-  $client = New-Object System.Net.WebClient
-  try {
-    $client.Headers.Add('User-Agent', 'AnhLapTrinh-EmTroLy-Installer/1.0')
-    $task = $client.DownloadFileTaskAsync([uri]$Uri, $OutFile)
-    if (-not $task.Wait($TimeoutSec * 1000)) {
-      $client.CancelAsync()
-      throw 'Download timed out.'
+    $lastErr = $null
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+      try {
+        Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $OutFile -TimeoutSec $TimeoutSec -ErrorAction Stop
+        return
+      } catch {
+        $lastErr = $_
+        if ($attempt -lt $MaxAttempts) { Start-Sleep -Milliseconds (300 * $attempt) }
+      }
     }
-    if ($task.IsFaulted) { throw $task.Exception.InnerException }
-  } finally {
-    $client.Dispose()
+    throw $lastErr
   }
+
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  [Net.ServicePointManager]::DefaultConnectionLimit = 16
+  [Net.ServicePointManager]::Expect100Continue = $false
+
+  $candidates = @($Uri) + @($FallbackUris | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and $_ -cne $Uri })
+  $partFile = "$OutFile.part"
+  $lastErr = $null
+  $totalTries = [Math]::Max($MaxAttempts, $candidates.Count)
+
+  for ($attempt = 1; $attempt -le $totalTries; $attempt++) {
+    $targetUri = $candidates[($attempt - 1) % $candidates.Count]
+    $resp = $null
+    $inStream = $null
+    $outStream = $null
+    try {
+      if (Test-Path -LiteralPath $partFile -PathType Leaf) { Remove-Item -LiteralPath $partFile -Force -ErrorAction SilentlyContinue }
+      if ($DisplayName) {
+        Write-DependencyInstallStatus "Đang kết nối tải $DisplayName..."
+      }
+      $req = [System.Net.HttpWebRequest]::Create([uri]$targetUri)
+      $req.UserAgent = 'AnhLapTrinh-EmTroLy-Installer/1.0'
+      $req.AllowAutoRedirect = $true
+      $req.MaximumAutomaticRedirections = 10
+      $req.Timeout = 30000
+      $req.ReadWriteTimeout = 45000
+
+      $resp = $req.GetResponse()
+      $totalBytes = [long]$resp.ContentLength
+      $inStream = $resp.GetResponseStream()
+      $outStream = New-Object System.IO.FileStream($partFile, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read, 262144)
+      $buffer = New-Object byte[] 262144
+      $readTotal = 0L
+      $dlSw = [Diagnostics.Stopwatch]::StartNew()
+      $lastUiMs = -1000L
+
+      while (($readNow = $inStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+        $outStream.Write($buffer, 0, $readNow)
+        $readTotal += $readNow
+        if ($dlSw.Elapsed.TotalSeconds -gt $TimeoutSec) {
+          throw 'Download timed out.'
+        }
+        if ($DisplayName -and ($dlSw.ElapsedMilliseconds - $lastUiMs) -ge 550) {
+          $lastUiMs = $dlSw.ElapsedMilliseconds
+          $mbDone = [Math]::Round($readTotal / 1MB, 1)
+          $speedMbps = [Math]::Round(($readTotal / 1MB) / [Math]::Max(0.2, $dlSw.Elapsed.TotalSeconds), 1)
+          if ($totalBytes -gt 0) {
+            $mbTotal = [Math]::Round($totalBytes / 1MB, 1)
+            $pct = [Math]::Min(99, [int][Math]::Floor(($readTotal * 100.0) / $totalBytes))
+            Write-DependencyInstallStatus ("Đang tải $DisplayName... $pct% ($mbDone / $mbTotal MB · $speedMbps MB/s)")
+          } else {
+            Write-DependencyInstallStatus ("Đang tải $DisplayName... ($mbDone MB · $speedMbps MB/s)")
+          }
+        }
+      }
+
+      $outStream.Flush()
+      $outStream.Close(); $outStream = $null
+      $inStream.Close(); $inStream = $null
+      $resp.Close(); $resp = $null
+
+      if ($totalBytes -gt 0 -and $readTotal -ne $totalBytes) {
+        throw "Incomplete download ($readTotal of $totalBytes bytes)."
+      }
+      Move-Item -LiteralPath $partFile -Destination $OutFile -Force
+      return
+    } catch {
+      $lastErr = $_
+      if ($outStream) { try { $outStream.Close() } catch { } }
+      if ($inStream) { try { $inStream.Close() } catch { } }
+      if ($resp) { try { $resp.Close() } catch { } }
+      if (Test-Path -LiteralPath $partFile -PathType Leaf) { Remove-Item -LiteralPath $partFile -Force -ErrorAction SilentlyContinue }
+      if ($attempt -lt $totalTries) { Start-Sleep -Milliseconds (500 * $attempt) }
+    }
+  }
+  throw $lastErr
 }
 
 function Expand-FastDependencyZip {
@@ -129,31 +215,73 @@ function Initialize-UserDependencies {
   $nodeArchive = Join-Path $dependencies $archiveName
   $pythonInstaller = Join-Path $dependencies 'python-3.13.16-amd64.exe'
   $ffmpegArchive = Join-Path $dependencies 'ffmpeg-9.0.2-essentials_build.zip'
+  $ffmpegFastCdnUri = 'https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.zip'
+  $ffmpegFallbackUri = 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip'
   $parallelDownloads = @{}
   if (-not $isMockedWeb) {
+    [Net.ServicePointManager]::DefaultConnectionLimit = 16
+    [Net.ServicePointManager]::Expect100Continue = $false
     $jobs = @()
     if ($needNodeDownload) {
-      $jobs += @{ Key = 'node'; Uri = "https://nodejs.org/dist/v24.21.0/$archiveName"; Out = $nodeArchive; Timeout = 300 }
+      $jobs += @{ Key = 'node'; Label = 'Node.js'; Uri = "https://nodejs.org/dist/v24.21.0/$archiveName"; Out = $nodeArchive; ApproxBytes = 31500000L }
     }
     if ($needPythonDownload) {
-      $jobs += @{ Key = 'python'; Uri = 'https://www.python.org/ftp/python/3.13.16/python-3.13.16-amd64.exe'; Out = $pythonInstaller; Timeout = 300 }
+      $jobs += @{ Key = 'python'; Label = 'Python 3.13'; Uri = 'https://www.python.org/ftp/python/3.13.16/python-3.13.16-amd64.exe'; Out = $pythonInstaller; ApproxBytes = 27500000L }
     }
     if ($needFfmpegDownload) {
-      $jobs += @{ Key = 'ffmpeg'; Uri = 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip'; Out = $ffmpegArchive; Timeout = 900 }
+      $jobs += @{ Key = 'ffmpeg'; Label = 'FFmpeg'; Uri = $ffmpegFastCdnUri; Out = $ffmpegArchive; ApproxBytes = 114768076L }
     }
     if ($jobs.Count -ge 2) {
       $active = @()
+      $progressMap = [hashtable]::Synchronized(@{})
       foreach ($job in $jobs) {
+        $partOut = "$($job.Out).part"
+        if (Test-Path -LiteralPath $partOut -PathType Leaf) { Remove-Item -LiteralPath $partOut -Force -ErrorAction SilentlyContinue }
+        $progressMap[$job.Key] = @{ Received = 0L; Total = [long]$job.ApproxBytes }
         $wc = New-Object System.Net.WebClient
         $wc.Headers.Add('User-Agent', 'AnhLapTrinh-EmTroLy-Installer/1.0')
-        $t = $wc.DownloadFileTaskAsync([uri]$job.Uri, $job.Out)
-        $active += [pscustomobject]@{ Key = $job.Key; Client = $wc; Task = $t; Out = $job.Out }
+        $jobKeyLocal = $job.Key
+        $mapRef = $progressMap
+        $wc.add_DownloadProgressChanged(({
+          param($s, $e)
+          $entry = $mapRef[$jobKeyLocal]
+          if ($entry) {
+            $entry.Received = [long]$e.BytesReceived
+            if ($e.TotalBytesToReceive -gt 0) { $entry.Total = [long]$e.TotalBytesToReceive }
+          }
+        }).GetNewClosure())
+        $t = $wc.DownloadFileTaskAsync([uri]$job.Uri, $partOut)
+        $active += [pscustomobject]@{ Key = $job.Key; Label = $job.Label; Client = $wc; Task = $t; PartOut = $partOut; Out = $job.Out }
       }
-      try {
-        [void][System.Threading.Tasks.Task]::WaitAll(@($active | ForEach-Object { $_.Task }), 900000)
-      } catch { }
+      $labelsJoined = (@($jobs | ForEach-Object { $_.Label }) -join ', ')
+      $parSw = [Diagnostics.Stopwatch]::StartNew()
+      while (@($active | Where-Object { -not $_.Task.IsCompleted }).Count -gt 0 -and $parSw.Elapsed.TotalSeconds -lt 900) {
+        Start-Sleep -Milliseconds 550
+        $sumRecv = 0L
+        $sumTotal = 0L
+        foreach ($k in @($progressMap.Keys)) {
+          $sumRecv += [long]$progressMap[$k].Received
+          $sumTotal += [long]$progressMap[$k].Total
+        }
+        if ($sumTotal -gt 0 -and $sumRecv -gt 0) {
+          $pctAll = [Math]::Min(99, [int][Math]::Floor(($sumRecv * 100.0) / $sumTotal))
+          $mbRecv = [Math]::Round($sumRecv / 1MB, 1)
+          $mbAll = [Math]::Round($sumTotal / 1MB, 1)
+          $spdAll = [Math]::Round(($sumRecv / 1MB) / [Math]::Max(0.2, $parSw.Elapsed.TotalSeconds), 1)
+          Write-DependencyInstallStatus ("Đang tải song song ($labelsJoined)... $pctAll% ($mbRecv / $mbAll MB · $spdAll MB/s)")
+        }
+      }
       foreach ($item in $active) {
-        $ok = ($item.Task.IsCompleted -and -not $item.Task.IsFaulted -and -not $item.Task.IsCanceled -and (Test-Path -LiteralPath $item.Out -PathType Leaf))
+        if (-not $item.Task.IsCompleted) { try { $item.Client.CancelAsync() } catch { } }
+        $ok = ($item.Task.IsCompleted -and -not $item.Task.IsFaulted -and -not $item.Task.IsCanceled -and (Test-Path -LiteralPath $item.PartOut -PathType Leaf))
+        if ($ok) {
+          try {
+            Move-Item -LiteralPath $item.PartOut -Destination $item.Out -Force
+          } catch { $ok = $false }
+        }
+        if (-not $ok -and (Test-Path -LiteralPath $item.PartOut -PathType Leaf)) {
+          Remove-Item -LiteralPath $item.PartOut -Force -ErrorAction SilentlyContinue
+        }
         $parallelDownloads[$item.Key] = $ok
         try { $item.Client.Dispose() } catch { }
       }
@@ -166,10 +294,11 @@ function Initialize-UserDependencies {
       $checksumUri = 'https://nodejs.org/dist/v24.21.0/SHASUMS256.txt'
       try {
         if (-not $parallelDownloads['node']) {
-          Invoke-FastDependencyDownload -Uri $archiveUri -OutFile $nodeArchive -TimeoutSec 300
+          Invoke-FastDependencyDownload -Uri $archiveUri -OutFile $nodeArchive -TimeoutSec 300 -DisplayName 'Node.js 24'
         }
         $sums = (Invoke-WebRequest -UseBasicParsing -Uri $checksumUri -TimeoutSec 60 -ErrorAction Stop).Content
       } catch { throw 'Node.js download failed.' }
+      Write-DependencyInstallStatus 'Đang kiểm tra chữ ký SHA-256 và giải nén Node.js...'
       $expected = [regex]::Match($sums, "(?m)^([a-f0-9]{64})\s+$([regex]::Escape($archiveName))\r?$")
       if (-not $expected.Success -or (Get-FileHash $nodeArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected.Groups[1].Value) { throw 'Portable Node checksum verification failed.' }
       Expand-FastDependencyZip -LiteralPath $nodeArchive -DestinationPath $dependencies
@@ -182,9 +311,10 @@ function Initialize-UserDependencies {
   if ($needPythonDownload) {
     try {
       if (-not $parallelDownloads['python']) {
-        Invoke-FastDependencyDownload -Uri 'https://www.python.org/ftp/python/3.13.16/python-3.13.16-amd64.exe' -OutFile $pythonInstaller -TimeoutSec 300
+        Invoke-FastDependencyDownload -Uri 'https://www.python.org/ftp/python/3.13.16/python-3.13.16-amd64.exe' -OutFile $pythonInstaller -TimeoutSec 300 -DisplayName 'Python 3.13'
       }
     } catch { throw 'Python download failed.' }
+    Write-DependencyInstallStatus 'Đang xác thực chữ ký số và cài đặt Python 3.13...'
     $signature = Get-AuthenticodeSignature -FilePath $pythonInstaller
     if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notlike '*Python Software Foundation*') { throw 'Python installer signature verification failed.' }
     $pythonDirectory = Join-Path $dependencies 'python313'
@@ -201,9 +331,10 @@ function Initialize-UserDependencies {
       $expectedHash = '60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba'
       try {
         if (-not $parallelDownloads['ffmpeg']) {
-          Invoke-FastDependencyDownload -Uri 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip' -OutFile $ffmpegArchive -TimeoutSec 900
+          Invoke-FastDependencyDownload -Uri $ffmpegFastCdnUri -FallbackUris @($ffmpegFallbackUri) -OutFile $ffmpegArchive -TimeoutSec 900 -DisplayName 'FFmpeg'
         }
       } catch { throw 'FFmpeg download failed.' }
+      Write-DependencyInstallStatus 'Đang kiểm tra SHA-256 và giải nén FFmpeg...'
       if ((Get-FileHash $ffmpegArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) { throw 'FFmpeg checksum verification failed.' }
       Expand-FastDependencyZip -LiteralPath $ffmpegArchive -DestinationPath $dependencies
       Remove-Item -LiteralPath $ffmpegArchive -Force

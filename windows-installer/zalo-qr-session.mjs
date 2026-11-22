@@ -254,6 +254,9 @@ async function main() {
     if (!settled && child.pid) {
       try { child.kill("SIGTERM"); } catch {}
     }
+    if (!settled && wasRunning) {
+      runGatewayCall(cliEntry, childEnv, "channels.start", { channel: "zalouser", accountId: opts.accountId }, 10_000);
+    }
   };
   process.on("SIGTERM", () => { cleanupChild(); process.exit(2); });
   process.on("SIGINT", () => { cleanupChild(); process.exit(2); });

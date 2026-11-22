@@ -78,6 +78,7 @@ def main():
     import tkinter as tk
     from tkinter import filedialog, font as tkfont, messagebox, ttk
 
+    import license_gate
     import runner
 
     source = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
@@ -479,7 +480,25 @@ def main():
 
     notebook.bind("<<NotebookTabChanged>>", on_tab_changed)
 
+    def collect_form_values():
+        vals = {key: variable.get() for key, variable in variables.items()}
+        vals["accept_full_access"] = consent.get()
+        vals["configure_zalo"] = zalo_var.get()
+        return vals
+
+    def persist_unix_draft():
+        vals = collect_form_values()
+        if any(
+            vals.get(k, "").strip()
+            for k in ("telegram_token", "owner_ids", "group_id", "qr_owner_id", "audience", "addressing", "style")
+        ):
+            try:
+                license_gate.save_setup_draft(vals)
+            except OSError:
+                pass
+
     def close():
+        persist_unix_draft()
         if busy:
             if not messagebox.askyesno(
                 "Xác nhận dừng và thoát",
@@ -502,9 +521,11 @@ def main():
         nonlocal busy
         if busy:
             return
-        values = {key: variable.get() for key, variable in variables.items()}
-        values["accept_full_access"] = consent.get()
-        values["configure_zalo"] = zalo_var.get()
+        values = collect_form_values()
+        try:
+            license_gate.save_setup_draft(values)
+        except OSError:
+            pass
         busy = True
         button.state(["disabled"])
         exit_btn.configure(text="Dừng & Thoát")
@@ -551,9 +572,9 @@ def main():
                 busy = False
                 button.state(["!disabled"])
                 exit_btn.configure(text="Thoát")
-                variables["telegram_token"].set("")
-                variables["ai_api_key"].set("")
                 if kind == "success":
+                    variables["telegram_token"].set("")
+                    variables["ai_api_key"].set("")
                     command = value["cli"]["command"]
                     shell = value["cli"].get("shell_path", {})
                     if value["cli"]["path_present"]:
@@ -613,6 +634,81 @@ def main():
     exit_btn.pack(side="left", padx=(8, 0))
     button = ttk.Button(install_actions, text="Bắt đầu cài đặt", style="Primary.TButton", command=start)
     button.pack(side="right")
+
+    # Restore previously entered form parameters (encrypted per-machine draft)
+    saved_unix_draft = license_gate.get_saved_setup_draft()
+    if isinstance(saved_unix_draft, dict):
+        for key, variable in variables.items():
+            val = saved_unix_draft.get(key)
+            if isinstance(val, str) and val.strip():
+                variable.set(val.strip())
+        if "configure_zalo" in saved_unix_draft:
+            zalo_var.set(bool(saved_unix_draft["configure_zalo"]))
+        if "accept_full_access" in saved_unix_draft:
+            consent.set(bool(saved_unix_draft["accept_full_access"]))
+        status.set("✓ Đã tự động điền lại các thông số bạn đã nhập ở lần trước (lưu mã hóa an toàn trên máy).")
+
+    # One-time per-machine license activation gate (matches Windows codex.anhlaptrinh.vn lock)
+    saved_unix_key = license_gate.get_saved_license_key()
+    license_overlay = tk.Frame(window, bg="#F3F6FB")
+
+    def unlock_unix_app(verified_key: str, *, persist: bool = True):
+        clean_k = (verified_key or "").strip()
+        if clean_k:
+            if persist:
+                try:
+                    license_gate.save_license_key(clean_k)
+                except OSError:
+                    pass
+            if not variables["ai_api_key"].get().strip():
+                variables["ai_api_key"].set(clean_k)
+        license_overlay.place_forget()
+
+    if saved_unix_key:
+        unlock_unix_app(saved_unix_key, persist=False)
+    else:
+        license_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
+        card = tk.Frame(license_overlay, bg="#FFFFFF", bd=1, relief="solid", padx=28, pady=24)
+        card.place(relx=0.5, rely=0.5, anchor="center", width=460)
+        ttk.Label(card, text="Kích hoạt Em Trợ Lý", style="HeaderTitle.TLabel").pack(pady=(0, 6))
+        ttk.Label(
+            card,
+            text="Nhập Provider API Key trên codex.anhlaptrinh.vn — chỉ cần kích hoạt 1 lần duy nhất trên máy này.",
+            style="HeaderSub.TLabel",
+            wraplength=400,
+            justify="center",
+        ).pack(pady=(0, 14))
+        lic_var = tk.StringVar()
+        lic_entry = ttk.Entry(card, textvariable=lic_var, show="*")
+        lic_entry.pack(fill="x", pady=(0, 8))
+        lic_msg = tk.StringVar(value="")
+        ttk.Label(card, textvariable=lic_msg, foreground="#B91C1C", background="#FFFFFF", wraplength=400).pack(pady=(0, 10))
+        lic_btns = ttk.Frame(card, style="Card.TFrame")
+        lic_btns.pack(fill="x")
+
+        def do_activate():
+            key_val = lic_var.get().strip()
+            act_btn.state(["disabled"])
+            lic_msg.set("Đang xác thực bản quyền...")
+
+            def _check():
+                res = license_gate.verify_license_key(key_val)
+
+                def _finish():
+                    act_btn.state(["!disabled"])
+                    if res["valid"]:
+                        unlock_unix_app(key_val, persist=True)
+                    else:
+                        lic_msg.set(res["message"])
+
+                window.after(0, _finish)
+
+            threading.Thread(target=_check, daemon=True).start()
+
+        ttk.Button(lic_btns, text="Thoát", style="Secondary.TButton", command=window.destroy).pack(side="left")
+        act_btn = ttk.Button(lic_btns, text="Kích hoạt & Mở khóa", style="Primary.TButton", command=do_activate)
+        act_btn.pack(side="right")
+        lic_entry.focus_set()
 
     refresh_codex_state()
     window.protocol("WM_DELETE_WINDOW", close)

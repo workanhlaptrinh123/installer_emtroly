@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([Parameter(Position=0)][ValidateSet('install','validate','list','remove')][string]$Command = 'list', [string]$Profile = '', [string[]]$Module = @(), [switch]$DryRun)
 $ErrorActionPreference = 'Stop'
 $root = if ($env:OPENCLAW_ROOT) { $env:OPENCLAW_ROOT } else { Join-Path $env:USERPROFILE '.openclaw' }

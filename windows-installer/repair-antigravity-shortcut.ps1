@@ -36,7 +36,7 @@ function Resolve-EditorBundle([string]$Root, [bool]$RequirePinnedVersion = $fals
 }
 
 function Test-EditorApplication([string]$Root) {
-  return ($null -ne (Resolve-EditorBundle -Root $Root -RequirePinnedVersion $true))
+  return ($null -ne (Resolve-EditorBundle -Root $Root -RequirePinnedVersion $false))
 }
 
 function Test-EmTroLyDataComplete([string]$Root) {
@@ -87,13 +87,13 @@ if (Test-Path -LiteralPath $recordedPathFile -PathType Leaf) {
 $savedJob = if (Test-Path -LiteralPath $receipt -PathType Leaf) { [IO.File]::ReadAllText($receipt).Trim() } else { '' }
 if (-not $bundle -and $savedJob -match '^[a-f0-9]{32}$') {
   $candidate = Join-Path $programsRoot ('EmTroLy-Antigravity-IDE-' + $savedJob)
-  if (Test-EditorApplication $candidate) { $bundle = Resolve-EditorBundle -Root $candidate -RequirePinnedVersion $true }
+  if (Test-EditorApplication $candidate) { $bundle = Resolve-EditorBundle -Root $candidate -RequirePinnedVersion $false }
 }
 if (-not $bundle -and (Test-Path -LiteralPath $programsRoot -PathType Container)) {
   $foundPrivate = @(Get-ChildItem -LiteralPath $programsRoot -Directory -Filter 'EmTroLy-Antigravity-IDE-*' -ErrorAction SilentlyContinue | Where-Object {
     Test-EditorApplication $_.FullName
   } | Sort-Object LastWriteTime -Descending | Select-Object -First 1)
-  if ($foundPrivate.Count -gt 0) { $bundle = Resolve-EditorBundle -Root $foundPrivate[0].FullName -RequirePinnedVersion $true }
+  if ($foundPrivate.Count -gt 0) { $bundle = Resolve-EditorBundle -Root $foundPrivate[0].FullName -RequirePinnedVersion $false }
 }
 if (-not $bundle) {
   foreach ($progDir in @($programsRoot, $env:ProgramFiles, ${env:ProgramFiles(x86)})) {
@@ -144,8 +144,18 @@ $shortcut.WorkingDirectory = $base
 $shortcut.IconLocation = $editor + ',0'
 $shortcut.Description = 'Em Trợ Lý - Antigravity IDE và Codex riêng'
 $shortcut.Save()
-if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }
-[IO.File]::Move($temporaryShortcut, $shortcutPath)
+$repairedMoved = $false
+for ($scTry = 1; $scTry -le 3; $scTry++) {
+  try {
+    if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }
+    [IO.File]::Move($temporaryShortcut, $shortcutPath)
+    $repairedMoved = $true
+    break
+  } catch {
+    if ($scTry -lt 3) { Start-Sleep -Milliseconds (400 * $scTry) }
+  }
+}
+if (-not $repairedMoved) { throw 'shortcut-verification-failed' }
 $saved = $shell.CreateShortcut($shortcutPath)
 if ($saved.TargetPath -ine (Join-Path $env:SystemRoot 'System32\wscript.exe') -or
     $saved.Arguments -cne ('//B //Nologo "' + $launchPath + '"') -or

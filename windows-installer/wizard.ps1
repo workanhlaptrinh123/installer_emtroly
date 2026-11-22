@@ -12,6 +12,29 @@ Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+$script:singleInstanceMutex = $null
+if (-not $SmokeTest -and $env:EMTROLY_ALLOW_MULTI_INSTANCE -ne '1') {
+  $mutexName = if (-not [string]::IsNullOrWhiteSpace($env:EMTROLY_TEST_MUTEX_NAME)) {
+    $env:EMTROLY_TEST_MUTEX_NAME.Trim()
+  } else {
+    'Local\EmTroLy-Wizard-SingleInstance'
+  }
+  $createdNew = $false
+  $script:singleInstanceMutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
+  if (-not $createdNew) {
+    try { $script:singleInstanceMutex.Dispose() } catch { }
+    if ($env:EMTROLY_SUPPRESS_SINGLE_INSTANCE_MSGBOX -ne '1') {
+      [void][System.Windows.MessageBox]::Show(
+        'Ứng dụng Em Trợ Lý đang mở sẵn trên màn hình. Hãy kiểm tra thanh tác vụ (Taskbar) bên dưới.',
+        'Em Trợ Lý đang chạy',
+        [System.Windows.MessageBoxButton]::OK,
+        [System.Windows.MessageBoxImage]::Information
+      )
+    }
+    exit 0
+  }
+}
+
 function Resolve-HelperScript([string]$FileName) {
   $p = if ($PSScriptRoot) { Join-Path $PSScriptRoot $FileName } else { '' }
   if (-not $p -or -not (Test-Path -LiteralPath $p -PathType Leaf)) {
@@ -296,8 +319,8 @@ $xamlText = @'
 
         <!-- Bottom Status & Version -->
         <StackPanel DockPanel.Dock="Bottom" Margin="2,12,2,0">
-          <!-- License Verified Badge -->
-          <Border x:Name="SidebarLicensePill" Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="8" Padding="10,6" Margin="0,0,0,6" Visibility="Collapsed">
+          <!-- License Verified Badge (Click to switch activation key) -->
+          <Border x:Name="SidebarLicensePill" Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="8" Padding="10,6" Margin="0,0,0,6" Cursor="Hand" ToolTip="Bấm để đổi khóa kích hoạt bản quyền" Visibility="Collapsed">
             <StackPanel Orientation="Horizontal">
               <Border Width="18" Height="18" CornerRadius="9" Background="#2563EB" VerticalAlignment="Center" Margin="0,0,8,0">
                 <Path Data="M 4,9.2 L 7.4,12.5 L 14,5.6" Stroke="#FFFFFF" StrokeThickness="2.1" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
@@ -503,6 +526,14 @@ $xamlText = @'
             <!-- Mode Notice Banner (Visible in Manage Mode) -->
             <Border x:Name="ManageEditBanner" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,0,12" Visibility="Collapsed">
               <TextBlock Text="✓ Chế độ Chỉnh sửa nhanh: Chỉ cần sửa ô bạn muốn đổi rồi bấm Lưu thay đổi (~3 giây). Bot Token &amp; API Key có thể để trống để giữ nguyên mã cũ." FontSize="12.5" FontWeight="SemiBold" Foreground="#065F46" TextWrapping="Wrap"/>
+            </Border>
+
+            <!-- Saved Draft Notice Banner (Visible in Fresh Install when previous inputs were restored) -->
+            <Border x:Name="SavedDraftBanner" Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="10" Padding="14,9" Margin="0,0,0,12" Visibility="Collapsed">
+              <DockPanel>
+                <Button x:Name="ClearSavedDraftBtn" DockPanel.Dock="Right" Style="{StaticResource SecondaryBtn}" Content="Xóa thông số đã lưu" Height="28" Padding="10,2" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                <TextBlock x:Name="SavedDraftBannerText" Text="✓ Đã tự động điền lại các thông số bạn đã nhập ở lần trước (lưu mã hóa an toàn trên máy)." FontSize="12.5" FontWeight="SemiBold" Foreground="#1E40AF" TextWrapping="Wrap" VerticalAlignment="Center"/>
+              </DockPanel>
             </Border>
 
             <!-- Card 1: 4 Essential Inputs -->
@@ -862,10 +893,11 @@ $xamlText = @'
               <StackPanel>
                 <TextBlock Text="Hỗ trợ kỹ thuật &amp; Lối tắt ứng dụng" FontSize="15" FontWeight="Bold" Margin="0,0,0,6"/>
                 <TextBlock Text="File báo cáo hỗ trợ đã tự động ẩn toàn bộ Bot Token, API Key và Gateway Token trước khi xuất." FontSize="12.5" Foreground="#64748B" Margin="0,0,0,12"/>
-                <StackPanel Orientation="Horizontal">
-                  <Button x:Name="DiagExportBtn" Style="{StaticResource SoftAccentBtn}" Content="Xuất báo cáo hỗ trợ (.txt)" Margin="0,0,10,0"/>
-                  <Button x:Name="DiagShortcutBtn" Style="{StaticResource SecondaryBtn}" Content="Tạo lối tắt trên Desktop"/>
-                </StackPanel>
+                <WrapPanel>
+                  <Button x:Name="DiagExportBtn" Style="{StaticResource SoftAccentBtn}" Content="Xuất báo cáo hỗ trợ (.txt)" Margin="0,0,10,6"/>
+                  <Button x:Name="DiagShortcutBtn" Style="{StaticResource SecondaryBtn}" Content="Tạo lối tắt trên Desktop" Margin="0,0,10,6"/>
+                  <Button x:Name="DiagChangeLicenseBtn" Style="{StaticResource SecondaryBtn}" Content="Đổi khóa bản quyền" Margin="0,0,0,6"/>
+                </WrapPanel>
               </StackPanel>
             </Border>
           </StackPanel>
@@ -1138,11 +1170,18 @@ $dashAutoHealBtn    = Get-Ui 'DashAutoHealBtn'
 $dashExportBtn      = Get-Ui 'DashExportBtn'
 
 $manageEditBanner   = Get-Ui 'ManageEditBanner'
+$savedDraftBanner   = Get-Ui 'SavedDraftBanner'
+$savedDraftBannerText = Get-Ui 'SavedDraftBannerText'
+$clearSavedDraftBtn = Get-Ui 'ClearSavedDraftBtn'
 $showSecretCheck    = Get-Ui 'ShowSecretCheck'
 $tokenFieldLabel    = Get-Ui 'TokenFieldLabel'
 $apiKeyFieldLabel   = Get-Ui 'ApiKeyFieldLabel'
-$tokenBox           = New-WpfSecretBoxAdapter (Get-Ui 'TokenPwdBox') (Get-Ui 'TokenPlainBox')
-$apiKeyBox          = New-WpfSecretBoxAdapter (Get-Ui 'ApiKeyPwdBox') (Get-Ui 'ApiKeyPlainBox')
+$tokenPwdBox        = Get-Ui 'TokenPwdBox'
+$tokenPlainBox      = Get-Ui 'TokenPlainBox'
+$apiKeyPwdBox       = Get-Ui 'ApiKeyPwdBox'
+$apiKeyPlainBox     = Get-Ui 'ApiKeyPlainBox'
+$tokenBox           = New-WpfSecretBoxAdapter $tokenPwdBox $tokenPlainBox
+$apiKeyBox          = New-WpfSecretBoxAdapter $apiKeyPwdBox $apiKeyPlainBox
 $autoFetchIdBtn     = Get-Ui 'AutoFetchIdBtn'
 $testConnBtn        = Get-Ui 'TestConnBtn'
 $liveCheckBanner    = Get-Ui 'LiveCheckBanner'
@@ -1209,6 +1248,7 @@ $diagZaloBtn        = Get-Ui 'DiagZaloBtn'
 $diagCodexBtn       = Get-Ui 'DiagCodexBtn'
 $diagExportBtn      = Get-Ui 'DiagExportBtn'
 $diagShortcutBtn    = Get-Ui 'DiagShortcutBtn'
+$diagChangeLicenseBtn = Get-Ui 'DiagChangeLicenseBtn'
 
 $zaloQrFrame        = Get-Ui 'ZaloQrFrame'
 $zaloQrImage        = Get-Ui 'ZaloQrImage'
@@ -1315,6 +1355,9 @@ $script:zaloSyncProc = $null
 $script:lastZaloSyncAt = [datetime]::MinValue
 $script:licenseVerified = $false
 $script:licenseCheckRunning = $false
+$script:licenseCanDismiss = $false
+$script:draftHydrating = $false
+$script:draftDirty = $false
 
 $codexGuideText = "Hướng dẫn nhanh:`r`n1. Chọn thư mục cần chỉnh sửa (mặc định là thư mục trợ lý OpenClaw).`r`n2. Nhập yêu cầu bằng tiếng Việt vào ô phía trên (hoặc bấm 1 mẫu gợi ý).`r`n3. Bấm `"Thực hiện bằng Codex`" để Codex CLI tự đọc và sửa tệp giúp bạn."
 $codexDirBox.Text = Get-CodexDefaultWorkspace
@@ -1498,7 +1541,7 @@ function Update-ProgressFromStatus([string]$Message) {
   $editorOn = (-not $existingEditorCheck.Checked)
   $pct = 8
   $activeStep = 1
-  $isHealing = ($Message -match 'Codex CLI đang tự động|Phát hiện sự cố|tự sửa lỗi')
+  $isHealing = ($Message -match 'Codex CLI đang tự động|Codex CLI đã xử lý|Phát hiện sự cố|tự sửa lỗi')
 
   if ($Message.StartsWith('Hoàn tất:')) {
     $pct = 100
@@ -1513,11 +1556,33 @@ function Update-ProgressFromStatus([string]$Message) {
     return
   }
 
-  if ($Message -match 'Antigravity|Codex CLI|lối tắt|Thử lại bước Codex') { $activeStep = 5; $pct = 88 }
-  elseif ($Message -match 'Zalo|/zaloqr|menu Telegram') { $activeStep = 4; $pct = 74 }
-  elseif ($Message -match 'OpenClaw|kỹ năng|Full Exec|Gateway|lệnh openclaw') { $activeStep = 3; $pct = 55 }
-  elseif ($Message -match 'Node\.js|Python|FFmpeg|môi trường') { $activeStep = 2; $pct = 32 }
-  else { $activeStep = 1; $pct = 14 }
+  $activeBadge = ''
+  $subPct = -1
+  if ($Message -match '(?<!\d)(\d{1,3})%') {
+    $subPct = [Math]::Max(0, [Math]::Min(100, [int]$Matches[1]))
+  }
+
+  if ($isHealing) {
+    $activeStep = [Math]::Max(1, [Math]::Min(5, [int]$script:lastActiveStepIndex))
+    $pct = [Math]::Max(20, [int]$installProgressBar.Value)
+  } elseif ($Message -match 'Antigravity|Codex Extension|khóa API cho Codex|cài Codex|kiểm tra Codex|Codex CLI|lối tắt|Thử lại bước Codex') {
+    $activeStep = 5
+    $pct = if ($subPct -ge 0) { 78 + [int][Math]::Round($subPct * 0.17) } else { 88 }
+    if ($subPct -ge 0) { $activeBadge = "Đang tải $subPct%" }
+  } elseif ($Message -match 'Zalo|/zaloqr|menu Telegram') {
+    $activeStep = 4
+    $pct = 74
+  } elseif ($Message -match 'OpenClaw|kỹ năng|Full Exec|Gateway|lệnh openclaw') {
+    $activeStep = 3
+    $pct = 55
+  } elseif ($Message -match 'Node\.js|Python|FFmpeg|môi trường|gói môi trường|tải song song') {
+    $activeStep = 2
+    $pct = if ($subPct -ge 0) { 18 + [int][Math]::Round($subPct * 0.26) } else { 32 }
+    if ($subPct -ge 0) { $activeBadge = "Đang tải $subPct%" }
+  } else {
+    $activeStep = 1
+    $pct = 14
+  }
   $script:lastActiveStepIndex = $activeStep
 
   if ($script:currentManageAction) {
@@ -1536,7 +1601,7 @@ function Update-ProgressFromStatus([string]$Message) {
     if ($s -lt $activeStep) { Set-ChecklistStep $s 'done' }
     elseif ($s -eq $activeStep) {
       if ($isHealing) { Set-ChecklistStep $s 'heal' }
-      else { Set-ChecklistStep $s 'active' }
+      else { Set-ChecklistStep $s 'active' $activeBadge }
     } else {
       Set-ChecklistStep $s 'pending'
     }
@@ -1910,34 +1975,166 @@ function Stop-ActiveRunner([string]$ReasonMessage = 'Đã dừng tiến trình t
   Set-Buttons
 }
 
+function Save-CurrentFormDraft {
+  param([switch]$PreserveExistingSecrets)
+  if (-not (Get-Command Save-EmTroLySetupDraft -ErrorAction SilentlyContinue)) { return }
+  $tokVal = $tokenBox.Text.Trim()
+  $keyVal = $apiKeyBox.Text.Trim()
+  if ($PreserveExistingSecrets) {
+    $prevDraft = if (Get-Command Get-EmTroLySavedSetupDraft -ErrorAction SilentlyContinue) { Get-EmTroLySavedSetupDraft } else { $null }
+    if ([string]::IsNullOrWhiteSpace($tokVal) -and $prevDraft -and $prevDraft.telegram_token) {
+      $tokVal = ([string]$prevDraft.telegram_token).Trim()
+    }
+    if ([string]::IsNullOrWhiteSpace($keyVal)) {
+      if ($prevDraft -and $prevDraft.ai_api_key) {
+        $keyVal = ([string]$prevDraft.ai_api_key).Trim()
+      } elseif (-not [string]::IsNullOrWhiteSpace($script:sessionApiKeyFallback)) {
+        $keyVal = $script:sessionApiKeyFallback.Trim()
+      }
+    }
+  }
+  $draftObj = [ordered]@{
+    telegram_token     = $tokVal
+    ai_api_key         = $keyVal
+    owner_ids          = $ownersBox.Text.Trim()
+    group_id           = $groupBox.Text.Trim()
+    model              = ([string]$modelBox.SelectedItem).Trim()
+    assistant_name     = $assistantBox.Text.Trim()
+    base_url           = $baseUrlBox.Text.Trim().TrimEnd('/')
+    gateway_port       = $portBox.Text.Trim()
+    qr_owner_id        = $qrOwnerBox.Text.Trim()
+    audience           = $audienceBox.Text.Trim()
+    addressing         = $addressingBox.Text.Trim()
+    style              = $styleBox.Text.Trim()
+    configure_zalo     = [bool]$zaloCheck.Checked
+    skip_editor        = [bool]$existingEditorCheck.Checked
+    accept_full_access = [bool]$fullAccessCheck.Checked
+  }
+  [void](Save-EmTroLySetupDraft -Draft $draftObj)
+  $script:draftDirty = $false
+}
+
+function Apply-SavedSetupDraft {
+  if ($script:isManageMode -or $script:retryEditor) { return $false }
+  if (-not (Get-Command Get-EmTroLySavedSetupDraft -ErrorAction SilentlyContinue)) { return $false }
+  $draft = Get-EmTroLySavedSetupDraft
+  if (-not $draft) { return $false }
+
+  $script:draftHydrating = $true
+  $restoredAny = $false
+  try {
+    if ($draft.telegram_token) { $tokenBox.Text = [string]$draft.telegram_token; $restoredAny = $true }
+    if ($draft.ai_api_key) { $apiKeyBox.Text = [string]$draft.ai_api_key }
+    if ($draft.owner_ids) { $ownersBox.Text = [string]$draft.owner_ids; $restoredAny = $true }
+    if ($draft.group_id) { $groupBox.Text = [string]$draft.group_id; $restoredAny = $true }
+    if ($draft.assistant_name) {
+      $assistantBox.Text = [string]$draft.assistant_name
+      if ([string]$draft.assistant_name -cne 'Trợ lý OpenClaw') { $restoredAny = $true }
+    }
+    if ($draft.model) {
+      for ($i = 0; $i -lt $modelBox.Items.Count; $i++) {
+        if ([string]$modelBox.Items[$i] -ieq [string]$draft.model) {
+          $modelBox.SelectedIndex = $i
+          if ($i -ne 0) { $restoredAny = $true }
+          break
+        }
+      }
+    }
+    if ($draft.gateway_port) {
+      $portBox.Text = [string]$draft.gateway_port
+      if ([string]$draft.gateway_port -ne '0') { $restoredAny = $true }
+    }
+    if ($draft.qr_owner_id) { $qrOwnerBox.Text = [string]$draft.qr_owner_id; $restoredAny = $true }
+    if ($draft.audience) { $audienceBox.Text = [string]$draft.audience; $restoredAny = $true }
+    if ($draft.addressing) { $addressingBox.Text = [string]$draft.addressing; $restoredAny = $true }
+    if ($draft.style) { $styleBox.Text = [string]$draft.style; $restoredAny = $true }
+    if ($null -ne $draft.PSObject.Properties['configure_zalo']) {
+      $zaloCheck.Checked = [bool]$draft.configure_zalo
+    }
+    if ($null -ne $draft.PSObject.Properties['skip_editor']) {
+      $existingEditorCheck.Checked = [bool]$draft.skip_editor
+    }
+    if ($null -ne $draft.PSObject.Properties['accept_full_access']) {
+      $fullAccessCheck.Checked = [bool]$draft.accept_full_access
+    }
+  } finally {
+    $script:draftHydrating = $false
+    $script:draftDirty = $false
+  }
+
+  if ($restoredAny) {
+    $savedWhen = if ($draft.savedAt) { " ($($draft.savedAt))" } else { '' }
+    $savedDraftBannerText.Text = "✓ Đã tự động điền lại các thông số bạn đã nhập ở lần trước$savedWhen — lưu mã hóa an toàn trên máy."
+    $savedDraftBanner.Visibility = [System.Windows.Visibility]::Visible
+  }
+  return $restoredAny
+}
+
+function Clear-SavedDraftAction {
+  if (Get-Command Clear-EmTroLySavedSetupDraft -ErrorAction SilentlyContinue) {
+    Clear-EmTroLySavedSetupDraft
+  }
+  $script:draftHydrating = $true
+  try {
+    $tokenBox.Clear()
+    $ownersBox.Text = ''
+    $groupBox.Text = ''
+    $assistantBox.Text = 'Trợ lý OpenClaw'
+    $modelBox.SelectedIndex = 0
+    $portBox.Text = '0'
+    $qrOwnerBox.Text = ''
+    $audienceBox.Text = ''
+    $addressingBox.Text = ''
+    $styleBox.Text = ''
+    $zaloCheck.Checked = $true
+    $existingEditorCheck.Checked = $false
+    $fullAccessCheck.Checked = $false
+    if (-not [string]::IsNullOrWhiteSpace($script:sessionApiKeyFallback)) {
+      $apiKeyBox.Text = $script:sessionApiKeyFallback
+    } else {
+      $apiKeyBox.Clear()
+    }
+    $savedDraftBanner.Visibility = [System.Windows.Visibility]::Collapsed
+  } finally {
+    $script:draftHydrating = $false
+    $script:draftDirty = $false
+  }
+}
+
 function Apply-ManageModeUI {
   $st = Get-EmTroLyInstalledState
   if (-not $st.OpenClawInstalled) { return }
   $script:isManageMode = $true
   $script:installCompleted = $true
   $script:resultCode = 0
-
-  $assistantBox.Text = $st.AssistantName
-  $baseUrlBox.Text = $st.BaseUrl
-  for ($i = 0; $i -lt $modelBox.Items.Count; $i++) {
-    if ([string]$modelBox.Items[$i] -ieq [string]$st.Model) {
-      $modelBox.SelectedIndex = $i
-      break
+  $script:draftHydrating = $true
+  try {
+    $assistantBox.Text = $st.AssistantName
+    $baseUrlBox.Text = $st.BaseUrl
+    for ($i = 0; $i -lt $modelBox.Items.Count; $i++) {
+      if ([string]$modelBox.Items[$i] -ieq [string]$st.Model) {
+        $modelBox.SelectedIndex = $i
+        break
+      }
     }
-  }
-  $ownersBox.Text = $st.OwnerIds
-  $groupBox.Text = $st.GroupId
-  $portBox.Text = $st.GatewayPort
-  $audienceBox.Text = $st.Audience
-  $addressingBox.Text = $st.Addressing
-  $styleBox.Text = $st.Style
-  $fullAccessCheck.Checked = $true
-  $zaloCheck.Checked = $st.ZaloInstalled
-  if ($st.OwnerIds) {
-    $qrOwnerBox.Text = (($ownersBox.Text -split ',')[0]).Trim()
+    $ownersBox.Text = $st.OwnerIds
+    $groupBox.Text = $st.GroupId
+    $portBox.Text = $st.GatewayPort
+    $audienceBox.Text = $st.Audience
+    $addressingBox.Text = $st.Addressing
+    $styleBox.Text = $st.Style
+    $fullAccessCheck.Checked = $true
+    $zaloCheck.Checked = $st.ZaloInstalled
+    if ($st.OwnerIds) {
+      $qrOwnerBox.Text = (($ownersBox.Text -split ',')[0]).Trim()
+    }
+  } finally {
+    $script:draftHydrating = $false
+    $script:draftDirty = $false
   }
 
   $manageEditBanner.Visibility = [System.Windows.Visibility]::Visible
+  $savedDraftBanner.Visibility = [System.Windows.Visibility]::Collapsed
   $installOptionsCard.Visibility = [System.Windows.Visibility]::Collapsed
   $tokenFieldLabel.Text = 'Telegram Bot Token mới (để trống = giữ nguyên mã cũ)'
   $apiKeyFieldLabel.Text = 'Provider API Key mới (để trống = giữ nguyên mã cũ)'
@@ -1978,14 +2175,18 @@ function Test-FormInputs([bool]$ForManageConfig = $false) {
   return $true
 }
 
-function Show-LicenseGate([string]$ErrorMessage = '') {
-  $script:licenseVerified = $false
-  $sidebarLicensePill.Visibility = [System.Windows.Visibility]::Collapsed
+function Show-LicenseGate([string]$ErrorMessage = '', [switch]$AllowCancel) {
+  $script:licenseCanDismiss = ([bool]$AllowCancel -and $script:licenseVerified)
+  if (-not $script:licenseCanDismiss) {
+    $script:licenseVerified = $false
+    $sidebarLicensePill.Visibility = [System.Windows.Visibility]::Collapsed
+  }
   $licenseGateOverlay.Visibility = [System.Windows.Visibility]::Visible
   $licenseCheckingBox.Visibility = [System.Windows.Visibility]::Collapsed
   $licenseInputBox.Visibility = [System.Windows.Visibility]::Visible
   $licenseActivateBtn.IsEnabled = $true
   $licenseActivateBtn.Content = 'Kích hoạt & Mở khóa phần mềm'
+  $licenseExitBtn.Content = if ($script:licenseCanDismiss) { 'Quay lại' } else { 'Thoát' }
   if (-not [string]::IsNullOrWhiteSpace($ErrorMessage)) {
     $licenseMsgBanner.Visibility = [System.Windows.Visibility]::Visible
     $licenseMsgText.Text = $ErrorMessage
@@ -1997,15 +2198,26 @@ function Show-LicenseGate([string]$ErrorMessage = '') {
 
 function Unlock-LicenseGate([string]$VerifiedKey, [switch]$SkipSave) {
   $script:licenseVerified = $true
+  $script:licenseCanDismiss = $false
   $cleanKey = if ($VerifiedKey) { $VerifiedKey.Trim() } else { '' }
   if ($cleanKey) {
     $script:sessionApiKeyFallback = $cleanKey
     if (-not $SkipSave -and (Get-Command Save-EmTroLyLicenseKey -ErrorAction SilentlyContinue)) {
       Save-EmTroLyLicenseKey -ApiKey $cleanKey
     }
-    if (-not $script:isManageMode -and [string]::IsNullOrWhiteSpace($apiKeyBox.Text)) {
-      $apiKeyBox.Text = $cleanKey
-      $apiKeyFieldLabel.Text = 'Provider API Key (✓ Đã tự động điền từ khóa kích hoạt trên máy)'
+    if (-not $script:isManageMode) {
+      $prevHydr = $script:draftHydrating
+      $script:draftHydrating = $true
+      try {
+        if (-not $SkipSave -or [string]::IsNullOrWhiteSpace($apiKeyBox.Text)) {
+          $apiKeyBox.Text = $cleanKey
+        }
+        if ($apiKeyBox.Text.Trim() -ceq $cleanKey) {
+          $apiKeyFieldLabel.Text = 'Provider API Key (✓ Đã tự động điền từ khóa kích hoạt trên máy)'
+        }
+      } finally {
+        $script:draftHydrating = $prevHydr
+      }
     }
     if ($script:retryEditor -and [string]::IsNullOrWhiteSpace($retryKeyPwdBox.Password)) {
       $retryKeyPwdBox.Password = $cleanKey
@@ -2107,26 +2319,45 @@ function Show-RichFailureDiagnostics([string]$SummaryMessage, [object]$DiagPaylo
   $techRaw = if ($DiagPayload -and $DiagPayload.technicalDetail) { [string]$DiagPayload.technicalDetail } else { '' }
 
   $errorStepText.Text = $stageFriendly
-  $errorSummaryHeading.Text = $SummaryMessage
+
+  $activeSecrets = @()
+  foreach ($candSec in @($tokenBox.Text, $apiKeyBox.Text, $script:sessionApiKeyFallback)) {
+    if (-not [string]::IsNullOrWhiteSpace($candSec)) { $activeSecrets += $candSec.Trim() }
+  }
+  if (Get-Command Get-EmTroLySavedLicenseKey -ErrorAction SilentlyContinue) {
+    try { $savedK = Get-EmTroLySavedLicenseKey; if ($savedK) { $activeSecrets += $savedK } } catch { }
+  }
+  $scrubText = {
+    param([string]$T)
+    if (Get-Command Remove-SensitiveStrings -ErrorAction SilentlyContinue) {
+      return (Remove-SensitiveStrings -Text $T -Secrets $activeSecrets)
+    }
+    return $T
+  }
+
+  $safeSummary = & $scrubText $SummaryMessage
+  $safeHealSum = & $scrubText $healSum
+  $safeTechRaw = & $scrubText $techRaw
+  $errorSummaryHeading.Text = $safeSummary
 
   $lines = New-Object System.Collections.Generic.List[string]
   [void]$lines.Add("Thời điểm ghi nhận : $timeRaw")
   [void]$lines.Add("Hạng mục thực hiện : $stageFriendly")
   if ($codeRaw) { [void]$lines.Add("Mã chẩn đoán       : $codeRaw") }
-  [void]$lines.Add("Tóm tắt thông báo  : $SummaryMessage")
-  if ($healSum) {
+  [void]$lines.Add("Tóm tắt thông báo  : $safeSummary")
+  if ($safeHealSum) {
     [void]$lines.Add('')
     [void]$lines.Add("--- Ghi chú từ Codex tự sửa lỗi ---")
-    [void]$lines.Add($healSum)
+    [void]$lines.Add($safeHealSum)
   }
-  if ($techRaw) {
+  if ($safeTechRaw) {
     [void]$lines.Add('')
     [void]$lines.Add("--- Nhật ký kỹ thuật chi tiết (đã ẩn mã bí mật) ---")
-    [void]$lines.Add($techRaw)
+    [void]$lines.Add($safeTechRaw)
   }
 
-  $fullReport = ($lines -join "`r`n")
-  $script:lastInstallErrorDetail = "$SummaryMessage`n$techRaw".Trim()
+  $fullReport = & $scrubText ($lines -join "`r`n")
+  $script:lastInstallErrorDetail = "$safeSummary`n$safeTechRaw".Trim()
   $script:lastFullErrorReport = $fullReport
   $errorDetailBox.Text = $fullReport
   if ($autoHealNoteBorder) { $autoHealNoteBorder.Visibility = [System.Windows.Visibility]::Collapsed }
@@ -2136,7 +2367,7 @@ function Show-RichFailureDiagnostics([string]$SummaryMessage, [object]$DiagPaylo
   # Mirror full diagnostic log & ready-to-run prompt into Công cụ Codex CLI view so user also sees it immediately if they open Codex CLI!
   $codexOutputBox.Text = "=== CHI TIẾT LỖI GẦN NHẤT TRÊN GIAO DIỆN ===`r`n`r`n$fullReport`r`n`r`n(Bấm nút `"Thực hiện bằng Codex`" phía trên nếu bạn muốn giao yêu cầu tùy chỉnh cho Codex CLI xử lý trực tiếp.)"
   if ([string]::IsNullOrWhiteSpace($codexPromptBox.Text)) {
-    $codexPromptBox.Text = "Hãy kiểm tra và khắc phục sự cố sau trên máy giúp tôi ($stageFriendly - mã: $codeRaw): $SummaryMessage"
+    $codexPromptBox.Text = "Hãy kiểm tra và khắc phục sự cố sau trên máy giúp tôi ($stageFriendly - mã: $codeRaw): $safeSummary"
   }
 }
 
@@ -2214,6 +2445,9 @@ function Start-ManageAction([string]$ActionName, [string]$ErrorDetail = '') {
     if (-not [string]::IsNullOrWhiteSpace($apiKeyBox.Text)) {
       $script:sessionApiKeyFallback = $apiKeyBox.Text.Trim()
     }
+    if ($ActionName -eq 'update-config' -and -not $SmokeTest) {
+      Save-CurrentFormDraft -PreserveExistingSecrets
+    }
     $tokenBox.Clear()
     $apiKeyBox.Clear()
     $installTimer.Start()
@@ -2246,7 +2480,9 @@ function Start-Install {
       return
     }
   } else {
+    if (-not $SmokeTest) { Save-CurrentFormDraft }
     if (-not (Test-FormInputs -ForManageConfig $false)) { return }
+    if (-not $SmokeTest) { Save-CurrentFormDraft }
     $ansExec = [System.Windows.MessageBox]::Show($window, 'Các Owner IDs và thành viên trong nhóm Telegram đã chọn có thể yêu cầu đọc, sửa tệp và chạy lệnh trên máy. Bạn có tin tưởng họ?', 'Xác nhận Full Exec', [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
     if ($ansExec -ne [System.Windows.MessageBoxResult]::Yes) { return }
     if ($zaloCheck.Checked) {
@@ -2337,6 +2573,21 @@ $installTimer.Add_Tick({
     try {
       $msg = [IO.File]::ReadAllText($script:safeLog, [System.Text.Encoding]::UTF8)
       if ($msg) {
+        if ($msg -match '^Đang tải (Codex Extension|Antigravity IDE)' -and $msg -notmatch '\d+%') {
+          try {
+            $isVsix = ($Matches[1] -eq 'Codex Extension')
+            $filePat = if ($isVsix) { 'codex.vsix' } else { 'antigravity-ide-setup.exe' }
+            $estTotal = if ($isVsix) { 389000000L } else { 199000000L }
+            $cand = @(Get-ChildItem -Path (Join-Path $env:TEMP 'emtroly-editor-*') -Filter $filePat -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1)
+            if ($cand.Count -gt 0 -and $cand[0].Length -gt 0) {
+              $mbNow = [Math]::Round($cand[0].Length / 1MB, 1)
+              $mbTot = [Math]::Round($estTotal / 1MB, 0)
+              $pNow = [Math]::Min(99, [int][Math]::Floor(($cand[0].Length * 100.0) / $estTotal))
+              $labelName = if ($isVsix) { 'Codex Extension' } else { 'Antigravity IDE' }
+              $msg = "Đang tải $labelName... $pNow% ($mbNow / ~$mbTot MB)"
+            }
+          } catch { }
+        }
         $statusText.Text = $msg
         Update-ProgressFromStatus $msg
       }
@@ -2857,6 +3108,7 @@ $autoFetchIdBtn.Add_Click({
     }
     if ($res.SuggestedGroupId) { $groupBox.Text = $res.SuggestedGroupId }
     if ($res.Ok -and ($res.SuggestedOwnerId -or $res.SuggestedGroupId)) {
+      if (-not $SmokeTest) { Save-CurrentFormDraft -PreserveExistingSecrets }
       $liveCheckBanner.Background = New-Brush '#ECFDF5'
       $liveCheckBanner.BorderBrush = New-Brush '#A7F3D0'
       $liveCheckText.Foreground = New-Brush '#065F46'
@@ -2876,6 +3128,7 @@ $autoFetchIdBtn.Add_Click({
 })
 
 $testConnBtn.Add_Click({
+  if (-not $script:isManageMode -and -not $SmokeTest) { Save-CurrentFormDraft }
   $testConnBtn.IsEnabled = $false
   $testConnBtn.Content = 'Đang kiểm tra...'
   $liveCheckBanner.Visibility = [System.Windows.Visibility]::Visible
@@ -3043,6 +3296,13 @@ $diagShortcutBtn.Add_Click({
     Show-Error 'Chưa tìm thấy tệp ứng dụng để tạo lối tắt trên Desktop.'
   }
 })
+$openChangeLicensePrompt = {
+  if ($script:installRunning -or $script:retryEditor) { return }
+  Show-LicenseGate '' -AllowCancel
+  [void]$licensePwdBox.Focus()
+}
+$sidebarLicensePill.Add_MouseLeftButtonUp($openChangeLicensePrompt)
+$diagChangeLicenseBtn.Add_Click($openChangeLicensePrompt)
 
 $btnCopyErrorDetail.Add_Click({
   if (-not [string]::IsNullOrWhiteSpace($script:lastFullErrorReport)) {
@@ -3094,7 +3354,15 @@ $codexClearBtn.Add_Click({ $codexOutputBox.Text = $codexGuideText })
 $licenseShowCheck.Add_Checked({ $licenseKeyBox.UseSystemPasswordChar = $false })
 $licenseShowCheck.Add_Unchecked({ $licenseKeyBox.UseSystemPasswordChar = $true })
 $licenseActivateBtn.Add_Click({ Invoke-LicenseVerifyFlow -CandidateKey $licenseKeyBox.Text -IsStartupAuto $false })
-$licenseExitBtn.Add_Click({ $window.Close() })
+$licenseExitBtn.Add_Click({
+  if ($script:licenseCanDismiss -and $script:licenseVerified) {
+    $script:licenseCanDismiss = $false
+    $licenseKeyBox.Clear()
+    $licenseGateOverlay.Visibility = [System.Windows.Visibility]::Collapsed
+    return
+  }
+  $window.Close()
+})
 $licensePwdBox.Add_KeyDown({
   param($s, $e)
   if ($e.Key -eq [System.Windows.Input.Key]::Return) {
@@ -3107,6 +3375,23 @@ $licensePlainBox.Add_KeyDown({
     Invoke-LicenseVerifyFlow -CandidateKey $licenseKeyBox.Text -IsStartupAuto $false
   }
 })
+
+$markDraftDirty = {
+  if (-not $script:draftHydrating -and -not $script:isManageMode) {
+    $script:draftDirty = $true
+  }
+}
+foreach ($tbCtrl in @($tokenPlainBox, $apiKeyPlainBox, $ownersBox, $groupBox, $assistantBox, $portBox, $qrOwnerBox, $audienceBox, $addressingBox, $styleBox)) {
+  if ($tbCtrl) { $tbCtrl.Add_TextChanged($markDraftDirty) }
+}
+foreach ($pwCtrl in @($tokenPwdBox, $apiKeyPwdBox)) {
+  if ($pwCtrl) { $pwCtrl.Add_PasswordChanged($markDraftDirty) }
+}
+$modelBox.Add_SelectionChanged($markDraftDirty)
+foreach ($cbCtrl in @($zaloCheck, $existingEditorCheck, $fullAccessCheck)) {
+  if ($cbCtrl) { $cbCtrl.Add_Click($markDraftDirty) }
+}
+$clearSavedDraftBtn.Add_Click({ Clear-SavedDraftAction })
 
 $primaryActionBtn.Add_Click({ Start-Install })
 $stopTaskButton.Add_Click({
@@ -3136,7 +3421,16 @@ $window.Add_Closing({
     Stop-CodexRun
     Cleanup-CodexRun
   }
+  if (-not $SmokeTest -and -not $script:isManageMode -and $script:draftDirty) {
+    Save-CurrentFormDraft
+  }
   Stop-ZaloQrSession
+  if ($asyncTimer) { $asyncTimer.Stop() }
+  foreach ($asyncItem in @($script:asyncTasks)) {
+    try { $asyncItem.Ps.Stop() } catch { }
+    try { $asyncItem.Ps.Dispose() } catch { }
+  }
+  $script:asyncTasks.Clear()
   if ($liveSyncTimer) { $liveSyncTimer.Stop() }
   if ($script:zaloSyncProc) {
     try { if (-not $script:zaloSyncProc.HasExited) { $script:zaloSyncProc.Kill() } } catch { }
@@ -3169,8 +3463,10 @@ if (Test-Path -LiteralPath $pending -PathType Leaf) {
 } elseif ($CodexMode -or $hasExistingInstall) {
   $script:resultCode = 0
   $script:installCompleted = $true
+  [void](Apply-SavedSetupDraft)
   Set-NavActive 'codex'
 } else {
+  [void](Apply-SavedSetupDraft)
   Set-NavActive 'home'
 }
 
@@ -3195,9 +3491,17 @@ $window.Add_ContentRendered({
     [void]$licensePwdBox.Focus()
   }
 })
-[void]$window.ShowDialog()
-Stop-ZaloQrSession
-Stop-CodexRun
-Cleanup-CodexRun
-Cleanup-Secret
+try {
+  [void]$window.ShowDialog()
+} finally {
+  Stop-ZaloQrSession
+  Stop-CodexRun
+  Cleanup-CodexRun
+  Cleanup-Secret
+  if ($script:singleInstanceMutex) {
+    try { $script:singleInstanceMutex.ReleaseMutex() } catch { }
+    try { $script:singleInstanceMutex.Dispose() } catch { }
+    $script:singleInstanceMutex = $null
+  }
+}
 exit $script:resultCode

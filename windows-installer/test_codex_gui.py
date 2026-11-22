@@ -95,7 +95,13 @@ class CodexCliPowerShellTests(unittest.TestCase):
             if os.name == "nt":
                 cmd += ["-ExecutionPolicy", "Bypass"]
             cmd += ["-File", str(driver), "-WizardPath", str(staged_wizard), "-CodexPath", str(staged_codex)]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(
+                cmd,
+                env={**os.environ, "EMTROLY_ALLOW_MULTI_INSTANCE": "1"},
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_discovery_prefers_emtroly_isolated_codex_and_skips_ps1_shim(self):
@@ -169,7 +175,13 @@ if ($shimContent -notmatch 'CODEX_HOME=' -or $shimContent -notmatch 'codex\.exe'
             if os.name == "nt":
                 cmd += ["-ExecutionPolicy", "Bypass"]
             cmd += ["-File", str(driver), "-ModulePath", str(staged_codex), "-Directory", str(temp)]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(
+                cmd,
+                env={**os.environ, "EMTROLY_ALLOW_MULTI_INSTANCE": "1"},
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     @unittest.skipUnless(os.name == "nt", "Requires Windows cmd/PowerShell execution")
@@ -236,7 +248,13 @@ if ($shimContent -notmatch 'CODEX_HOME=' -or $shimContent -notmatch 'codex\.exe'
                 "-OutputFile",
                 str(out_file),
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(
+                cmd,
+                env={**os.environ, "EMTROLY_ALLOW_MULTI_INSTANCE": "1"},
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(req_file.exists())
             self.assertEqual(target_file.read_text(encoding="utf-8"), "da-sua: " + prompt)
@@ -310,7 +328,13 @@ if ($shimContent -notmatch 'CODEX_HOME=' -or $shimContent -notmatch 'codex\.exe'
                 "-PayloadRoot",
                 str(ROOT),
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(
+                cmd,
+                env={**os.environ, "EMTROLY_ALLOW_MULTI_INSTANCE": "1"},
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
             self.assertIn(result.returncode, (0, 1, 2), result.stdout + result.stderr)
             self.assertEqual(result.stderr.strip(), "", result.stderr)
 

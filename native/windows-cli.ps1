@@ -1,4 +1,4 @@
-function Install-UserOpenClawCli {
+﻿function Install-UserOpenClawCli {
   param([string]$Root, [string]$CliEntry, [int]$Port, [string]$Profile, [string]$ExpectedVersion,
         [string]$Python = (Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source,
         [string]$Node = (Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source)

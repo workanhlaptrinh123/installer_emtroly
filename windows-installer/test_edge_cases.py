@@ -1,0 +1,912 @@
+"""Comprehensive Unit Tests, Edge-Case Integration Tests, and Static Integrity Checks
+for Anh Lap Trinh - Em Tro Ly (Windows & Unix installers).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+import urllib.error
+
+
+ROOT = Path(__file__).resolve().parents[1]
+WIN_POWERSHELL = (
+    Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    / "System32/WindowsPowerShell/v1.0/powershell.exe"
+)
+SHELL = str(WIN_POWERSHELL) if WIN_POWERSHELL.is_file() else (os.environ.get("PWSH") or shutil.which("pwsh"))
+NODE = shutil.which("node")
+WSCRIPT = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/wscript.exe"
+
+TEXT_KWARGS = {"text": True, "encoding": "utf-8", "errors": "replace"}
+
+
+def stage_minimal_manage_payload(parent: Path) -> Path:
+    payload = parent / "minimal_payload"
+    wi = payload / "windows-installer"
+    wi.mkdir(parents=True, exist_ok=True)
+    for name in ("validation.ps1", "codex-cli.ps1", "auto-heal-codex.ps1", "wizard-helpers.ps1"):
+        shutil.copy2(ROOT / "windows-installer" / name, wi / name)
+    return payload
+
+
+def run_ps(script_text: str, *, env: dict[str, str] | None = None, sta: bool = False, timeout: int = 35) -> subprocess.CompletedProcess[str]:
+    with tempfile.TemporaryDirectory(prefix="emtroly-ps-unit-") as td:
+        script_path = Path(td) / "run.ps1"
+        script_path.write_text(script_text, encoding="utf-8-sig")
+        cmd = [SHELL, "-NoLogo", "-NoProfile"]
+        if sta:
+            cmd.append("-STA")
+        if os.name == "nt":
+            cmd += ["-ExecutionPolicy", "Bypass"]
+        cmd += ["-File", str(script_path)]
+        return subprocess.run(cmd, env=env, capture_output=True, timeout=timeout, **TEXT_KWARGS)
+
+
+# =============================================================================
+# 1. PURE UNIT TESTS (Isolated single-function AAA tests, mocked externals)
+# =============================================================================
+
+
+class PureUnitTests(unittest.TestCase):
+    def test_unix_license_gate_pure_unit_tests(self):
+        sys.path.insert(0, str(ROOT / "unix-installer"))
+        try:
+            import license_gate
+
+            # Seal & unseal bound to machine ID
+            sealed = license_gate.seal_machine_activation("sk-unix-key-abc123", machine_id="machine-A")
+            self.assertNotIn("sk-unix-key-abc123", sealed)
+            self.assertEqual(license_gate.unseal_machine_activation(sealed, machine_id="machine-A"), "sk-unix-key-abc123")
+            self.assertEqual(license_gate.unseal_machine_activation(sealed, machine_id="machine-B"), "")
+            self.assertEqual(license_gate.unseal_machine_activation("not-valid-base64!!!", machine_id="machine-A"), "")
+            self.assertEqual(license_gate.unseal_machine_activation("", machine_id="machine-A"), "")
+            with self.assertRaises(ValueError):
+                license_gate.seal_machine_activation("   ", machine_id="machine-A")
+
+            # Disk persistence isolated via XDG_CONFIG_HOME
+            with tempfile.TemporaryDirectory(prefix="emtroly-unix-lic-") as td:
+                prev_xdg = os.environ.get("XDG_CONFIG_HOME")
+                prev_mid = os.environ.get("EMTROLY_TEST_MACHINE_ID")
+                try:
+                    os.environ["XDG_CONFIG_HOME"] = td
+                    os.environ["EMTROLY_TEST_MACHINE_ID"] = "unix-box-1"
+                    self.assertEqual(license_gate.get_saved_license_key(), "")
+                    saved_path = license_gate.save_license_key("sk-unix-persisted-999")
+                    self.assertTrue(saved_path.is_file())
+                    self.assertEqual(license_gate.get_saved_license_key(), "sk-unix-persisted-999")
+                    os.environ["EMTROLY_TEST_MACHINE_ID"] = "unix-box-2"
+                    self.assertEqual(license_gate.get_saved_license_key(), "")
+                    os.environ["EMTROLY_TEST_MACHINE_ID"] = "unix-box-1"
+                    license_gate.clear_saved_license_key()
+                    self.assertEqual(license_gate.get_saved_license_key(), "")
+                finally:
+                    if prev_xdg is None:
+                        os.environ.pop("XDG_CONFIG_HOME", None)
+                    else:
+                        os.environ["XDG_CONFIG_HOME"] = prev_xdg
+                    if prev_mid is None:
+                        os.environ.pop("EMTROLY_TEST_MACHINE_ID", None)
+                    else:
+                        os.environ["EMTROLY_TEST_MACHINE_ID"] = prev_mid
+
+            # Mocked verify_license_key across empty / wrong domain / 200 / empty models / 401 / 403 / 500 / network error
+            self.assertFalse(license_gate.verify_license_key("")["valid"])
+            bad_domain = license_gate.verify_license_key("sk-key", authority_base_url="https://api.openai.com/v1")
+            self.assertFalse(bad_domain["valid"])
+            self.assertTrue(bad_domain["revoked"])
+
+            class FakeResp:
+                def __init__(self, payload: dict):
+                    self._raw = json.dumps(payload).encode("utf-8")
+
+                def read(self):
+                    return self._raw
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    return False
+
+            ok = license_gate.verify_license_key(
+                "sk-valid",
+                opener=lambda req, timeout=15: FakeResp({"data": [{"id": "gpt-6.2-sol"}]}),
+            )
+            self.assertTrue(ok["valid"])
+            self.assertEqual(ok["models"], ["gpt-6.2-sol"])
+
+            no_models = license_gate.verify_license_key(
+                "sk-empty-models",
+                opener=lambda req, timeout=15: FakeResp({"data": []}),
+            )
+            self.assertFalse(no_models["valid"])
+            self.assertTrue(no_models["revoked"])
+
+            for code, expect_revoked, expect_net in ((401, True, False), (403, True, False), (500, False, True)):
+                def _raise_http(req, timeout=15, status=code):
+                    raise urllib.error.HTTPError(req.full_url, status, "err", {}, io.BytesIO(b""))
+
+                res = license_gate.verify_license_key("sk-test", opener=_raise_http)
+                self.assertFalse(res["valid"])
+                self.assertEqual(res["revoked"], expect_revoked)
+                self.assertEqual(res["network_error"], expect_net)
+
+            net_err = license_gate.verify_license_key(
+                "sk-test",
+                opener=lambda req, timeout=15: (_ for _ in ()).throw(OSError("offline")),
+            )
+            self.assertFalse(net_err["valid"])
+            self.assertTrue(net_err["network_error"])
+        finally:
+            sys.path.pop(0)
+
+    @unittest.skipUnless(SHELL and os.name == "nt", "Requires Windows PowerShell")
+    def test_validation_boundary_and_exception_inputs(self):
+        val_path = ROOT / "windows-installer/validation.ps1"
+        res = run_ps(
+            f'. "{val_path}"\n'
+            "$ErrorActionPreference = 'Stop'\n"
+            "function New-ValidSettings([hashtable]$Over = @{}) {\n"
+            "  $h = [ordered]@{\n"
+            "    member = 'emtroly'; assistant_name = 'Em Tro Ly'; owner_ids = '123456789';\n"
+            "    group_id = '-1001234567890'; telegram_token = '123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ12345';\n"
+            "    ai_api_key = 'sk-valid-key'; model = 'gpt-6.2-sol'; base_url = 'https://codex.anhlaptrinh.vn/v1';\n"
+            "    gateway_port = '0'; accept_full_access = $true; configure_zalo = $true; qr_owner_id = '123456789'\n"
+            "  }\n"
+            "  foreach ($k in $Over.Keys) { $h[$k] = $Over[$k] }\n"
+            "  return [pscustomobject]$h\n"
+            "}\n"
+            "# Valid boundary ports & all 3 models\n"
+            "foreach ($p in @('0', '1024', '65000')) { Test-MemberInstallerSettings (New-ValidSettings @{ gateway_port = $p }) }\n"
+            "foreach ($m in @('gpt-6.2-sol', 'GPT-6.1-terra', 'gpt-6.2-astra')) { Test-MemberInstallerSettings (New-ValidSettings @{ model = $m }) }\n"
+            "# Invalid cases must throw exact error codes\n"
+            "$cases = @(\n"
+            "  @{ Over = @{ member = 'BadUpper' }; Expect = 'invalid-member' },\n"
+            "  @{ Over = @{ assistant_name = '   ' }; Expect = 'missing-assistant-name' },\n"
+            "  @{ Over = @{ owner_ids = '0' }; Expect = 'invalid-owners' },\n"
+            "  @{ Over = @{ owner_ids = '-12345' }; Expect = 'invalid-owners' },\n"
+            "  @{ Over = @{ group_id = '10012345' }; Expect = 'invalid-group' },\n"
+            "  @{ Over = @{ telegram_token = 'bad-token' }; Expect = 'invalid-telegram-token' },\n"
+            "  @{ Over = @{ ai_api_key = '' }; Expect = 'missing-api-key' },\n"
+            "  @{ Over = @{ model = 'gpt-4o' }; Expect = 'invalid-model' },\n"
+            "  @{ Over = @{ base_url = 'http://codex.anhlaptrinh.vn/v1' }; Expect = 'invalid-base-url' },\n"
+            "  @{ Over = @{ base_url = 'https://user:pass@codex.anhlaptrinh.vn/v1' }; Expect = 'invalid-base-url' },\n"
+            "  @{ Over = @{ base_url = 'https://codex.anhlaptrinh.vn/v1?x=1' }; Expect = 'invalid-base-url' },\n"
+            "  @{ Over = @{ gateway_port = '80' }; Expect = 'invalid-port' },\n"
+            "  @{ Over = @{ gateway_port = '1023' }; Expect = 'invalid-port' },\n"
+            "  @{ Over = @{ gateway_port = '65001' }; Expect = 'invalid-port' },\n"
+            "  @{ Over = @{ accept_full_access = $false }; Expect = 'full-access-consent-required' },\n"
+            "  @{ Over = @{ qr_owner_id = '999999999' }; Expect = 'invalid-qr-owner' }\n"
+            ")\n"
+            "foreach ($c in $cases) {\n"
+            "  $got = ''\n"
+            "  try { Test-MemberInstallerSettings (New-ValidSettings $c.Over) } catch { $got = [string]$_.Exception.Message }\n"
+            "  if ($got -cne $c.Expect) { throw \"Expected $($c.Expect) but got '$got'\" }\n"
+            "}\n"
+            "Write-Output 'VALIDATION_UNIT_OK'\n"
+        )
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertIn("VALIDATION_UNIT_OK", res.stdout)
+
+    @unittest.skipUnless(SHELL and os.name == "nt", "Requires Windows PowerShell")
+    def test_dpapi_seal_unseal_corrupt_cross_machine_and_no_plaintext_leftover(self):
+        helpers = ROOT / "windows-installer/wizard-helpers.ps1"
+        with tempfile.TemporaryDirectory(prefix="emtroly-dpapi-unit-") as td:
+            home = Path(td) / "home"
+            local = Path(td) / "local"
+            home.mkdir()
+            local.mkdir()
+            env = {**os.environ, "USERPROFILE": str(home), "LOCALAPPDATA": str(local)}
+            res = run_ps(
+                f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{helpers}", [Text.Encoding]::UTF8)))\n'
+                "$ErrorActionPreference = 'Stop'\n"
+                "# Seed legacy plaintext license.key first\n"
+                "$legacyDir = Join-Path $env:LOCALAPPDATA 'EmTroLyUI'\n"
+                "[void][IO.Directory]::CreateDirectory($legacyDir)\n"
+                "$legacyFile = Join-Path $legacyDir 'license.key'\n"
+                "[IO.File]::WriteAllText($legacyFile, 'sk-legacy-plaintext-key-12345')\n"
+                "# Save-EmTroLyLicenseKey seals into DPAPI activation.dat and removes plaintext license.key\n"
+                "Save-EmTroLyLicenseKey -ApiKey 'sk-dpapi-secret-key-98765'\n"
+                "if (Test-Path -LiteralPath $legacyFile) { throw 'plaintext-license-key-not-removed' }\n"
+                "$actPath = Get-EmTroLyActivationFilePath\n"
+                "if (-not (Test-Path -LiteralPath $actPath -PathType Leaf)) { throw 'activation-dat-missing' }\n"
+                "$cipherRaw = [IO.File]::ReadAllText($actPath)\n"
+                "if ($cipherRaw -match 'sk-dpapi-secret-key') { throw 'activation-dat-not-encrypted' }\n"
+                "if ((Get-EmTroLySavedLicenseKey) -cne 'sk-dpapi-secret-key-98765') { throw 'dpapi-roundtrip-failed' }\n"
+                "# Different machine binding ID must fail to decrypt\n"
+                "$env:EMTROLY_TEST_MACHINE_ID = 'OTHER-MACHINE-GUID'\n"
+                "if ((Get-EmTroLySavedLicenseKey) -ne '') { throw 'other-machine-decrypted-activation' }\n"
+                "Remove-Item Env:EMTROLY_TEST_MACHINE_ID\n"
+                "# Corrupted activation.dat returns empty string safely without throwing\n"
+                "[IO.File]::WriteAllText($actPath, '!!!CORRUPT_BASE64!!!')\n"
+                "if ((Get-EmTroLySavedLicenseKey) -ne '') { throw 'corrupt-activation-not-rejected' }\n"
+                "Write-Output 'DPAPI_UNIT_OK'\n",
+                env=env,
+            )
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertIn("DPAPI_UNIT_OK", res.stdout)
+
+    @unittest.skipUnless(SHELL and os.name == "nt", "Requires Windows PowerShell")
+    def test_download_retry_transient_failure_and_checksum_fail_closed(self):
+        editor_ps1 = ROOT / "windows-installer/install-antigravity-codex.ps1"
+        deps_ps1 = ROOT / "native/user-dependencies.ps1"
+        with tempfile.TemporaryDirectory(prefix="emtroly-dl-unit-") as td:
+            src = Path(td) / "good.bin"
+            src.write_bytes(b"verified-installer-bytes")
+            good_hash = hashlib.sha256(b"verified-installer-bytes").hexdigest()
+            out1 = Path(td) / "out-editor.bin"
+            out2 = Path(td) / "out-dep.bin"
+            res = run_ps(
+                "$ErrorActionPreference = 'Stop'\n"
+                f"$tokens = $null; $errs = $null\n"
+                f"$ast = [Management.Automation.Language.Parser]::ParseFile('{editor_ps1}', [ref]$tokens, [ref]$errs)\n"
+                "$fn = @($ast.FindAll({ param($x) $x -is [Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq 'Get-VerifiedDownload' }, $true))[0]\n"
+                "Invoke-Expression $fn.Extent.Text\n"
+                f". '{deps_ps1}'\n"
+                "$script:calls = 0\n"
+                "function global:Invoke-WebRequest {\n"
+                "  param([switch]$UseBasicParsing, $Uri, $OutFile, $TimeoutSec, $ErrorAction)\n"
+                "  $script:calls++\n"
+                "  if ($script:calls -lt 3) { throw 'transient-network-drop' }\n"
+                f"  Copy-Item -LiteralPath '{src}' -Destination $OutFile -Force\n"
+                "}\n"
+                f"Get-VerifiedDownload -Url 'https://example.test/a.exe' -Path '{out1}' -Hash '{good_hash}'\n"
+                f"if ($script:calls -ne 3 -or -not (Test-Path -LiteralPath '{out1}')) {{ throw 'editor-retry-failed' }}\n"
+                "# Bad checksum must fail closed and delete corrupt file\n"
+                "$script:calls = 3\n"
+                "$errCode = ''\n"
+                f"try {{ Get-VerifiedDownload -Url 'https://example.test/a.exe' -Path '{out1}' -Hash ('0'*64) }} catch {{ $errCode = [string]$_.Exception.Message }}\n"
+                f"if ($errCode -cne 'editor-download-checksum' -or (Test-Path -LiteralPath '{out1}')) {{ throw 'bad-hash-not-cleaned' }}\n"
+                "# FastDependencyDownload retries transient failures too\n"
+                "$script:calls = 0\n"
+                f"Invoke-FastDependencyDownload -Uri 'https://example.test/b.zip' -OutFile '{out2}' -MaxAttempts 3\n"
+                f"if ($script:calls -ne 3 -or -not (Test-Path -LiteralPath '{out2}')) {{ throw 'dep-retry-failed' }}\n"
+                "# Verify FFmpeg fast GitHub CDN primary mirror + gyan.dev fallback + status helper exist\n"
+                f"$depSrc = [IO.File]::ReadAllText('{deps_ps1}', [Text.Encoding]::UTF8)\n"
+                "if ($depSrc -notmatch 'github\\.com/GyanD/codexffmpeg' -or $depSrc -notmatch 'www\\.gyan\\.dev/ffmpeg') { throw 'ffmpeg-dual-mirror-missing' }\n"
+                "$stTmp = Join-Path ([IO.Path]::GetTempPath()) ('dep-status-' + [guid]::NewGuid().ToString('N') + '.txt')\n"
+                "$env:MEMBER_INSTALL_STATUS_FILE = $stTmp\n"
+                "Write-DependencyInstallStatus 'Đang tải FFmpeg... 65% (71.2 / 109.5 MB)'\n"
+                "if ([IO.File]::ReadAllText($stTmp, [Text.Encoding]::UTF8) -notmatch '65%') { throw 'dep-status-write-failed' }\n"
+                "Remove-Item -LiteralPath $stTmp -Force -ErrorAction SilentlyContinue\n"
+                "Remove-Item Env:MEMBER_INSTALL_STATUS_FILE -ErrorAction SilentlyContinue\n"
+                "Write-Output 'DOWNLOAD_RETRY_UNIT_OK'\n"
+            )
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertIn("DOWNLOAD_RETRY_UNIT_OK", res.stdout)
+
+    @unittest.skipUnless(SHELL and os.name == "nt", "Requires Windows PowerShell")
+    def test_stale_gateway_pid_record_unit_logic_and_dotnet_port_probe(self):
+        gw_ps1 = ROOT / "native/user-gateway.ps1"
+        with tempfile.TemporaryDirectory(prefix="emtroly-pid-unit-") as td:
+            recent_pid = Path(td) / "recent.pid.json"
+            old_pid = Path(td) / "old.pid.json"
+            recent_pid.write_text(json.dumps({"pid": None}), encoding="utf-8")
+            old_pid.write_text(json.dumps({"pid": None, "startedAt": 1000}), encoding="utf-8")
+            res = run_ps(
+                f'. "{gw_ps1}"\n'
+                "$ErrorActionPreference = 'Stop'\n"
+                f"$rRecent = Get-Content -LiteralPath '{recent_pid}' -Raw | ConvertFrom-Json\n"
+                f"$rOld = Get-Content -LiteralPath '{old_pid}' -Raw | ConvertFrom-Json\n"
+                f"if (Test-StaleGatewayPidRecord -PidPath '{recent_pid}' -Record $rRecent -StaleSeconds 60) {{ throw 'recent-marked-stale' }}\n"
+                f"if (-not (Test-StaleGatewayPidRecord -PidPath '{old_pid}' -Record $rOld -StaleSeconds 60)) {{ throw 'old-not-marked-stale' }}\n"
+                "# Pure .NET IPGlobalProperties port probe fallback works without CIM/WMI\n"
+                "$ports = @([System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() | Select-Object -ExpandProperty Port)\n"
+                "if ($null -eq $ports) { throw 'dotnet-port-probe-null' }\n"
+                "Write-Output 'PID_AND_PORT_UNIT_OK'\n"
+            )
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertIn("PID_AND_PORT_UNIT_OK", res.stdout)
+
+    def test_setup_draft_encrypted_roundtrip_windows_dpapi_and_unix(self):
+        # 1. Unix machine-bound encrypted draft unit test
+        sys.path.insert(0, str(ROOT / "unix-installer"))
+        try:
+            import license_gate
+
+            with tempfile.TemporaryDirectory(prefix="emtroly-unix-draft-") as td:
+                prev_xdg = os.environ.get("XDG_CONFIG_HOME")
+                prev_mid = os.environ.get("EMTROLY_TEST_MACHINE_ID")
+                try:
+                    os.environ["XDG_CONFIG_HOME"] = td
+                    os.environ["EMTROLY_TEST_MACHINE_ID"] = "unix-draft-box-1"
+                    self.assertIsNone(license_gate.get_saved_setup_draft())
+                    saved_path = license_gate.save_setup_draft(
+                        {
+                            "telegram_token": "777888:UNIX_DRAFT_SECRET_TOKEN_1234567890",
+                            "ai_api_key": "sk-unix-draft-secret-key-99999",
+                            "owner_ids": "111222333",
+                            "group_id": "-100999888777",
+                            "model": "gpt-6.2-astra",
+                            "assistant_name": "Trợ Lý Của Anh",
+                            "gateway_port": "19888",
+                            "configure_zalo": False,
+                            "accept_full_access": True,
+                        }
+                    )
+                    raw_disk = saved_path.read_text(encoding="ascii")
+                    self.assertNotIn("UNIX_DRAFT_SECRET_TOKEN", raw_disk)
+                    self.assertNotIn("sk-unix-draft-secret-key", raw_disk)
+                    loaded = license_gate.get_saved_setup_draft()
+                    self.assertIsNotNone(loaded)
+                    self.assertEqual(loaded["telegram_token"], "777888:UNIX_DRAFT_SECRET_TOKEN_1234567890")
+                    self.assertEqual(loaded["assistant_name"], "Trợ Lý Của Anh")
+                    self.assertEqual(loaded["configure_zalo"], False)
+                    self.assertEqual(loaded["accept_full_access"], True)
+                    # Different machine ID cannot decrypt
+                    os.environ["EMTROLY_TEST_MACHINE_ID"] = "unix-draft-box-2"
+                    self.assertIsNone(license_gate.get_saved_setup_draft())
+                    os.environ["EMTROLY_TEST_MACHINE_ID"] = "unix-draft-box-1"
+                    license_gate.clear_saved_setup_draft()
+                    self.assertIsNone(license_gate.get_saved_setup_draft())
+                finally:
+                    if prev_xdg is None:
+                        os.environ.pop("XDG_CONFIG_HOME", None)
+                    else:
+                        os.environ["XDG_CONFIG_HOME"] = prev_xdg
+                    if prev_mid is None:
+                        os.environ.pop("EMTROLY_TEST_MACHINE_ID", None)
+                    else:
+                        os.environ["EMTROLY_TEST_MACHINE_ID"] = prev_mid
+        finally:
+            sys.path.pop(0)
+
+        # 2. Windows DPAPI encrypted draft unit test
+        if SHELL and os.name == "nt":
+            helpers = ROOT / "windows-installer/wizard-helpers.ps1"
+            with tempfile.TemporaryDirectory(prefix="emtroly-win-draft-") as td:
+                home = Path(td) / "home"
+                local = Path(td) / "local"
+                home.mkdir()
+                local.mkdir()
+                env = {**os.environ, "USERPROFILE": str(home), "LOCALAPPDATA": str(local)}
+                res = run_ps(
+                    f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{helpers}", [Text.Encoding]::UTF8)))\n'
+                    "$ErrorActionPreference = 'Stop'\n"
+                    "if ($null -ne (Get-EmTroLySavedSetupDraft)) { throw 'expected-null-before-save' }\n"
+                    "$ok = Save-EmTroLySetupDraft -Draft @{\n"
+                    "  telegram_token = '123456:DPAPI_DRAFT_TOKEN_SECRET_ABCDEFGHIJ'\n"
+                    "  ai_api_key = 'sk-dpapi-draft-secret-key-55555'\n"
+                    "  owner_ids = '698000111,698000222'\n"
+                    "  group_id = '-1001234567890'\n"
+                    "  model = 'gpt-6.2-astra'\n"
+                    "  assistant_name = 'Trợ Lý Anh Lập Trình'\n"
+                    "  base_url = 'https://codex.anhlaptrinh.vn/v1'\n"
+                    "  gateway_port = '19888'\n"
+                    "  qr_owner_id = '698000222'\n"
+                    "  audience = 'Nhân sự kỹ thuật'\n"
+                    "  addressing = 'anh / em'\n"
+                    "  style = 'Ngắn gọn, dễ hiểu'\n"
+                    "  configure_zalo = $false\n"
+                    "  skip_editor = $true\n"
+                    "  accept_full_access = $true\n"
+                    "}\n"
+                    "if (-not $ok) { throw 'save-draft-returned-false' }\n"
+                    "$df = Get-EmTroLySetupDraftFilePath\n"
+                    "$raw = [IO.File]::ReadAllText($df)\n"
+                    "if ($raw -match 'DPAPI_DRAFT_TOKEN' -or $raw -match 'sk-dpapi-draft-secret') { throw 'draft-not-encrypted-on-disk' }\n"
+                    "$d = Get-EmTroLySavedSetupDraft\n"
+                    "if ($d.telegram_token -cne '123456:DPAPI_DRAFT_TOKEN_SECRET_ABCDEFGHIJ') { throw 'token-mismatch' }\n"
+                    "if ($d.assistant_name -cne 'Trợ Lý Anh Lập Trình') { throw 'unicode-assistant-mismatch' }\n"
+                    "if ($d.model -cne 'gpt-6.2-astra' -or $d.gateway_port -ne '19888' -or $d.configure_zalo -ne $false -or $d.skip_editor -ne $true -or $d.accept_full_access -ne $true) { throw 'fields-mismatch' }\n"
+                    "# Cross-machine isolation\n"
+                    "$env:EMTROLY_TEST_MACHINE_ID = 'ANOTHER-PC-GUID'\n"
+                    "if ($null -ne (Get-EmTroLySavedSetupDraft)) { throw 'cross-machine-decrypted-draft' }\n"
+                    "Remove-Item Env:EMTROLY_TEST_MACHINE_ID\n"
+                    "# Corrupt draft file returns null cleanly\n"
+                    "[IO.File]::WriteAllText($df, 'BROKEN_BASE64!!!')\n"
+                    "if ($null -ne (Get-EmTroLySavedSetupDraft)) { throw 'corrupt-draft-not-null' }\n"
+                    "Clear-EmTroLySavedSetupDraft\n"
+                    "if (Test-Path -LiteralPath $df) { throw 'clear-draft-did-not-delete' }\n"
+                    "Write-Output 'SETUP_DRAFT_UNIT_OK'\n",
+                    env=env,
+                )
+                self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+                self.assertIn("SETUP_DRAFT_UNIT_OK", res.stdout)
+
+
+# =============================================================================
+# 2. EDGE-CASE INTEGRATION & COMPONENT TESTS (Real isolated temp environments)
+# =============================================================================
+
+
+@unittest.skipUnless(SHELL and os.name == "nt", "Requires Windows PowerShell")
+class EdgeCaseIntegrationTests(unittest.TestCase):
+    def test_vietnamese_unicode_paths_in_vbs_and_codex_cmd_shims(self):
+        gw_ps1 = ROOT / "native/user-gateway.ps1"
+        codex_ps1 = ROOT / "windows-installer/codex-cli.ps1"
+        with tempfile.TemporaryDirectory(prefix="emtroly-vn-") as td:
+            base = Path(td) / "Nguyễn Văn Ánh"
+            home = base / "profile"
+            local = base / "local"
+            startup = base / "startup"
+            oc_root = home / "openclaw"
+            em_codex = local / "EmTroLy/Codex"
+            em_ext = local / "EmTroLy/Antigravity/Extensions/openai.chatgpt-26.51111.21308/bin/windows-x86_64"
+            for d in (home, local, startup, oc_root, em_codex, em_ext):
+                d.mkdir(parents=True, exist_ok=True)
+            (oc_root / "installer-instance.json").write_text(
+                json.dumps({"root": str(oc_root), "profile": "member-emtroly", "cli_entry": str(oc_root / "cli.mjs"), "port": 19789}),
+                encoding="utf-8",
+            )
+            (em_codex / "config.toml").write_text('model = "gpt-6.2-sol"\n', encoding="utf-8")
+            (em_codex / "auth.json").write_text('{"OPENAI_API_KEY":"sk-vn"}', encoding="utf-8")
+            # Tiny batch-compatible fake codex executable to verify chcp 65001 shim execution under Vietnamese folder!
+            fake_exe = em_ext / "codex.exe"
+            fake_exe.write_text("dummy", encoding="utf-8")
+
+            env = {**os.environ, "USERPROFILE": str(home), "LOCALAPPDATA": str(local)}
+            res = run_ps(
+                f'. "{gw_ps1}"\n'
+                f'. "{codex_ps1}"\n'
+                "$ErrorActionPreference = 'Stop'\n"
+                "Register-EmTroLyCodexCli -PayloadRoot '" + str(ROOT) + "' | Out-Null\n"
+                "$shim = Join-Path $env:LOCALAPPDATA 'OpenClaw\\bin\\codex-emtroly.cmd'\n"
+                "$uiShim = Join-Path $env:LOCALAPPDATA 'OpenClaw\\bin\\emtroly-ui.cmd'\n"
+                "$shimTxt = [IO.File]::ReadAllText($shim, [Text.Encoding]::UTF8)\n"
+                "$uiTxt = [IO.File]::ReadAllText($uiShim, [Text.Encoding]::UTF8)\n"
+                "if ($shimTxt -notmatch 'chcp\\.com\" 65001') { throw 'codex-shim-missing-utf8-chcp' }\n"
+                "if ($uiTxt -notmatch 'chcp\\.com\" 65001' -or $uiTxt -notmatch 'wscript\\.exe') { throw 'ui-shim-not-hidden-utf8' }\n"
+                "# Verify Startup VBS encoding in user-gateway.ps1 is UTF-16 LE ([Text.Encoding]::Unicode)\n"
+                f"$gwSrc = [IO.File]::ReadAllText('{gw_ps1}', [Text.Encoding]::UTF8)\n"
+                "if ($gwSrc -notmatch 'WriteAllText\\(\\$startupFile,\\s*\\$body,\\s*\\[Text\\.Encoding\\]::Unicode\\)') { throw 'startup-vbs-not-unicode' }\n"
+                "Write-Output 'UNICODE_PATHS_OK'\n",
+                env=env,
+            )
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertIn("UNICODE_PATHS_OK", res.stdout)
+
+    def test_powershell51_native_stderr_warnings_do_not_abort_runner(self):
+        runner = ROOT / "windows-installer/run-native-install.ps1"
+        with tempfile.TemporaryDirectory(prefix="emtroly-stderr-") as td:
+            root = Path(td)
+            payload = root / "payload"
+            (payload / "windows-installer").mkdir(parents=True)
+            shutil.copy2(ROOT / "windows-installer/validation.ps1", payload / "windows-installer")
+            (payload / "windows-installer/verify-openclaw-command.ps1").write_text("exit 0\n", encoding="utf-8-sig")
+            # Fake installer that runs a REAL native process emitting warnings to stderr (exit 0)
+            (payload / "install-native-windows.ps1").write_text(
+                "param($Name,$OwnerIds,$GroupId,$AssistantName,$BaseUrl,$Model,$Profile,$Modules,$QrOwnerId,$OpenClawVersion,$InstallMode,$InstallRoot,$GatewayPort,$Audience,$Addressing,$Style,[switch]$UserInstall,$CredentialData)\n"
+                "$ErrorActionPreference = 'Stop'\n"
+                "& cmd.exe /d /c 'echo npm warn deprecated something 1>&2 & exit /b 0'\n"
+                "if ($LASTEXITCODE -ne 0) { throw 'cmd-failed' }\n"
+                "$r = Join-Path $env:USERPROFILE 'openclaw'\n"
+                "foreach ($f in @('openclaw.json','installer-instance.json','openclaw-instance.ps1','windows-cli.json',"
+                "'workspace\\skills\\core-openclaw-telegram\\SKILL.md','workspace\\skills\\cap-full-quyen-telegram-openclaw\\SKILL.md',"
+                "'workspace\\skills\\reliable-media-delivery\\SKILL.md','workspace\\skills\\imagegen\\SKILL.md',"
+                "'workspace\\skills\\core-openclaw-media\\SKILL.md','workspace\\skills\\openclaw-docx-reader\\SKILL.md',"
+                "'workspace\\skills\\openclaw-python-docx-telegram\\SKILL.md')) {\n"
+                "  $p = Join-Path $r $f; [void](New-Item -ItemType Directory -Force -Path (Split-Path -Parent $p)); [IO.File]::WriteAllText($p, 'ok')\n"
+                "}\n"
+                "$owners = @($OwnerIds -split ',')\n"
+                "$exec = @{ host='gateway'; mode='full'; strictInlineEval=$false }\n"
+                "$targets = @($owners | ForEach-Object { @{ channel='telegram'; accountId=$Name; to=$_ } })\n"
+                "$cfg = @{ commands=@{ownerAllowFrom=@($owners | ForEach-Object { \"telegram:$_\" })}; channels=@{telegram=@{allowFrom=$owners;execApprovals=@{approvers=$owners};accounts=@{$Name=@{allowFrom=$owners;execApprovals=@{approvers=$owners}}}}}; approvals=@{exec=@{enabled=$true;mode='targets';agentFilter=@('main');targets=$targets};plugin=@{enabled=$true;mode='targets';agentFilter=@('main');targets=$targets}}; tools=@{exec=$exec}; agents=@{entries=@{main=@{tools=@{exec=$exec}}}}; bindings=@(@{agentId='main';match=@{channel='telegram';accountId=$Name}}) }\n"
+                "[IO.File]::WriteAllText((Join-Path $r 'openclaw.json'), ($cfg | ConvertTo-Json -Depth 15))\n"
+                "[IO.File]::WriteAllText((Join-Path $r 'installer-instance.json'), '{\"profile\":\"member-emtroly\"}')\n"
+                "$rt = Join-Path $r 'runtime\\2026.11.4\\node_modules\\openclaw'; [void](New-Item -ItemType Directory -Force -Path $rt)\n"
+                "[IO.File]::WriteAllText((Join-Path $rt 'openclaw.mjs'), \"const a=process.argv.slice(2);if(a[0]==='--version')console.log('OpenClaw 2026.11.4');else if(a[0]==='approvals')console.log(JSON.stringify({file:{agents:{main:{security:'full',ask:'off',askFallback:'full'}}}}));else if(a[0]==='gateway')console.log(JSON.stringify({ok:true,plugins:{loaded:[]}}));\")\n"
+                "$global:LASTEXITCODE = 0\n",
+                encoding="utf-8-sig",
+            )
+            home = root / "home"
+            home.mkdir()
+            settings_file = root / "settings.json"
+            log_file = root / "status.txt"
+            settings_file.write_text(
+                json.dumps(
+                    {
+                        "member": "emtroly",
+                        "assistant_name": "Em Tro Ly",
+                        "base_url": "https://provider.example/v1",
+                        "model": "gpt-6.2-sol",
+                        "owner_ids": "123456789",
+                        "group_id": "-1001234567890",
+                        "gateway_port": "0",
+                        "audience": "",
+                        "addressing": "",
+                        "style": "",
+                        "accept_full_access": True,
+                        "configure_zalo": False,
+                        "skip_editor": True,
+                        "qr_owner_id": "",
+                        "telegram_token": "123456:STDERR_TEST_TOKEN_ABCDEFGHIJKLMNO",
+                        "ai_api_key": "sk-stderr-test-key",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            clean_path = os.pathsep.join(
+                p for p in os.environ.get("PATH", "").split(os.pathsep) if "openclaw" not in p.lower()
+            )
+            env = {**os.environ, "PATH": clean_path, "USERPROFILE": str(home), "LOCALAPPDATA": str(root / "local")}
+            (root / "local").mkdir()
+            res = run_ps(
+                "function global:Invoke-RestMethod {\n"
+                "  param([switch]$UseBasicParsing, $Method, $Uri, $Headers, $TimeoutSec, $MaximumRedirection)\n"
+                "  if ($Uri -match '/models$') { return @{ data = @(@{ id = 'gpt-6.2-sol' }) } }\n"
+                "  if ($Uri -match '/getMe$') { return @{ ok = $true; result = @{ is_bot = $true } } }\n"
+                "  throw $Uri\n"
+                "}\n"
+                f'& "{runner}" -SettingsFile "{settings_file}" -PayloadRoot "{payload}" -LogFile "{log_file}"\n'
+                "exit $LASTEXITCODE\n",
+                env=env,
+                timeout=45,
+            )
+            self.assertEqual(res.returncode, 0, f"status={log_file.read_text(encoding='utf-8') if log_file.exists() else ''}\n{res.stdout}\n{res.stderr}")
+            self.assertTrue(log_file.read_text(encoding="utf-8").startswith("Hoàn tất:"))
+
+    def test_diag_json_and_wpf_error_card_scrub_secrets_and_update_ui(self):
+        manage_ps1 = ROOT / "windows-installer/manage-instance.ps1"
+        wizard_ps1 = ROOT / "windows-installer/wizard.ps1"
+        secret_tok = "987654:SUPER_SECRET_BOT_TOKEN_DO_NOT_LEAK_777"
+        secret_key = "sk-super-secret-customer-key-do-not-leak-888"
+        with tempfile.TemporaryDirectory(prefix="emtroly-errcard-") as td:
+            temp = Path(td)
+            home = temp / "home"
+            local = temp / "local"
+            home.mkdir()
+            local.mkdir()
+
+            # 1. Verify manage-instance.ps1 scrubs secrets from .diag.json on error
+            req_file = temp / "req.json"
+            status_file = temp / "status.txt"
+            req_file.write_text(
+                json.dumps(
+                    {
+                        "action": "auto-heal",
+                        "ai_api_key": secret_key,
+                        "telegram_token": secret_tok,
+                        "error_detail": f"Crash with {secret_tok} and {secret_key}",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            env = {
+                **os.environ,
+                "USERPROFILE": str(home),
+                "LOCALAPPDATA": str(local),
+                "EMTROLY_ALLOW_MULTI_INSTANCE": "1",
+            }
+            # Force auto-heal to fail offline fast (minimal payload without native/user-dependencies.ps1)
+            minimal_payload = stage_minimal_manage_payload(temp)
+            res_m = run_ps(
+                "$env:Path = ''\n"
+                f'& "{manage_ps1}" -RunManageWorker -WorkerRequestFile "{req_file}" -WorkerPayloadRoot "{minimal_payload}" -WorkerLogFile "{status_file}"\n'
+                "exit $LASTEXITCODE\n",
+                env=env,
+            )
+            self.assertNotEqual(res_m.returncode, 0)
+            diag_file = Path(str(status_file) + ".diag.json")
+            self.assertTrue(diag_file.is_file(), "manage-instance must write .diag.json on failure")
+            diag_text = diag_file.read_text(encoding="utf-8")
+            self.assertNotIn(secret_tok, diag_text)
+            self.assertNotIn(secret_key, diag_text)
+
+            # 2. Verify WPF Show-RichFailureDiagnostics scrubs secrets, updates UI, and Change License dismissal works
+            for h in ("codex-cli.ps1", "manage-instance.ps1", "auto-heal-codex.ps1", "wizard-helpers.ps1"):
+                (temp / h).write_text((ROOT / "windows-installer" / h).read_text(encoding="utf-8-sig"), encoding="utf-8-sig")
+            wiz_src = wizard_ps1.read_text(encoding="utf-8-sig")
+            probe = f"""
+Unlock-LicenseGate '{secret_key}'
+$tokenBox.Text = '{secret_tok}'
+$script:lastActiveStepIndex = 3
+$diagObj = [pscustomobject]@{{
+  timestamp = '2026-11-22 16:30:00'
+  stage = 'install'
+  code = 'gateway-health-failed'
+  autoHealSummary = 'Failed with {secret_key}'
+  technicalDetail = 'Leak attempt {secret_tok} and {secret_key}'
+}}
+Show-RichFailureDiagnostics -SummaryMessage 'Lỗi kết nối với {secret_tok}' -DiagPayload $diagObj -IsManageFailure $false
+if ($installFailureActions.Visibility -ne [System.Windows.Visibility]::Visible) {{ throw 'error-card-hidden' }}
+if ($autoHealNoteBorder.Visibility -ne [System.Windows.Visibility]::Collapsed) {{ throw 'note-not-collapsed' }}
+if ($progressPercentText.Text -cne 'Gặp sự cố') {{ throw 'percent-text-wrong' }}
+if ($errorDetailBox.Text -match [regex]::Escape('{secret_tok}') -or $errorDetailBox.Text -match [regex]::Escape('{secret_key}')) {{ throw 'secret-leaked-in-error-card' }}
+if ($codexOutputBox.Text -match [regex]::Escape('{secret_tok}') -or $codexOutputBox.Text -match [regex]::Escape('{secret_key}')) {{ throw 'secret-leaked-in-codex-box' }}
+if ($codexOutputBox.Text -notmatch 'gateway-health-failed') {{ throw 'error-not-mirrored-to-codex-tab' }}
+# Verify Change License overlay allows dismissing back to unlocked app
+Show-LicenseGate '' -AllowCancel
+if ($licenseGateOverlay.Visibility -ne [System.Windows.Visibility]::Visible -or $licenseExitBtn.Content -cne 'Quay lại') {{ throw 'change-license-cancel-not-ready' }}
+$window.Close()
+Write-Output 'ERROR_CARD_UI_OK'
+"""
+            (temp / "wiz-err.ps1").write_text(wiz_src.replace("[void]$window.ShowDialog()", probe), encoding="utf-8-sig")
+            res_w = run_ps(
+                f'& "{temp / "wiz-err.ps1"}" -PayloadRoot "{ROOT}"\n',
+                env=env,
+                sta=True,
+            )
+            self.assertEqual(res_w.returncode, 0, res_w.stdout + res_w.stderr)
+            self.assertIn("ERROR_CARD_UI_OK", res_w.stdout)
+
+    def test_auto_heal_cleans_incomplete_root_only_never_complete_instance(self):
+        manage_ps1 = ROOT / "windows-installer/manage-instance.ps1"
+        with tempfile.TemporaryDirectory(prefix="emtroly-clean-half-") as td:
+            temp = Path(td)
+            home = temp / "home"
+            local = temp / "local"
+            oc = home / "openclaw"
+            (oc / "runtime").mkdir(parents=True)
+            (oc / "workspace").mkdir(parents=True)
+            local.mkdir()
+
+            # Case 1: Incomplete folder (NO openclaw.json) -> auto-heal cleans it cleanly and exits 0
+            req1 = temp / "req1.json"
+            st1 = temp / "st1.txt"
+            req1.write_text(json.dumps({"action": "auto-heal"}), encoding="utf-8")
+            env = {**os.environ, "USERPROFILE": str(home), "LOCALAPPDATA": str(local)}
+            r1 = run_ps(
+                f'& "{manage_ps1}" -RunManageWorker -WorkerRequestFile "{req1}" -WorkerPayloadRoot "{ROOT}" -WorkerLogFile "{st1}"\nexit $LASTEXITCODE\n',
+                env=env,
+            )
+            self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
+            self.assertFalse(oc.exists(), "Incomplete pre-config openclaw folder must be cleaned")
+            self.assertTrue(st1.read_text(encoding="utf-8").startswith("Hoàn tất:"))
+
+            # Case 2: Complete folder (HAS openclaw.json) -> auto-heal MUST NOT delete openclaw!
+            minimal_payload = stage_minimal_manage_payload(temp)
+            oc.mkdir(parents=True)
+            (oc / "openclaw.json").write_text('{"gateway":{"port":19789}}', encoding="utf-8")
+            req2 = temp / "req2.json"
+            st2 = temp / "st2.txt"
+            req2.write_text(json.dumps({"action": "auto-heal"}), encoding="utf-8")
+            r2 = run_ps(
+                "$env:Path = ''\n"
+                f'& "{manage_ps1}" -RunManageWorker -WorkerRequestFile "{req2}" -WorkerPayloadRoot "{minimal_payload}" -WorkerLogFile "{st2}"\nexit $LASTEXITCODE\n',
+                env=env,
+            )
+            self.assertNotEqual(r2.returncode, 0)
+            self.assertTrue((oc / "openclaw.json").is_file(), "Complete instance openclaw.json must NEVER be deleted by auto-heal")
+
+    def test_repair_shortcut_accepts_auto_updated_antigravity_version(self):
+        repair_src = (ROOT / "windows-installer/repair-antigravity-shortcut.ps1").read_text(encoding="utf-8-sig")
+        desktop_expr = "([Environment]::GetFolderPath('Desktop'))"
+        with tempfile.TemporaryDirectory(prefix="emtroly-repair-upd-") as td:
+            temp = Path(td)
+            staged_repair = temp / "repair.ps1"
+            staged_repair.write_text(repair_src.replace(desktop_expr, "$env:TEST_DESKTOP"), encoding="utf-8-sig")
+
+            local = temp / "local"
+            desktop = temp / "desktop"
+            base = local / "EmTroLy"
+            app = local / "Programs/EmTroLy-Antigravity-IDE-0123456789abcdef0123456789abcdef"
+            for d in (
+                desktop,
+                base / "Codex",
+                base / "Antigravity/UserData/User",
+                base / "Antigravity/Extensions/openai.chatgpt-26.51111.21308/bin/windows-x86_64",
+                app / "bin",
+                app / "resources/app",
+            ):
+                d.mkdir(parents=True, exist_ok=True)
+            (base / "installer-job.txt").write_text("0123456789abcdef0123456789abcdef", encoding="utf-8")
+            (base / "Codex/config.toml").write_text('base_url = "https://codex.anhlaptrinh.vn/v1"\nrequires_openai_auth = true\n', encoding="utf-8")
+            (base / "Codex/auth.json").write_text('{"OPENAI_API_KEY":"sk-fixture"}', encoding="utf-8")
+            (base / "Antigravity/UserData/User/settings.json").write_text("{}", encoding="utf-8")
+            (base / "Antigravity/Extensions/openai.chatgpt-26.51111.21308/package.json").write_text(
+                '{"publisher":"openai","name":"chatgpt","version":"26.51111.21308"}', encoding="utf-8"
+            )
+            (base / "Antigravity/Extensions/openai.chatgpt-26.51111.21308/bin/windows-x86_64/codex.exe").write_text("bin", encoding="utf-8")
+            (app / "Antigravity IDE.exe").write_text("ide", encoding="utf-8")
+            (app / "bin/antigravity-ide.cmd").write_text("@echo off", encoding="utf-8")
+            # Auto-updated Antigravity version (1.112.4 instead of pinned 1.107.0)
+            (app / "resources/app/product.json").write_text('{"applicationName":"antigravity-ide","version":"1.112.4"}', encoding="utf-8")
+
+            env = {**os.environ, "LOCALAPPDATA": str(local), "USERPROFILE": str(temp / "home"), "TEST_DESKTOP": str(desktop)}
+            (temp / "home").mkdir()
+            res = run_ps(f'& "{staged_repair}"\nexit $LASTEXITCODE\n', env=env)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertTrue((desktop / "EmTroLy - Antigravity.lnk").is_file())
+
+    def test_wizard_single_instance_mutex_blocks_duplicate_and_startup_unlocks_offline(self):
+        wizard_ps1 = ROOT / "windows-installer/wizard.ps1"
+        with tempfile.TemporaryDirectory(prefix="emtroly-mutex-") as td:
+            temp = Path(td)
+            home = temp / "home"
+            local = temp / "local"
+            home.mkdir()
+            local.mkdir()
+            mutex_name = f"Local\\EmTroLy-Test-Mutex-{os.getpid()}"
+            env = {
+                **os.environ,
+                "USERPROFILE": str(home),
+                "LOCALAPPDATA": str(local),
+                "EMTROLY_TEST_MUTEX_NAME": mutex_name,
+                "EMTROLY_SUPPRESS_SINGLE_INSTANCE_MSGBOX": "1",
+            }
+            # Hold mutex in parent PS and launch wizard.ps1 as child: must exit 0 immediately without opening UI!
+            res = run_ps(
+                f"$created = $false\n"
+                f"$m = New-Object System.Threading.Mutex($true, '{mutex_name}', [ref]$created)\n"
+                "try {\n"
+                f'  $p = Start-Process -FilePath "{SHELL}" -ArgumentList \'-STA -NoLogo -NoProfile -ExecutionPolicy Bypass -File "{wizard_ps1}" -PayloadRoot "{ROOT}"\' -WindowStyle Hidden -PassThru\n'
+                "  if (-not $p.WaitForExit(10000)) { try { $p.Kill() } catch {}; throw 'duplicate-wizard-did-not-exit' }\n"
+                "  if ($p.ExitCode -ne 0) { throw ('unexpected-exit-' + $p.ExitCode) }\n"
+                "  Write-Output 'SINGLE_INSTANCE_OK'\n"
+                "} finally {\n"
+                "  try { $m.ReleaseMutex() } catch {}\n"
+                "  $m.Dispose()\n"
+                "}\n",
+                env=env,
+            )
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertIn("SINGLE_INSTANCE_OK", res.stdout)
+
+    @unittest.skipUnless(WSCRIPT.is_file(), "Requires Windows Script Host wscript.exe")
+    def test_launch_wizard_vbs_propagates_exit_code_with_spaces_and_zero_windows(self):
+        vbs = ROOT / "windows-installer/launch-wizard.vbs"
+        with tempfile.TemporaryDirectory(prefix="emtroly vbs spaces ") as td:
+            fake_wiz = Path(td) / "wizard.ps1"
+            fake_wiz.write_text("param($PayloadRoot)\nif ($PayloadRoot -ne '" + td + "') { exit 9 }\nexit 17\n", encoding="utf-8-sig")
+            proc = subprocess.run(
+                [str(WSCRIPT), "//B", "//Nologo", str(vbs), SHELL, str(fake_wiz), td, "-WindowStyle Hidden"],
+                capture_output=True,
+                timeout=20,
+                **TEXT_KWARGS,
+            )
+            self.assertEqual(proc.returncode, 17, proc.stdout + proc.stderr)
+
+    @unittest.skipUnless(NODE, "Requires Node.js")
+    def test_zalo_qr_bridge_timeout_and_corrupted_png_restore_running_channel(self):
+        qr_bridge = ROOT / "windows-installer/zalo-qr-session.mjs"
+        with tempfile.TemporaryDirectory(prefix="emtroly-zalo-edge-") as td:
+            temp = Path(td)
+            oc = temp / "openclaw"
+            rt = oc / "runtime/2026.11.4/node_modules/openclaw"
+            rt.mkdir(parents=True)
+            calls_log = temp / "calls.log"
+            bad_png = temp / "bad.png"
+            bad_png.write_bytes(b"NOT_A_VALID_PNG_HEADER_AT_ALL_0123456789")
+
+            fake_cli = rt / "openclaw.mjs"
+            fake_cli.write_text(
+                "import fs from 'node:fs';\n"
+                f"const logFile = {json.dumps(str(calls_log))};\n"
+                "const args = process.argv.slice(2);\n"
+                "if (args[0] === 'gateway' && args[1] === 'call') {\n"
+                "  const method = args[2];\n"
+                "  fs.appendFileSync(logFile, method + '\\n');\n"
+                "  if (method === 'channels.status') console.log(JSON.stringify({channels:{zalouser:{running:true}}}));\n"
+                "  else console.log(JSON.stringify({ok:true}));\n"
+                "  process.exit(0);\n"
+                "}\n"
+                "if (args[0] === 'channels' && args[1] === 'login') {\n"
+                f"  console.log('Scan QR image: {str(bad_png).replace(chr(92), chr(92)*2)}');\n"
+                "  setTimeout(() => process.exit(0), 60000);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            (oc / "installer-instance.json").write_text(json.dumps({"cli_entry": str(fake_cli)}), encoding="utf-8")
+            (oc / "openclaw.json").write_text("{}", encoding="utf-8")
+            state_file = temp / "state.json"
+            qr_out = temp / "gui-qr.png"
+
+            proc = subprocess.run(
+                [NODE, str(qr_bridge), "--root", str(oc), "--state-file", str(state_file), "--qr-out", str(qr_out), "--timeout-seconds", "1"],
+                capture_output=True,
+                timeout=15,
+                **TEXT_KWARGS,
+            )
+            self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+            self.assertFalse(qr_out.exists(), "Corrupted non-PNG file must not be copied to GUI QR output")
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(state["phase"], "expired")
+            logged = calls_log.read_text(encoding="utf-8").splitlines()
+            self.assertIn("channels.stop", logged)
+            self.assertIn("channels.start", logged, "Previous running zalouser channel must be restored on timeout")
+
+    def test_wizard_persists_and_restores_setup_inputs_across_restart(self):
+        wizard_ps1 = ROOT / "windows-installer/wizard.ps1"
+        with tempfile.TemporaryDirectory(prefix="emtroly-wiz-persist-") as td:
+            temp = Path(td)
+            home = temp / "home"
+            local = temp / "local"
+            home.mkdir()
+            local.mkdir()
+            for h in ("codex-cli.ps1", "manage-instance.ps1", "auto-heal-codex.ps1", "wizard-helpers.ps1"):
+                (temp / h).write_text((ROOT / "windows-installer" / h).read_text(encoding="utf-8-sig"), encoding="utf-8-sig")
+            wiz_src = wizard_ps1.read_text(encoding="utf-8-sig")
+            env = {
+                **os.environ,
+                "USERPROFILE": str(home),
+                "LOCALAPPDATA": str(local),
+                "EMTROLY_ALLOW_MULTI_INSTANCE": "1",
+            }
+
+            # Session 1: User enters all form settings, saves draft (as on Start Install), and closes app
+            probe1 = """
+Unlock-LicenseGate 'sk-persist-license-key-111222'
+$tokenBox.Text = '555666:PERSIST_TELEGRAM_TOKEN_XYZ123456789'
+$ownersBox.Text = '112233445,998877665'
+$groupBox.Text = '-1005566778899'
+$modelBox.SelectedIndex = 2
+$assistantBox.Text = 'Em Trợ Lý Riêng'
+$portBox.Text = '19777'
+$qrOwnerBox.Text = '998877665'
+$audienceBox.Text = 'Khách hàng VIP'
+$addressingBox.Text = 'anh / em'
+$styleBox.Text = 'Tự nhiên, ngắn gọn'
+$zaloCheck.Checked = $false
+$existingEditorCheck.Checked = $true
+$fullAccessCheck.Checked = $true
+Save-CurrentFormDraft
+$window.Close()
+Write-Output 'SESSION1_SAVED'
+"""
+            (temp / "wiz1.ps1").write_text(wiz_src.replace("[void]$window.ShowDialog()", probe1), encoding="utf-8-sig")
+            r1 = run_ps(f'& "{temp / "wiz1.ps1"}" -PayloadRoot "{ROOT}"\n', env=env, sta=True)
+            self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
+            self.assertIn("SESSION1_SAVED", r1.stdout)
+
+            # Session 2: User reopens app -> all inputs + saved draft banner must be restored automatically; Clear resets cleanly
+            probe2 = """
+if ($tokenBox.Text -cne '555666:PERSIST_TELEGRAM_TOKEN_XYZ123456789') { throw ('token-not-restored:' + $tokenBox.Text) }
+if ($apiKeyBox.Text -cne 'sk-persist-license-key-111222') { throw ('apikey-not-restored:' + $apiKeyBox.Text) }
+if ($ownersBox.Text -cne '112233445,998877665') { throw 'owners-not-restored' }
+if ($groupBox.Text -cne '-1005566778899') { throw 'group-not-restored' }
+if ([string]$modelBox.SelectedItem -cne 'gpt-6.2-astra') { throw ('model-not-restored:' + [string]$modelBox.SelectedItem) }
+if ($assistantBox.Text -cne 'Em Trợ Lý Riêng') { throw 'assistant-not-restored' }
+if ($portBox.Text -cne '19777') { throw 'port-not-restored' }
+if ($qrOwnerBox.Text -cne '998877665') { throw 'qrowner-not-restored' }
+if ($audienceBox.Text -cne 'Khách hàng VIP' -or $addressingBox.Text -cne 'anh / em' -or $styleBox.Text -cne 'Tự nhiên, ngắn gọn') { throw 'profile-not-restored' }
+if ($zaloCheck.Checked -ne $false -or $existingEditorCheck.Checked -ne $true -or $fullAccessCheck.Checked -ne $true) { throw 'checkboxes-not-restored' }
+if ($savedDraftBanner.Visibility -ne [System.Windows.Visibility]::Visible) { throw 'saved-draft-banner-hidden' }
+Clear-SavedDraftAction
+if ($savedDraftBanner.Visibility -ne [System.Windows.Visibility]::Collapsed) { throw 'banner-not-hidden-after-clear' }
+if ($tokenBox.Text -ne '' -or $ownersBox.Text -ne '' -or $groupBox.Text -ne '') { throw 'fields-not-cleared' }
+if ($apiKeyBox.Text -cne 'sk-persist-license-key-111222') { throw 'license-apikey-should-remain-after-draft-clear' }
+$window.Close()
+Write-Output 'SESSION2_RESTORED_AND_CLEARED'
+"""
+            (temp / "wiz2.ps1").write_text(wiz_src.replace("[void]$window.ShowDialog()", probe2), encoding="utf-8-sig")
+            r2 = run_ps(f'& "{temp / "wiz2.ps1"}" -PayloadRoot "{ROOT}"\n', env=env, sta=True)
+            self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+            self.assertIn("SESSION2_RESTORED_AND_CLEARED", r2.stdout)
+
+
+# =============================================================================
+# 3. STATIC INTEGRITY CHECKS (UTF-8 BOM + PowerShell AST across repository)
+# =============================================================================
+
+
+class StaticIntegrityTests(unittest.TestCase):
+    @unittest.skipUnless(SHELL and os.name == "nt", "Requires Windows PowerShell")
+    def test_all_windows_powershell_scripts_have_single_utf8_bom_and_clean_ast(self):
+        targets = sorted(
+            list((ROOT / "windows-installer").glob("*.ps1"))
+            + list((ROOT / "native").glob("*.ps1"))
+            + [ROOT / "install-native-windows.ps1"]
+        )
+        self.assertGreater(len(targets), 10)
+        for ps_file in targets:
+            raw = ps_file.read_bytes()
+            self.assertTrue(raw.startswith(b"\xef\xbb\xbf"), f"{ps_file.name} is missing UTF-8 BOM (breaks Vietnamese in PS 5.1)")
+            self.assertFalse(raw.startswith(b"\xef\xbb\xbf\xef\xbb\xbf"), f"{ps_file.name} has double UTF-8 BOM")
+
+        quoted_paths = ",".join(f"'{str(p)}'" for p in targets)
+        res = run_ps(
+            f"$files = @({quoted_paths})\n"
+            "foreach ($f in $files) {\n"
+            "  $t = $null; $e = $null\n"
+            "  [void][Management.Automation.Language.Parser]::ParseFile($f, [ref]$t, [ref]$e)\n"
+            "  if ($e.Count -gt 0) { throw \"AST parse error in ${f}: $($e[0].Message)\" }\n"
+            "}\n"
+            "Write-Output 'BOM_AND_AST_OK'\n"
+        )
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertIn("BOM_AND_AST_OK", res.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()
