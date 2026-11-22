@@ -3,6 +3,7 @@
 import json
 import urllib.request
 
+import net_utils
 from telegram import _NoRedirect
 
 
@@ -10,7 +11,8 @@ def verify(base_url, api_key, model):
     request = urllib.request.Request(base_url.rstrip("/") + "/models",
                                      headers={"Authorization": "Bearer " + api_key})
     try:
-        with urllib.request.build_opener(_NoRedirect()).open(request, timeout=45) as response:
+        opener = urllib.request.build_opener(_NoRedirect())
+        with net_utils.urlopen_with_retry(request, timeout=45, opener=opener) as response:
             document = json.loads(response.read(4 * 1024 * 1024))
     except Exception:
         raise RuntimeError("Provider model check failed; verify URL, key and connection") from None

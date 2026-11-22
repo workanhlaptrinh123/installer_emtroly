@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 
+import net_utils
 from python_exec import restore_library_path
 
 
@@ -67,7 +68,7 @@ def install(dependencies):
             raise ValueError("Existing FFmpeg directory is unsafe")
         return _verify(executable, binary_hash)
     try:
-        with urllib.request.urlopen("https://pypi.org/pypi/imageio-ffmpeg/0.6.0/json", timeout=60) as response:
+        with net_utils.urlopen_with_retry("https://pypi.org/pypi/imageio-ffmpeg/0.6.0/json", timeout=60) as response:
             url = urllib.parse.urlsplit(response.geturl())
             if url.scheme != "https" or url.hostname != "pypi.org":
                 raise ValueError("Unexpected FFmpeg metadata source")
@@ -82,7 +83,7 @@ def install(dependencies):
             temporary = Path(temporary)
             wheel = temporary / filename
             digest = hashlib.sha256()
-            with urllib.request.urlopen(matches[0]["url"], timeout=300) as response, wheel.open("wb") as output:
+            with net_utils.urlopen_with_retry(matches[0]["url"], timeout=300) as response, wheel.open("wb") as output:
                 final = urllib.parse.urlsplit(response.geturl())
                 if final.scheme != "https" or final.hostname != "files.pythonhosted.org":
                     raise ValueError("Unexpected FFmpeg package redirect")
@@ -108,6 +109,7 @@ def install(dependencies):
                 with archive.open(info) as source, candidate.open("xb") as output:
                     shutil.copyfileobj(source, output)
             candidate.chmod(0o700)
+            net_utils.clear_macos_quarantine(candidate)
             _verify(candidate, binary_hash)
             if destination.exists() or destination.is_symlink():
                 raise ValueError("FFmpeg directory appeared during installation")

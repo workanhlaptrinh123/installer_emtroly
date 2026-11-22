@@ -162,9 +162,66 @@ function Get-SafeRecentErrorTrace([object]$CaughtRecord, [psobject]$SettingsObj)
   return $joined
 }
 
+function Test-IsRecoverableIncompleteOpenClawDir([string]$DirPath) {
+  if ([string]::IsNullOrWhiteSpace($DirPath) -or -not (Test-Path -LiteralPath $DirPath -PathType Container)) { return $false }
+  try {
+    $item = Get-Item -LiteralPath $DirPath -Force -ErrorAction Stop
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+  } catch { return $false }
+
+  $markerFile = Join-Path $DirPath '.emtroly-installing.json'
+  if (Test-Path -LiteralPath $markerFile -PathType Leaf) { return $true }
+  if (Test-Path -LiteralPath (Join-Path $DirPath 'openclaw.json')) { return $false }
+
+  $children = @(Get-ChildItem -LiteralPath $DirPath -Force -ErrorAction SilentlyContinue)
+  if ($children.Count -eq 0) { return $false }
+  $knownPartial = @('runtime', 'workspace', 'npm-cache', 'logs')
+  foreach ($ch in $children) {
+    if ($ch.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+    if ($ch.Name -notin $knownPartial) { return $false }
+  }
+  return $true
+}
+
+function Test-InstallDiskFreeSpace([string]$TargetPath, [bool]$SkipEditor) {
+  $hasCustomMin = ($env:EMTROLY_MIN_FREE_BYTES -match '^[0-9]+$')
+  $hasSimFree = ($env:EMTROLY_SIMULATE_FREE_BYTES -match '^[0-9]+$')
+  if (-not $hasCustomMin -and -not $hasSimFree -and -not [string]::IsNullOrEmpty($env:TEST_MODE)) { return }
+
+  $emComplete = $env:LOCALAPPDATA -and (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'EmTroLy\installer-job.txt') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'EmTroLy\Antigravity\UserData\User\settings.json') -PathType Leaf)
+  $defaultMin = if ($SkipEditor -or $emComplete) { 1200000000L } else { 2500000000L }
+  $minBytes = if ($hasCustomMin) { [long]$env:EMTROLY_MIN_FREE_BYTES } else { $defaultMin }
+
+  $freeBytes = -1L
+  if ($hasSimFree) {
+    $freeBytes = [long]$env:EMTROLY_SIMULATE_FREE_BYTES
+  } else {
+    try {
+      $rootDrive = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($TargetPath))
+      if ($rootDrive -and $rootDrive.Length -ge 2) {
+        $drv = New-Object System.IO.DriveInfo($rootDrive.Substring(0, 1))
+        $freeBytes = [long]$drv.AvailableFreeSpace
+      }
+    } catch { $freeBytes = -1L }
+  }
+  if ($freeBytes -ge 0 -and $freeBytes -lt $minBytes) {
+    throw 'insufficient-disk-space'
+  }
+}
+
 function Remove-IncompleteOpenClawDirectory([string]$DirPath) {
   if ([string]::IsNullOrWhiteSpace($DirPath) -or -not (Test-Path -LiteralPath $DirPath -PathType Container)) { return }
-  if (Test-Path -LiteralPath (Join-Path $DirPath 'openclaw.json') -PathType Leaf) { return }
+  $hasMarker = Test-Path -LiteralPath (Join-Path $DirPath '.emtroly-installing.json') -PathType Leaf
+  if ((Test-Path -LiteralPath (Join-Path $DirPath 'openclaw.json') -PathType Leaf) -and (-not $hasMarker)) { return }
+  try {
+    $strayNodes = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue | Where-Object {
+      $_.CommandLine -and $_.CommandLine.IndexOf($DirPath, [StringComparison]::OrdinalIgnoreCase) -ge 0
+    })
+    foreach ($sn in $strayNodes) {
+      if ($sn.ProcessId) { Stop-Process -Id ([int]$sn.ProcessId) -Force -ErrorAction SilentlyContinue }
+    }
+  } catch { }
   try {
     $cmdExe = Join-Path $env:SystemRoot 'System32\cmd.exe'
     if (Test-Path -LiteralPath $cmdExe -PathType Leaf) {
@@ -200,6 +257,49 @@ try {
   function Invoke-EditorStepWithCodexAutoHeal([psobject]$EditorSettingsObj) {
     $editorInstaller = Join-Path $PayloadRoot 'windows-installer\install-antigravity-codex.ps1'
     if (-not (Test-Path -LiteralPath $editorInstaller -PathType Leaf)) { throw 'editor-module-missing' }
+
+    # Seamless reuse when Antigravity IDE + Codex Extension in %LOCALAPPDATA%\EmTroLy are already complete (e.g. reinstalling OpenClaw)
+    $emBaseExisting = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'EmTroLy' } else { '' }
+    $repairScript = Join-Path $PayloadRoot 'windows-installer\repair-antigravity-shortcut.ps1'
+    if (-not $EditorOnly -and $env:TEST_MODE -ne 'editor-existing' -and $emBaseExisting -and
+        (Test-Path -LiteralPath (Join-Path $emBaseExisting 'installer-job.txt') -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $emBaseExisting 'Antigravity\UserData\User\settings.json') -PathType Leaf) -and
+        (Test-Path -LiteralPath $repairScript -PathType Leaf)) {
+      try {
+        Write-SafeStatus 'Đã phát hiện Antigravity IDE & Codex Extension sẵn sàng — đang đồng bộ khóa API, Model và lối tắt...'
+        $emCodexDir = Join-Path $emBaseExisting 'Codex'
+        [void][IO.Directory]::CreateDirectory($emCodexDir)
+        $utf8NoBomEd = New-Object System.Text.UTF8Encoding($false)
+        $edMdl = [string]$EditorSettingsObj.model
+        $edKey = [string]$EditorSettingsObj.ai_api_key
+        if ($edMdl -match '^[A-Za-z0-9._-]+$' -and -not [string]::IsNullOrWhiteSpace($edKey)) {
+          $reuseCfg = @"
+model_provider = "router"
+model = "$edMdl"
+model_context_window = 272000
+model_auto_compact_token_limit = 200000
+cli_auth_credentials_store = "file"
+
+[model_providers.router]
+name = "router"
+base_url = "https://codex.anhlaptrinh.vn/v1"
+wire_api = "responses"
+requires_openai_auth = true
+"@
+          [IO.File]::WriteAllText((Join-Path $emCodexDir 'config.toml'), $reuseCfg, $utf8NoBomEd)
+          [IO.File]::WriteAllText((Join-Path $emCodexDir 'auth.json'), (@{ OPENAI_API_KEY = $edKey } | ConvertTo-Json -Compress), $utf8NoBomEd)
+        }
+        $psExeReuse = if ($env:OS -eq 'Windows_NT') { Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' } else { Join-Path $PSHOME 'pwsh' }
+        & $psExeReuse -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $repairScript *> $null
+        if ($LASTEXITCODE -eq 0) {
+          if (Get-Command Register-EmTroLyCodexCli -ErrorAction SilentlyContinue) {
+            [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot)
+          }
+          return
+        }
+      } catch { }
+    }
+
     Write-SafeStatus 'Đang cài đặt Antigravity IDE và Codex Extension trên Antigravity...'
     try {
       $global:Error.Clear()
@@ -246,7 +346,14 @@ try {
 
   if (-not $EditorOnly) {
     Test-MemberInstallerSettings $settings
-    if (Test-Path -LiteralPath $root) { throw 'instance-exists' }
+    if (Test-Path -LiteralPath $root) {
+      if (Test-IsRecoverableIncompleteOpenClawDir -DirPath $root) {
+        Write-SafeStatus 'Phát hiện thư mục OpenClaw cài dở từ lần trước — đang tự động dọn sạch để cài mới...'
+        Remove-IncompleteOpenClawDirectory -DirPath $root
+      }
+      if (Test-Path -LiteralPath $root) { throw 'instance-exists' }
+    }
+    Test-InstallDiskFreeSpace -TargetPath $env:USERPROFILE -SkipEditor ([bool]$settings.skip_editor)
     if ($env:OS -eq 'Windows_NT') {
       $existingOpenClawCmd = Get-Command openclaw -ErrorAction SilentlyContinue
       if ($existingOpenClawCmd) {
@@ -400,6 +507,7 @@ try {
       & $installer @arguments | Out-Null
       if ($LASTEXITCODE -ne 0) { throw 'installer-failed' }
       Invoke-CorePostInstallChecks
+      Remove-Item -LiteralPath (Join-Path $root '.emtroly-installing.json') -Force -ErrorAction SilentlyContinue
     } catch {
       $coreErr = [string]$_.Exception.Message
       $lastTechnicalDetail = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
@@ -571,6 +679,7 @@ try {
     'invalid-qr-owner' = 'QR owner phải thuộc danh sách Telegram Owner IDs.'
     'zalo-required' = 'Bộ cài yêu cầu bật plugin Zalo.'
     'instance-exists' = 'Thư mục OpenClaw đã tồn tại; dữ liệu cũ được giữ nguyên.'
+    'insufficient-disk-space' = 'Ổ đĩa không đủ dung lượng trống để cài đặt an toàn (cần tối thiểu 2.5 GB cho trọn gói hoặc 1.2 GB nếu bỏ qua Antigravity). Hãy dọn bớt ổ cứng rồi thử lại.'
     'provider-unavailable' = 'Không kết nối được API. Hãy kiểm tra URL, khóa API và kết nối Internet.'
     'provider-model-unavailable' = 'Nhà cung cấp không công bố mô hình đã chọn tại /models.'
     'telegram-unavailable' = 'Không kết nối được bot Telegram. Hãy kiểm tra token và kết nối Internet.'

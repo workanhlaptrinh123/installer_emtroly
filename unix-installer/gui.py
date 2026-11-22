@@ -127,7 +127,9 @@ def main():
     import license_gate
     import provider
     import runner
+    import settings
     import telegram
+    import uninstaller
 
     source = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
     app_ver = read_installer_version(source)
@@ -258,10 +260,11 @@ def main():
     live_banner_var = tk.StringVar(value="")
 
     def do_auto_fetch_ids():
-        tok = variables["telegram_token"].get().strip()
+        tok = telegram.normalize_token(variables["telegram_token"].get())
         if not tok:
             messagebox.showwarning("Thiếu Bot Token", "Hãy dán Telegram Bot Token trước rồi bấm Lấy ID tự động.")
             return
+        variables["telegram_token"].set(tok)
         fetch_btn.state(["disabled"])
         live_banner_var.set("Đang đọc tin nhắn gần nhất từ Telegram Bot để lấy Owner ID & Group ID...")
 
@@ -277,13 +280,14 @@ def main():
                             variables["qr_owner_id"].set(info["owner_id"])
                     if info["group_id"]:
                         variables["group_id"].set(info["group_id"])
+                    priv_note = (" " + info["privacy_warning"]) if info.get("privacy_warning") else ""
                     if info["owner_id"] or info["group_id"]:
                         live_banner_var.set(
-                            f"✓ Bot {info['bot_username']}: Đã điền Owner={info['owner_id'] or '—'}, Group={info['group_id'] or '—'}."
+                            f"✓ Bot {info['bot_username']}: Đã điền Owner={info['owner_id'] or '—'}, Group={info['group_id'] or '—'}.{priv_note}"
                         )
                     else:
                         live_banner_var.set(
-                            f"Bot {info['bot_username']} hợp lệ nhưng chưa có tin nhắn mới — hãy nhắn 1 tin cho bot rồi bấm lại."
+                            f"Bot {info['bot_username']} hợp lệ nhưng chưa có tin nhắn mới — hãy nhắn /start cho bot rồi bấm lại.{priv_note}"
                         )
 
                 window.after(0, _ok)
@@ -299,10 +303,13 @@ def main():
         threading.Thread(target=_bg, daemon=True).start()
 
     def do_test_connection():
-        tok = variables["telegram_token"].get().strip()
-        key = variables["ai_api_key"].get().strip()
-        url = variables["base_url"].get().strip().rstrip("/")
-        mdl = variables["model"].get().strip()
+        norm = settings.normalize({key: variable.get() for key, variable in variables.items()})
+        tok = norm.get("telegram_token", "")
+        key = norm.get("ai_api_key", "")
+        url = norm.get("base_url", "")
+        mdl = norm.get("model", "")
+        if tok:
+            variables["telegram_token"].set(tok)
         test_btn.state(["disabled"])
         live_banner_var.set("Đang kiểm tra kết nối Telegram Bot và máy chủ AI...")
 
@@ -311,11 +318,13 @@ def main():
                 me = telegram.verify_bot(tok)
                 resolved_model = provider.verify(url, key, mdl)
                 bot_u = ("@" + me["username"]) if isinstance(me, dict) and me.get("username") else "Bot hợp lệ"
+                priv_note = telegram.privacy_warning(me)
+                extra = f" · {priv_note}" if priv_note else ""
                 window.after(
                     0,
                     lambda: (
                         test_btn.state(["!disabled"]),
-                        live_banner_var.set(f"✓ Kết nối tốt! Telegram ({bot_u}) & Model ({resolved_model}) đều sẵn sàng."),
+                        live_banner_var.set(f"✓ Kết nối tốt! Telegram ({bot_u}) & Model ({resolved_model}) đều sẵn sàng.{extra}"),
                     ),
                 )
             except Exception as exc:
@@ -791,6 +800,10 @@ def main():
         vals["accept_full_access"] = consent.get()
         vals["configure_zalo"] = zalo_var.get()
         vals["skip_editor"] = skip_editor_var.get()
+        vals = settings.normalize(vals)
+        for key in ("member", "owner_ids", "group_id", "qr_owner_id", "gateway_port", "telegram_token"):
+            if key in variables and isinstance(vals.get(key), str):
+                variables[key].set(vals[key])
         return vals
 
     def persist_unix_draft():
@@ -958,6 +971,27 @@ def main():
 
         window.after(200, poll)
 
+    def do_uninstall():
+        if busy:
+            return
+        member_val = settings.clean_text(variables["member"].get()).lower() or "emtroly"
+        if not messagebox.askyesno(
+            "Xác nhận gỡ trợ lý cũ",
+            f"Bạn có muốn dừng dịch vụ nền, sao lưu cấu hình và gỡ bỏ trợ lý '{member_val}' để cài lại từ đầu không?",
+        ):
+            return
+        try:
+            res = uninstaller.uninstall_instance(member_val)
+            status.set(f"✓ Đã gỡ bỏ trợ lý '{member_val}' (đã sao lưu cấu hình tại {res['backup']}). Sẵn sàng cài mới!")
+            messagebox.showinfo(
+                "Đã gỡ cài đặt",
+                f"Đã dừng dịch vụ và gỡ bỏ trợ lý '{member_val}' thành công.\nBản sao lưu cấu hình: {res['backup']}",
+            )
+        except FileNotFoundError:
+            messagebox.showinfo("Chưa có trợ lý", f"Chưa tìm thấy trợ lý '{member_val}' trên máy — bạn có thể bấm Cài đặt ngay.")
+        except Exception as exc:
+            messagebox.showerror("Không thể gỡ cài đặt", str(exc))
+
     install_actions = ttk.Frame(tab_profile, style="Card.TFrame")
     install_actions.grid(row=p_row + 5, column=0, columnspan=3, sticky="ew")
     ttk.Button(
@@ -968,6 +1002,12 @@ def main():
     ).pack(side="left")
     exit_btn = ttk.Button(install_actions, text="Thoát", style="Secondary.TButton", command=close)
     exit_btn.pack(side="left", padx=(8, 0))
+    ttk.Button(
+        install_actions,
+        text="Gỡ trợ lý cũ để cài lại",
+        style="Secondary.TButton",
+        command=do_uninstall,
+    ).pack(side="left", padx=(8, 0))
     button = ttk.Button(install_actions, text="Cài đặt trọn gói A–Z", style="Primary.TButton", command=start)
     button.pack(side="right")
 

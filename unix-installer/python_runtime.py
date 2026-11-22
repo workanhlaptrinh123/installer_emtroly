@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.request
 
 from dependencies import _safe_archive
+import net_utils
 from python_exec import restore_library_path
 
 
@@ -69,7 +70,7 @@ def install(dependencies):
             temporary = Path(temporary)
             archive_path = temporary / filename
             digest = hashlib.sha256()
-            with urllib.request.urlopen(url, timeout=300) as response, archive_path.open("wb") as output:
+            with net_utils.urlopen_with_retry(url, timeout=300) as response, archive_path.open("wb") as output:
                 final = urllib.parse.urlsplit(response.geturl())
                 if final.scheme != "https" or final.hostname not in {"github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com"}:
                     raise ValueError("Unexpected Python download source")
@@ -87,6 +88,7 @@ def install(dependencies):
                 raise ValueError("Python archive checksum mismatch")
             with tarfile.open(archive_path, "r:gz") as archive:
                 archive.extractall(temporary, members=_safe_archive(archive, "python"))
+            net_utils.clear_macos_quarantine(temporary / "python")
             candidate = temporary / "python" / "bin" / "python3"
             if not _verify(candidate):
                 raise ValueError("Downloaded Python is not usable")

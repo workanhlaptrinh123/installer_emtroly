@@ -8,6 +8,8 @@ $extensionVersion = '26.51111.21308'
 $pending = Join-Path $env:USERPROFILE 'openclaw\installer-codex-pending.json'
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'EmTroLy - Antigravity.lnk'
 $legacyShortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Em Trợ Lý - Antigravity.lnk'
+$programsFolder = if ($env:EMTROLY_TEST_PROGRAMS_DIR) { $env:EMTROLY_TEST_PROGRAMS_DIR } else { [Environment]::GetFolderPath('Programs') }
+$startMenuShortcutPath = if ($programsFolder) { Join-Path $programsFolder 'EmTroLy - Antigravity.lnk' } else { '' }
 $receipt = Join-Path $base 'installer-job.txt'
 
 function Resolve-EditorBundle([string]$Root, [bool]$RequirePinnedVersion = $false) {
@@ -73,8 +75,14 @@ function Test-EmTroLyDataComplete([string]$Root) {
   return $installed.Count -eq 1
 }
 
+if (-not (Test-Path -LiteralPath (Split-Path -Parent $shortcutPath) -PathType Container)) {
+  if ($startMenuShortcutPath -and (Test-Path -LiteralPath (Split-Path -Parent $startMenuShortcutPath) -PathType Container)) {
+    $shortcutPath = $startMenuShortcutPath
+  } else {
+    exit 2
+  }
+}
 if (-not (Test-Path -LiteralPath $base -PathType Container) -or
-    -not (Test-Path -LiteralPath (Split-Path -Parent $shortcutPath) -PathType Container) -or
     -not (Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\wscript.exe') -PathType Leaf) -or
     -not (Test-EmTroLyDataComplete $base)) { exit 2 }
 
@@ -154,6 +162,14 @@ for ($scTry = 1; $scTry -le 3; $scTry++) {
   } catch {
     if ($scTry -lt 3) { Start-Sleep -Milliseconds (400 * $scTry) }
   }
+}
+if (-not $repairedMoved -and $startMenuShortcutPath -and ($shortcutPath -ine $startMenuShortcutPath) -and (Test-Path -LiteralPath (Split-Path -Parent $startMenuShortcutPath) -PathType Container)) {
+  try {
+    if (Test-Path -LiteralPath $startMenuShortcutPath) { Remove-Item -LiteralPath $startMenuShortcutPath -Force }
+    [IO.File]::Move($temporaryShortcut, $startMenuShortcutPath)
+    $shortcutPath = $startMenuShortcutPath
+    $repairedMoved = $true
+  } catch { }
 }
 if (-not $repairedMoved) { throw 'shortcut-verification-failed' }
 $saved = $shell.CreateShortcut($shortcutPath)

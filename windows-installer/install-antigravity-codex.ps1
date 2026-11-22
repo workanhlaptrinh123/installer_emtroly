@@ -27,6 +27,8 @@ $appDir = Join-Path $env:LOCALAPPDATA ('Programs\EmTroLy-Antigravity-IDE-' + $jo
 $editor = Join-Path $appDir 'Antigravity IDE.exe'
 $editorCli = Join-Path $appDir 'bin\antigravity-ide.cmd'
 $shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'EmTroLy - Antigravity.lnk'
+$programsFolder = if ($env:EMTROLY_TEST_PROGRAMS_DIR) { $env:EMTROLY_TEST_PROGRAMS_DIR } else { [Environment]::GetFolderPath('Programs') }
+$startMenuShortcutPath = if ($programsFolder) { Join-Path $programsFolder 'EmTroLy - Antigravity.lnk' } else { '' }
 $downloadDir = Join-Path $env:TEMP ('emtroly-editor-' + [guid]::NewGuid().ToString('N'))
 $activationProbe = Join-Path $PSScriptRoot 'activation-probe'
 $activationTest = Join-Path $activationProbe 'test.js'
@@ -167,7 +169,10 @@ function Test-EditorApplicationComplete([string]$Root) {
 }
 
 function Test-EditorShortcutComplete([string]$Root, [string]$AppRoot) {
-  if (-not (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) { return $false }
+  $candidateShortcuts = @($shortcutPath)
+  if ($startMenuShortcutPath) { $candidateShortcuts += $startMenuShortcutPath }
+  $existingShortcut = @($candidateShortcuts | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Leaf) } | Select-Object -First 1)
+  if ($existingShortcut.Count -eq 0) { return $false }
   try {
     $bundle = Resolve-EditorBundle -Root $AppRoot
     if (-not $bundle) { return $false }
@@ -180,7 +185,7 @@ function Test-EditorShortcutComplete([string]$Root, [string]$AppRoot) {
         $launch -notmatch '--user-data-dir' -or
         $launch -notmatch '--extensions-dir') { return $false }
     $shell = New-Object -ComObject WScript.Shell
-    $saved = $shell.CreateShortcut($shortcutPath)
+    $saved = $shell.CreateShortcut($existingShortcut[0])
     return $saved.TargetPath -ieq (Join-Path $env:SystemRoot 'System32\wscript.exe') -and
       $saved.Arguments -match [regex]::Escape($launchPath) -and
       $saved.WorkingDirectory -ieq $Root
@@ -329,8 +334,14 @@ function Get-EditorRegistryEntries {
 if ($env:OS -ne 'Windows_NT') { throw 'editor-windows-required' }
 if (([string]$Settings.base_url).TrimEnd('/') -cne 'https://codex.anhlaptrinh.vn/v1') { throw 'editor-provider-unsupported' }
 if ([string]::IsNullOrWhiteSpace([string]$Settings.ai_api_key)) { throw 'editor-api-key-missing' }
-if (-not (Test-Path -LiteralPath (Split-Path -Parent $shortcutPath) -PathType Container) -or
-    -not (Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\wscript.exe') -PathType Leaf)) { throw 'editor-desktop-missing' }
+if (-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\wscript.exe') -PathType Leaf)) { throw 'editor-desktop-missing' }
+if (-not (Test-Path -LiteralPath (Split-Path -Parent $shortcutPath) -PathType Container)) {
+  if ($startMenuShortcutPath -and $env:EMTROLY_DISABLE_STARTMENU_FALLBACK -ne '1' -and (Test-Path -LiteralPath (Split-Path -Parent $startMenuShortcutPath) -PathType Container)) {
+    $shortcutPath = $startMenuShortcutPath
+  } else {
+    throw 'editor-desktop-missing'
+  }
+}
 foreach ($path in @($editor, $editorCli, $userData, $extensions, $codexHome, $downloadDir, $base, $activationProbe, $activationTest)) { [void](Quote-Cmd $path) }
 foreach ($file in @('test.js', 'extension.js', 'package.json')) {
   if (-not (Test-Path -LiteralPath (Join-Path $activationProbe $file) -PathType Leaf)) { throw 'editor-activation-missing' }
@@ -536,6 +547,14 @@ Set shell = Nothing
     } catch {
       if ($scTry -lt 3) { Start-Sleep -Milliseconds (400 * $scTry) }
     }
+  }
+  if (-not $shortcutMoved -and $startMenuShortcutPath -and ($shortcutPath -ine $startMenuShortcutPath) -and $env:EMTROLY_DISABLE_STARTMENU_FALLBACK -ne '1' -and (Test-Path -LiteralPath (Split-Path -Parent $startMenuShortcutPath) -PathType Container)) {
+    try {
+      if (Test-Path -LiteralPath $startMenuShortcutPath) { Remove-Item -LiteralPath $startMenuShortcutPath -Force }
+      [IO.File]::Move($temporaryShortcut, $startMenuShortcutPath)
+      $shortcutPath = $startMenuShortcutPath
+      $shortcutMoved = $true
+    } catch { }
   }
   if (-not $shortcutMoved) { throw 'editor-shortcut-failed' }
   $saved = $shell.CreateShortcut($shortcutPath)

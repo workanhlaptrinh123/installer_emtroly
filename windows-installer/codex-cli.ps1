@@ -420,6 +420,12 @@ function New-CodexPrivateDirectory([string]$Path) {
   [void][IO.Directory]::CreateDirectory($Path, $acl)
 }
 
+function Escape-BatchLiteralValue([string]$Value) {
+  if ($null -eq $Value) { return '' }
+  if ($Value -match '[\r\n"\x00]') { throw 'codex-invalid-executable' }
+  return $Value.Replace('%', '%%')
+}
+
 function Start-CodexInteractiveWindow {
   param(
     [Parameter(Mandatory=$true)][string]$WorkspaceDir,
@@ -428,7 +434,7 @@ function Start-CodexInteractiveWindow {
   $info = Find-EmTroLyCodexCli
   if (-not $info.Available) { throw 'codex-cli-missing' }
   if (-not (Test-Path -LiteralPath $WorkspaceDir -PathType Container)) { throw 'codex-workspace-missing' }
-  if ($info.Executable -match '[\r\n"%&|<>^]') { throw 'codex-invalid-executable' }
+  if ($info.Executable -match '[\r\n"\x00]') { throw 'codex-invalid-executable' }
 
   $cmdExe = Join-Path $env:SystemRoot 'System32\cmd.exe'
   $cliArgs = @('--no-alt-screen')
@@ -438,7 +444,7 @@ function Start-CodexInteractiveWindow {
   $innerCmd = '"' + $info.Executable + '" ' + ($cliArgs -join ' ')
   $startInfo = New-Object System.Diagnostics.ProcessStartInfo
   $startInfo.FileName = $cmdExe
-  $startInfo.Arguments = '/d /k "' + $innerCmd + '"'
+  $startInfo.Arguments = '/d /s /k ""' + $innerCmd + '""'
   $startInfo.WorkingDirectory = $WorkspaceDir
   $startInfo.UseShellExecute = $false
   $startInfo.CreateNoWindow = $false
@@ -463,9 +469,8 @@ function Register-EmTroLyCodexCli {
   if (-not $env:LOCALAPPDATA) {
     return [pscustomobject]@{ Registered = $false; Command = ''; Path = '' }
   }
-  if ($info.Executable -match '[\r\n"%&|<>^]' -or ($info.CodexHome -and $info.CodexHome -match '[\r\n"%&|<>^]')) {
-    throw 'codex-invalid-executable'
-  }
+  $escapedExe = Escape-BatchLiteralValue $info.Executable
+  $escapedHome = if ($info.CodexHome) { Escape-BatchLiteralValue $info.CodexHome } else { '' }
 
   $binDir = Join-Path $env:LOCALAPPDATA 'OpenClaw\bin'
   [void][IO.Directory]::CreateDirectory($binDir)
@@ -473,17 +478,18 @@ function Register-EmTroLyCodexCli {
   $shimLines = @(
     '@echo off',
     '"%SystemRoot%\System32\chcp.com" 65001 >nul',
-    'setlocal',
+    'setlocal DisableDelayedExpansion',
     'set "OPENAI_API_KEY="',
     'set "ELECTRON_RUN_AS_NODE="',
     'set "VSCODE_IPC_HOOK_CLI="',
     'set "NODE_OPTIONS="',
     'set "VSCODE_DEV="'
   )
-  if (-not [string]::IsNullOrWhiteSpace($info.CodexHome)) {
-    $shimLines += ('set "CODEX_HOME=' + $info.CodexHome + '"')
+  if (-not [string]::IsNullOrWhiteSpace($escapedHome)) {
+    $shimLines += ('set "CODEX_HOME=' + $escapedHome + '"')
   }
-  $shimLines += ('"' + $info.Executable + '" %*')
+  $shimLines += ('"' + $escapedExe + '" %*')
+  $shimLines += 'exit /b %errorlevel%'
   $shimBody = ($shimLines -join "`r`n") + "`r`n"
   $asciiEnc = [System.Text.Encoding]::ASCII
   $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -517,7 +523,7 @@ function Register-EmTroLyCodexCli {
       $emUiDir = Join-Path $env:LOCALAPPDATA 'EmTroLyUI'
       $emWinDir = Join-Path $emUiDir 'windows-installer'
       [void][IO.Directory]::CreateDirectory($emWinDir)
-      foreach ($name in @('wizard.ps1', 'wizard-helpers.ps1', 'codex-cli.ps1', 'auto-heal-codex.ps1', 'manage-instance.ps1', 'validation.ps1')) {
+      foreach ($name in @('wizard.ps1', 'wizard-helpers.ps1', 'codex-cli.ps1', 'auto-heal-codex.ps1', 'manage-instance.ps1', 'validation.ps1', 'repair-antigravity-shortcut.ps1')) {
         $srcFile = Join-Path $PayloadRoot ('windows-installer\' + $name)
         if (Test-Path -LiteralPath $srcFile -PathType Leaf) {
           $txt = [IO.File]::ReadAllText($srcFile, [System.Text.Encoding]::UTF8)
@@ -541,7 +547,7 @@ function Register-EmTroLyCodexCli {
       $uiLauncher = Join-Path $binDir 'emtroly-ui.cmd'
       $uiWizard = Join-Path $emWinDir 'wizard.ps1'
       $uiVbs = Join-Path $emUiDir 'launch-emtroly-codex-ui.vbs'
-      if ((Test-Path -LiteralPath $uiWizard -PathType Leaf) -and $uiWizard -notmatch '[\r\n"%&|<>^]') {
+      if ((Test-Path -LiteralPath $uiWizard -PathType Leaf) -and $uiWizard -notmatch '[\r\n"\x00]' -and $uiVbs -notmatch '[\r\n"\x00]') {
         $psExePath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $codexVbsBody = @"
 Option Explicit
@@ -553,8 +559,10 @@ shell.Run command, 0, False
 Set shell = Nothing
 "@
         [IO.File]::WriteAllText($uiVbs, $codexVbsBody, [System.Text.Encoding]::Unicode)
-        $uiBody = "@echo off`r`n`"%SystemRoot%\System32\chcp.com`" 65001 >nul`r`n`"%SystemRoot%\System32\wscript.exe`" //B //Nologo `"$uiVbs`"`r`n"
-        [IO.File]::WriteAllText($uiLauncher, $uiBody, $shimEnc)
+        $escapedUiVbs = Escape-BatchLiteralValue $uiVbs
+        $uiBody = "@echo off`r`n`"%SystemRoot%\System32\chcp.com`" 65001 >nul`r`nsetlocal DisableDelayedExpansion`r`n`"%SystemRoot%\System32\wscript.exe`" //B //Nologo `"$escapedUiVbs`"`r`n"
+        $uiEnc = if ($uiBody -match '[^\u0000-\u007F]') { $utf8NoBom } else { $asciiEnc }
+        [IO.File]::WriteAllText($uiLauncher, $uiBody, $uiEnc)
       }
     } catch { }
   }

@@ -155,10 +155,12 @@ async function sendTelegramQrPhoto(apiBase, token, ownerId, pngPath, caption) {
         return { sent: true, note: `✓ Đã gửi đồng thời mã QR vào Telegram Chủ sở hữu (ID ${suffix}).` };
       }
       const desc = String(data?.description || "");
-      if (/chat not found|bot was blocked|user is deactivated/i.test(desc)) {
+      if (/chat not found|peer_id_invalid|bot can't initiate|bot was blocked|user is deactivated|forbidden/i.test(desc)) {
+        const suffix = ownerId.length > 4 ? `...${ownerId.slice(-4)}` : ownerId;
         return {
           sent: false,
-          note: "Chủ sở hữu chưa bấm /start với Bot trên Telegram — bạn hãy quét trực tiếp mã QR ngay trên màn hình này!",
+          errorCode: "owner_not_started_bot",
+          note: `Chủ sở hữu (ID ${suffix}) chưa bấm /start với Bot trên Telegram (hoặc đã chặn Bot). Hãy mở Bot trên Telegram bấm START (/start), hoặc quét trực tiếp mã QR ngay trên màn hình này!`,
         };
       }
       return { sent: false, note: "Tạm chưa gửi được ảnh qua Telegram — bạn hãy quét trực tiếp mã QR trên màn hình này." };

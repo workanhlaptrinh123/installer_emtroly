@@ -65,7 +65,9 @@ function Invoke-InstanceCli {
     return
   }
   $pidPath = Join-Path $Root 'user-gateway.pid.json'
+  $stopSentinel = Join-Path $Root 'user-gateway.stop'
   $target = $null
+  $supervisorProc = $null
   if (Test-Path $pidPath) {
     $record = $null
     try {
@@ -78,6 +80,12 @@ function Invoke-InstanceCli {
       }
     }
     if ($record) {
+      if ($record.PSObject.Properties['supervisorPid'] -and $record.supervisorPid) {
+        $supCandidate = Get-CimInstance Win32_Process -Filter "ProcessId = $($record.supervisorPid)" -ErrorAction SilentlyContinue
+        if ($supCandidate -and $supCandidate.CommandLine -like '*user-gateway.cjs*') {
+          $supervisorProc = $supCandidate
+        }
+      }
       if (-not $record.pid) {
         $launcherRunning = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue | Where-Object {
           $_.CommandLine -like '*user-gateway.cjs*' -and $_.CommandLine -like "*$Root*"
@@ -103,15 +111,24 @@ function Invoke-InstanceCli {
             throw 'Saved PID belongs to another process. Nothing was stopped.'
           }
         }
-        if (-not $target -and (Test-Path -LiteralPath $pidPath)) { Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue }
+        if (-not $target -and -not $supervisorProc -and (Test-Path -LiteralPath $pidPath)) { Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue }
       }
     }
   }
-  if ($action -in @('stop','restart') -and $target) {
-    Stop-Process -Id $record.pid -ErrorAction Stop
-    Wait-Process -Id $record.pid -Timeout 30 -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $pidPath
+  if ($action -in @('stop','restart') -and ($target -or $supervisorProc)) {
+    [IO.File]::WriteAllText($stopSentinel, 'stop', [Text.UTF8Encoding]::new($false))
+    if ($supervisorProc) {
+      Stop-Process -Id ([int]$record.supervisorPid) -Force -ErrorAction SilentlyContinue
+      Wait-Process -Id ([int]$record.supervisorPid) -Timeout 10 -ErrorAction SilentlyContinue
+    }
+    if ($target) {
+      Stop-Process -Id $record.pid -ErrorAction Stop
+      Wait-Process -Id $record.pid -Timeout 30 -ErrorAction SilentlyContinue
+    }
+    Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $stopSentinel -Force -ErrorAction SilentlyContinue
     $target = $null
+    $supervisorProc = $null
   }
   if ($action -in @('start','restart') -and -not $target) {
     & node (Join-Path $Root 'user-gateway.cjs') start

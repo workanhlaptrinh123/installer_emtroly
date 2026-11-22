@@ -108,16 +108,25 @@ function readLocalTelegramToken() {
   return "";
 }
 
+export function formatTelegramSendFailureHint(rawDetail, ownerId = "") {
+  const detail = String(rawDetail ?? "");
+  if (/chat not found|peer_id_invalid|bot can't initiate|bot was blocked|user is deactivated/i.test(detail)) {
+    const idLabel = ownerId ? ` (Owner ID: ${ownerId})` : "";
+    return `Telegram từ chối gửi ảnh QR${idLabel} vì Chủ sở hữu chưa mở Bot bấm START (/start) hoặc đã chặn Bot. Hãy mở chat riêng với Bot bấm /start rồi gõ lại /zaloqr.`;
+  }
+  return "";
+}
+
 async function sendDirectTelegramPhoto(ownerId, pngInput, caption, signal) {
   const token = readLocalTelegramToken();
-  if (!token) return null;
+  if (!token) return { messageId: null, fatalHint: "" };
   let bytes = null;
   if (Buffer.isBuffer(pngInput)) {
     bytes = pngInput;
   } else if (typeof pngInput === "string" && existsSync(pngInput)) {
     bytes = readFileSync(pngInput);
   }
-  if (!bytes || bytes.length === 0) return null;
+  if (!bytes || bytes.length === 0) return { messageId: null, fatalHint: "" };
   const apiBase = (process.env.EMTROLY_TELEGRAM_API_BASE || "https://api.telegram.org").replace(/\/+$/, "");
   const form = new FormData();
   form.append("chat_id", ownerId);
@@ -135,13 +144,16 @@ async function sendDirectTelegramPhoto(ownerId, pngInput, caption, signal) {
     });
     const data = await resp.json().catch(() => ({}));
     if (resp.ok && data?.ok && data?.result?.message_id) {
-      return String(data.result.message_id);
+      return { messageId: String(data.result.message_id), fatalHint: "" };
+    }
+    if ((resp.status === 400 || resp.status === 403) && data?.description) {
+      return { messageId: null, fatalHint: formatTelegramSendFailureHint(data.description, ownerId) };
     }
   } catch { } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", onAbort);
   }
-  return null;
+  return { messageId: null, fatalHint: "" };
 }
 
 function extractLastJson(output) {
@@ -336,7 +348,8 @@ export async function loginAndSendQr(ownerId, assertCurrent, signal) {
       }
       assertCurrent();
 
-      receipt = await sendDirectTelegramPhoto(ownerId, pngBytes, qrCaption, signal);
+      const directRes = await sendDirectTelegramPhoto(ownerId, pngBytes, qrCaption, signal);
+      receipt = directRes.messageId;
       if (!receipt) {
         const mediaPath = stageOutboundMedia(pngBytes);
         const delivery = cliProcess(
@@ -345,7 +358,10 @@ export async function loginAndSendQr(ownerId, assertCurrent, signal) {
         );
         const deliveryResult = await delivery.done;
         assertCurrent();
-        if (deliveryResult.code !== 0) throw new Error("Gửi ảnh QR qua Telegram chưa thành công.");
+        if (deliveryResult.code !== 0) {
+          const cliHint = directRes.fatalHint || formatTelegramSendFailureHint(deliveryResult.output, ownerId);
+          throw new Error(cliHint || "Gửi ảnh QR qua Telegram chưa thành công.");
+        }
         try {
           receipt = parseReceipt(deliveryResult.output, ownerId);
         } catch (err) {
@@ -429,7 +445,8 @@ export async function loginAndSendQr(ownerId, assertCurrent, signal) {
     }
     assertCurrent();
 
-    receipt = await sendDirectTelegramPhoto(ownerId, image, qrCaption, signal);
+    const directFallback = await sendDirectTelegramPhoto(ownerId, image, qrCaption, signal);
+    receipt = directFallback.messageId;
     if (!receipt) {
       const mediaPath = stageOutboundMedia(image);
       const delivery = cliProcess(["message", "send", "--channel", "telegram", "--account", settings.telegramAccount,
@@ -437,7 +454,10 @@ export async function loginAndSendQr(ownerId, assertCurrent, signal) {
         { signal, timeoutMs: 60000, logPath: path.join(privateDirectory, "delivery.log") });
       const deliveryResult = await delivery.done;
       assertCurrent();
-      if (deliveryResult.code !== 0) throw new Error("Gửi ảnh Telegram chưa thành công; không tự gửi lại khi biên nhận chưa rõ.");
+      if (deliveryResult.code !== 0) {
+        const cliHint = directFallback.fatalHint || formatTelegramSendFailureHint(deliveryResult.output, ownerId);
+        throw new Error(cliHint || "Gửi ảnh Telegram chưa thành công; không tự gửi lại khi biên nhận chưa rõ.");
+      }
       try {
         receipt = parseReceipt(deliveryResult.output, ownerId);
       } catch (error) {

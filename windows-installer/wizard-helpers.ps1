@@ -40,9 +40,88 @@ function Get-SafeProp($Obj, [string]$Name) {
   return $null
 }
 
+function Remove-EmTroLyInvisibleChars([string]$Value) {
+  if ($null -eq $Value) { return '' }
+  return ([regex]::Replace($Value, '[\u200B\u200C\u200D\u2060\uFEFF\u00A0]', '')).Trim()
+}
+
+function Normalize-EmTroLyTelegramToken([string]$RawToken) {
+  $clean = Remove-EmTroLyInvisibleChars $RawToken
+  $clean = [regex]::Replace($clean, '\s+', '')
+  if ($clean -match '^(?i)bot([0-9]{5,}:[A-Za-z0-9_-]{20,})$') {
+    return $Matches[1]
+  }
+  return $clean
+}
+
+function Normalize-EmTroLyCustomerInputs {
+  param([Parameter(Mandatory=$true)]$Inputs)
+  $tok = Normalize-EmTroLyTelegramToken ([string](Get-SafeProp $Inputs 'telegram_token'))
+  $apiKey = [regex]::Replace((Remove-EmTroLyInvisibleChars ([string](Get-SafeProp $Inputs 'ai_api_key'))), '\s+', '')
+
+  $rawOwners = Remove-EmTroLyInvisibleChars ([string](Get-SafeProp $Inputs 'owner_ids'))
+  $ownerSeen = New-Object 'System.Collections.Generic.HashSet[string]'
+  $ownerList = New-Object 'System.Collections.Generic.List[string]'
+  foreach ($part in @([regex]::Split($rawOwners, '[,;\s]+'))) {
+    $trimmed = $part.Trim()
+    if ($trimmed -and $ownerSeen.Add($trimmed)) {
+      [void]$ownerList.Add($trimmed)
+    }
+  }
+  $ownersClean = ($ownerList -join ',')
+
+  $rawGroup = Remove-EmTroLyInvisibleChars ([string](Get-SafeProp $Inputs 'group_id'))
+  $groupClean = [regex]::Replace($rawGroup, '\s+', '')
+  $groupClean = [regex]::Replace($groupClean, '^[\u2010\u2011\u2012\u2013\u2014\u2212]+', '-')
+
+  $rawUrl = Remove-EmTroLyInvisibleChars ([string](Get-SafeProp $Inputs 'base_url'))
+  if ($rawUrl -match '^\[[^\]]*\]\((https?://[^)\s]+)\)$') { $rawUrl = $Matches[1].Trim() }
+  $baseUrlClean = $rawUrl.TrimEnd('/')
+
+  $rawPort = [regex]::Replace((Remove-EmTroLyInvisibleChars ([string](Get-SafeProp $Inputs 'gateway_port'))), '\s+', '')
+  if ([string]::IsNullOrWhiteSpace($rawPort)) { $rawPort = '0' }
+
+  $qrOwnerClean = [regex]::Replace((Remove-EmTroLyInvisibleChars ([string](Get-SafeProp $Inputs 'qr_owner_id'))), '\s+', '')
+  $cfgZaloVal = Get-SafeProp $Inputs 'configure_zalo'
+  $cfgZalo = if ($null -eq $cfgZaloVal) { $true } else { [bool]$cfgZaloVal }
+  if ($cfgZalo -and [string]::IsNullOrWhiteSpace($qrOwnerClean) -and $ownerList.Count -gt 0 -and $ownerList[0] -match '^[1-9][0-9]*$') {
+    $qrOwnerClean = [string]$ownerList[0]
+  }
+
+  $memberRaw = (Remove-EmTroLyInvisibleChars ([string](Get-SafeProp $Inputs 'member'))).ToLowerInvariant()
+  if ([string]::IsNullOrWhiteSpace($memberRaw)) { $memberRaw = 'emtroly' }
+
+  return [pscustomobject]@{
+    member             = $memberRaw
+    assistant_name     = Remove-EmTroLyInvisibleChars ([string](Get-SafeProp $Inputs 'assistant_name'))
+    telegram_token     = $tok
+    ai_api_key         = $apiKey
+    owner_ids          = $ownersClean
+    group_id           = $groupClean
+    base_url           = $baseUrlClean
+    model              = Remove-EmTroLyInvisibleChars ([string](Get-SafeProp $Inputs 'model'))
+    gateway_port       = $rawPort
+    qr_owner_id        = $qrOwnerClean
+    audience           = Remove-EmTroLyInvisibleChars ([string](Get-SafeProp $Inputs 'audience'))
+    addressing         = Remove-EmTroLyInvisibleChars ([string](Get-SafeProp $Inputs 'addressing'))
+    style              = Remove-EmTroLyInvisibleChars ([string](Get-SafeProp $Inputs 'style'))
+    configure_zalo     = $cfgZalo
+    skip_editor        = [bool](Get-SafeProp $Inputs 'skip_editor')
+    accept_full_access = [bool](Get-SafeProp $Inputs 'accept_full_access')
+  }
+}
+
+function Get-EmTroLyTelegramPrivacyNote($MeResult) {
+  $canRead = Get-SafeProp $MeResult 'can_read_all_group_messages'
+  if ($null -ne $canRead -and $canRead -eq $false) {
+    return 'Lưu ý: Bot đang bật Privacy Mode — hãy mở @BotFather gõ /setprivacy → chọn Bot → Disable (hoặc cấp quyền Admin nhóm cho Bot) để Bot đọc được tin nhắn trong nhóm.'
+  }
+  return ''
+}
+
 function Get-TelegramIdsFromBotUpdates {
   param([Parameter(Mandatory=$true)][string]$TelegramToken)
-  $tok = $TelegramToken.Trim()
+  $tok = Normalize-EmTroLyTelegramToken $TelegramToken
   if ($tok -notmatch '^[0-9]{5,}:[A-Za-z0-9_-]{20,}$') {
     return [pscustomobject]@{
       Ok               = $false
@@ -64,6 +143,8 @@ function Get-TelegramIdsFromBotUpdates {
     $meUser = Get-SafeProp $meRes 'username'
     $meFirst = Get-SafeProp $meRes 'first_name'
     $botUser = if ($meUser) { '@' + [string]$meUser } else { [string]$meFirst }
+    $privWarning = Get-EmTroLyTelegramPrivacyNote $meRes
+    $canReadAll = (Get-SafeProp $meRes 'can_read_all_group_messages') -eq $true
     $updates = Invoke-RestMethod -UseBasicParsing -Method Get -Uri ("https://api.telegram.org/bot$tok/getUpdates?limit=50") -TimeoutSec 15 -MaximumRedirection 0
     $ownerMap = [ordered]@{}
     $groupMap = [ordered]@{}
@@ -116,14 +197,18 @@ function Get-TelegramIdsFromBotUpdates {
     $firstGroup = if ($groupItems.Count -gt 0) { [string]$groupItems[0].Id } else { '' }
 
     if ($ownerItems.Count -eq 0 -and $groupItems.Count -eq 0) {
+      $emptyMsg = "Đã tìm thấy bot $botUser nhưng chưa có tin nhắn gần đây. Hãy mở Telegram nhắn /start cho $botUser (và nhắn 1 tin trong nhóm có bot), sau đó bấm lại nút này!"
+      if ($privWarning) { $emptyMsg += " $privWarning" }
       return [pscustomobject]@{
-        Ok               = $true
-        BotUsername      = $botUser
-        SuggestedOwnerId = ''
-        SuggestedGroupId = ''
-        Owners           = @()
-        Groups           = @()
-        Message          = "Đã tìm thấy bot $botUser nhưng chưa có tin nhắn gần đây. Hãy mở Telegram nhắn /start cho $botUser (và nhắn 1 tin trong nhóm có bot), sau đó bấm lại nút này!"
+        Ok                      = $true
+        BotUsername             = $botUser
+        SuggestedOwnerId        = ''
+        SuggestedGroupId        = ''
+        Owners                  = @()
+        Groups                  = @()
+        CanReadAllGroupMessages = $canReadAll
+        PrivacyWarning          = $privWarning
+        Message                 = $emptyMsg
       }
     }
 
@@ -131,15 +216,18 @@ function Get-TelegramIdsFromBotUpdates {
     if ($firstOwner) { $summaryParts += "Owner ID: $firstOwner ($($ownerMap[$firstOwner]))." }
     if ($firstGroup) { $summaryParts += "Group ID: $firstGroup ($($groupMap[$firstGroup]))." }
     else { $summaryParts += 'Chưa thấy tin nhắn nhóm (hãy thêm bot vào nhóm rồi nhắn 1 tin nếu cần lấy Group ID).' }
+    if ($privWarning) { $summaryParts += $privWarning }
 
     return [pscustomobject]@{
-      Ok               = $true
-      BotUsername      = $botUser
-      SuggestedOwnerId = $firstOwner
-      SuggestedGroupId = $firstGroup
-      Owners           = $ownerItems
-      Groups           = $groupItems
-      Message          = ($summaryParts -join ' ')
+      Ok                      = $true
+      BotUsername             = $botUser
+      SuggestedOwnerId        = $firstOwner
+      SuggestedGroupId        = $firstGroup
+      Owners                  = $ownerItems
+      Groups                  = $groupItems
+      CanReadAllGroupMessages = $canReadAll
+      PrivacyWarning          = $privWarning
+      Message                 = ($summaryParts -join ' ')
     }
   } catch {
     return [pscustomobject]@{
@@ -163,29 +251,31 @@ function Test-EmTroLyLiveCredentials {
     [string]$OpenClawRoot = ''
   )
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-  $tok = $TelegramToken.Trim()
-  $key = $ApiKey.Trim()
+  $tok = Normalize-EmTroLyTelegramToken $TelegramToken
+  $key = [regex]::Replace((Remove-EmTroLyInvisibleChars $ApiKey), '\s+', '')
   if ([string]::IsNullOrWhiteSpace($tok) -and $OpenClawRoot) {
     $tPath = Join-Path $OpenClawRoot 'telegram.token'
     if (Test-Path -LiteralPath $tPath -PathType Leaf) {
-      try { $tok = ([IO.File]::ReadAllText($tPath, [System.Text.Encoding]::UTF8)).Trim() } catch { }
+      try { $tok = Normalize-EmTroLyTelegramToken ([IO.File]::ReadAllText($tPath, [System.Text.Encoding]::UTF8)) } catch { }
     }
   }
   if ([string]::IsNullOrWhiteSpace($key) -and $OpenClawRoot) {
     $kPath = Join-Path $OpenClawRoot 'member-provider.secret'
     if (Test-Path -LiteralPath $kPath -PathType Leaf) {
-      try { $key = ([IO.File]::ReadAllText($kPath, [System.Text.Encoding]::UTF8)).Trim() } catch { }
+      try { $key = [regex]::Replace((Remove-EmTroLyInvisibleChars ([IO.File]::ReadAllText($kPath, [System.Text.Encoding]::UTF8))), '\s+', '') } catch { }
     }
   }
 
   $tgOk = $false
   $tgText = 'Chưa nhập Bot Token'
+  $privWarn = ''
   if ($tok -match '^[0-9]{5,}:[A-Za-z0-9_-]{20,}$') {
     try {
       $me = Invoke-RestMethod -UseBasicParsing -Method Get -Uri ("https://api.telegram.org/bot$tok/getMe") -TimeoutSec 15 -MaximumRedirection 0
       if ($me.ok -and $me.result.is_bot) {
         $tgOk = $true
         $tgText = 'Bot @' + [string]$me.result.username + ' sẵn sàng'
+        $privWarn = Get-EmTroLyTelegramPrivacyNote $me.result
       } else {
         $tgText = 'Token không phải bot hợp lệ'
       }
@@ -216,13 +306,16 @@ function Test-EmTroLyLiveCredentials {
     }
   }
 
+  $summaryMsg = "Telegram: $tgText · AI: $apiText"
+  if ($privWarn) { $summaryMsg += " · $privWarn" }
   return [pscustomobject]@{
-    AllOk       = ($tgOk -and $apiOk)
-    TelegramOk  = $tgOk
-    TelegramMsg = $tgText
-    ApiOk       = $apiOk
-    ApiMsg      = $apiText
-    Summary     = "Telegram: $tgText · AI: $apiText"
+    AllOk          = ($tgOk -and $apiOk)
+    TelegramOk     = $tgOk
+    TelegramMsg    = $tgText
+    PrivacyWarning = $privWarn
+    ApiOk          = $apiOk
+    ApiMsg         = $apiText
+    Summary        = $summaryMsg
   }
 }
 
@@ -475,7 +568,7 @@ function Install-EmTroLyAppShortcut {
   [void][IO.Directory]::CreateDirectory($emWinDir)
 
   if ($PayloadRoot -and (Test-Path -LiteralPath $PayloadRoot -PathType Container)) {
-    foreach ($name in @('wizard.ps1', 'wizard-helpers.ps1', 'codex-cli.ps1', 'auto-heal-codex.ps1', 'manage-instance.ps1', 'validation.ps1')) {
+    foreach ($name in @('wizard.ps1', 'wizard-helpers.ps1', 'codex-cli.ps1', 'auto-heal-codex.ps1', 'manage-instance.ps1', 'validation.ps1', 'repair-antigravity-shortcut.ps1')) {
       $srcFile = Join-Path $PayloadRoot ('windows-installer\' + $name)
       if (Test-Path -LiteralPath $srcFile -PathType Leaf) {
         $txt = [IO.File]::ReadAllText($srcFile, [System.Text.Encoding]::UTF8)
@@ -504,10 +597,14 @@ function Install-EmTroLyAppShortcut {
   $icoDst = Join-Path $emWinDir 'alt.ico'
   $vbsPath = Join-Path $emUiDir 'launch-emtroly-ui.vbs'
   $desktopDir = [Environment]::GetFolderPath('Desktop')
-  $startMenuDir = Join-Path ([Environment]::GetFolderPath('Programs')) 'Anh Lap Trinh'
+  $programsBase = [Environment]::GetFolderPath('Programs')
+  $startMenuDir = if ($programsBase) { Join-Path $programsBase 'Anh Lap Trinh' } else { '' }
   $createdPath = ''
 
-  if ((Test-Path -LiteralPath $wizardDst -PathType Leaf) -and (Test-Path -LiteralPath $wscriptExe -PathType Leaf) -and $desktopDir -and (Test-Path -LiteralPath $desktopDir -PathType Container)) {
+  $hasAnyTargetDir = ($desktopDir -and (Test-Path -LiteralPath $desktopDir -PathType Container)) -or
+    ($programsBase -and (Test-Path -LiteralPath $programsBase -PathType Container))
+
+  if ((Test-Path -LiteralPath $wizardDst -PathType Leaf) -and (Test-Path -LiteralPath $wscriptExe -PathType Leaf) -and $hasAnyTargetDir) {
     try {
       $vbsBody = @"
 Option Explicit
@@ -521,7 +618,10 @@ Set shell = Nothing
       [IO.File]::WriteAllText($vbsPath, $vbsBody, [System.Text.Encoding]::Unicode)
 
       $wsh = New-Object -ComObject WScript.Shell
-      $targets = @((Join-Path $desktopDir 'Em Tro Ly - Anh Lap Trinh.lnk'))
+      $targets = @()
+      if ($desktopDir -and (Test-Path -LiteralPath $desktopDir -PathType Container)) {
+        $targets += (Join-Path $desktopDir 'Em Tro Ly - Anh Lap Trinh.lnk')
+      }
       if ($startMenuDir) {
         [void][IO.Directory]::CreateDirectory($startMenuDir)
         $targets += (Join-Path $startMenuDir 'Em Tro Ly - Anh Lap Trinh.lnk')
@@ -538,13 +638,13 @@ Set shell = Nothing
               $sc.IconLocation = "$icoDst,0"
             }
             $sc.Save()
+            if (-not $createdPath) { $createdPath = $lnkPath }
             break
           } catch {
             if ($scTry -lt 3) { Start-Sleep -Milliseconds (400 * $scTry) }
           }
         }
       }
-      $createdPath = $targets[0]
     } catch { }
   }
   return [pscustomobject]@{

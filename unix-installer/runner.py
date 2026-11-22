@@ -4,6 +4,7 @@ import importlib.util
 import os
 from pathlib import Path
 import platform
+import shutil
 import socket
 
 import codex_setup
@@ -18,7 +19,30 @@ import runtime
 import service
 import settings
 import telegram
+import uninstaller
 import zalo_setup
+
+
+DEFAULT_MIN_FREE_BYTES = 1_200_000_000
+
+
+def check_disk_space(target_dir: Path) -> None:
+    min_raw = os.environ.get("EMTROLY_MIN_FREE_BYTES", "").strip()
+    min_bytes = int(min_raw) if min_raw.isdigit() else DEFAULT_MIN_FREE_BYTES
+    sim_raw = os.environ.get("EMTROLY_SIMULATE_FREE_BYTES", "").strip()
+    if sim_raw.isdigit():
+        free_bytes = int(sim_raw)
+    else:
+        probe = Path(target_dir)
+        while not probe.exists() and probe.parent != probe:
+            probe = probe.parent
+        free_bytes = shutil.disk_usage(probe).free
+    if free_bytes < min_bytes:
+        free_mb = round(free_bytes / (1024 * 1024))
+        req_gb = round(min_bytes / (1024 * 1024 * 1024), 1)
+        raise RuntimeError(
+            f"Ổ đĩa không đủ dung lượng trống (còn {free_mb} MB, cần tối thiểu {req_gb} GB để cài đặt an toàn)."
+        )
 
 
 def choose_port(requested):
@@ -49,7 +73,12 @@ def install(values, source, progress=lambda message: None):
         raise RuntimeError("Run the installer as the desktop user, not root")
     prospective = home / (".openclaw-member-" + values_checked["member"])
     if prospective.exists() or prospective.is_symlink():
-        raise FileExistsError("Instance already exists; it was not changed")
+        if uninstaller.is_recoverable_incomplete_instance(prospective):
+            progress("Phát hiện lần cài trước bị gián đoạn — đang tự động lưu trữ & dọn dẹp để cài mới...")
+            uninstaller.archive_incomplete_instance(prospective, home)
+        else:
+            raise FileExistsError("Instance already exists; it was not changed")
+    check_disk_space(home)
     if platform.system() == "Linux":
         service.check_linux_user_service()
     progress("Đang kiểm tra Telegram và nhà cung cấp AI...")
@@ -113,6 +142,7 @@ def install(values, source, progress=lambda message: None):
     )
     progress("Đang tạo trợ lý riêng...")
     root = instance.initialize(values, home, port)
+    uninstaller.write_installing_marker(root, values_checked["member"])
     root_holder["root"] = root
 
     enable_zalo = values_checked.get("configure_zalo", True)
@@ -195,6 +225,7 @@ def install(values, source, progress=lambda message: None):
     except (OSError, ValueError, RuntimeError) as error:
         raise RuntimeError("Cài đặt chưa hoàn tất; Gateway có thể đã chạy. Không cài lại trước khi kiểm tra " +
                            str(root) + ". Chi tiết: " + str(error)) from None
+    uninstaller.clear_installing_marker(root)
     return {
         "root": str(root),
         "gateway_port": port,

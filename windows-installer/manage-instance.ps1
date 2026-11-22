@@ -285,11 +285,103 @@ function Invoke-ManageWorkerMain {
   $lastManageTechDetail = ''
 
   try {
-    if ($action -notin @('update-config', 'install-zalo', 'reinstall-codex', 'health-restart', 'auto-heal')) {
+    if ($action -notin @('update-config', 'install-zalo', 'reinstall-codex', 'health-restart', 'auto-heal', 'uninstall-instance')) {
       throw 'invalid-manage-action'
     }
-    if ($action -notin @('reinstall-codex', 'auto-heal') -and -not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+    if ($action -notin @('reinstall-codex', 'auto-heal', 'uninstall-instance') -and -not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
       throw 'instance-missing'
+    }
+
+    if ($action -eq 'uninstall-instance') {
+      if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+        Write-ManageStatus $StatusPath 'Hoàn tất: Trên máy hiện không còn thư mục trợ lý OpenClaw — bạn có thể cài đặt mới ngay!'
+        exit 0
+      }
+      $rootItem = Get-Item -LiteralPath $root -Force -ErrorAction Stop
+      if ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+        throw 'unsafe-symlink-instance'
+      }
+
+      Write-ManageStatus $StatusPath 'Đang dừng dịch vụ nền Gateway...'
+      [IO.File]::WriteAllText((Join-Path $root 'user-gateway.stop'), 'stop', $utf8NoBom)
+      if (Test-Path -LiteralPath (Join-Path $root 'openclaw-instance.ps1') -PathType Leaf) {
+        try { [void](Invoke-EmTroLyGatewayInstance -Root $root -CliArgs @('gateway', 'stop')) } catch { }
+      }
+      try {
+        $runningNodes = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue | Where-Object {
+          $_.CommandLine -and $_.CommandLine.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0
+        })
+        foreach ($rn in $runningNodes) {
+          if ($rn.ProcessId) { Stop-Process -Id ([int]$rn.ProcessId) -Force -ErrorAction SilentlyContinue }
+        }
+      } catch { }
+
+      Write-ManageStatus $StatusPath 'Đang sao lưu cấu hình an toàn trước khi gỡ bỏ...'
+      $stampUn = Get-Date -Format 'yyyyMMdd-HHmmss'
+      $backupBase = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "AnhLapTrinh\EmTroLy\backups\uninstall-$stampUn" } else { Join-Path $env:TEMP "emtroly-uninstall-$stampUn" }
+      [void][IO.Directory]::CreateDirectory($backupBase)
+      foreach ($pair in @(
+        @{ Src = $configPath; Dst = (Join-Path $backupBase 'openclaw.json') },
+        @{ Src = (Join-Path $root 'workspace\CUSTOMER_PROFILE.md'); Dst = (Join-Path $backupBase 'CUSTOMER_PROFILE.md') }
+      )) {
+        if (Test-Path -LiteralPath $pair.Src -PathType Leaf) {
+          Copy-Item -LiteralPath $pair.Src -Destination $pair.Dst -Force
+          if (Get-Command Set-EmTroLyPrivateFileAcl -ErrorAction SilentlyContinue) {
+            Set-EmTroLyPrivateFileAcl $pair.Dst
+          }
+        }
+      }
+
+      $startupDir = if ($env:EMTROLY_TEST_STARTUP_DIR) { $env:EMTROLY_TEST_STARTUP_DIR } else { [Environment]::GetFolderPath([Environment+SpecialFolder]::Startup) }
+      if ($startupDir -and (Test-Path -LiteralPath $startupDir -PathType Container)) {
+        foreach ($vbs in @(Get-ChildItem -LiteralPath $startupDir -Filter 'OpenClaw-*.vbs' -File -ErrorAction SilentlyContinue)) {
+          try {
+            $vbsTxt = [IO.File]::ReadAllText($vbs.FullName, [Text.Encoding]::Unicode)
+            if ($vbsTxt.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+              Remove-Item -LiteralPath $vbs.FullName -Force -ErrorAction SilentlyContinue
+            }
+          } catch { }
+        }
+      }
+
+      if ($env:LOCALAPPDATA) {
+        $ocBinDir = Join-Path $env:LOCALAPPDATA 'OpenClaw\bin'
+        if (Test-Path -LiteralPath $ocBinDir -PathType Container) {
+          foreach ($cmdFile in @(Get-ChildItem -LiteralPath $ocBinDir -Filter 'openclaw*.cmd' -File -ErrorAction SilentlyContinue)) {
+            try {
+              $cmdTxt = [IO.File]::ReadAllText($cmdFile.FullName, [Text.Encoding]::UTF8)
+              if ($cmdTxt.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                Remove-Item -LiteralPath $cmdFile.FullName -Force -ErrorAction SilentlyContinue
+              }
+            } catch { }
+          }
+        }
+      }
+
+      Write-ManageStatus $StatusPath 'Đang dọn sạch thư mục trợ lý OpenClaw (giữ nguyên Antigravity & Codex để cài lại siêu nhanh)...'
+      try {
+        $cmdExeUn = Join-Path $env:SystemRoot 'System32\cmd.exe'
+        if (Test-Path -LiteralPath $cmdExeUn -PathType Leaf) {
+          $rmPsiUn = New-Object System.Diagnostics.ProcessStartInfo
+          $rmPsiUn.FileName = $cmdExeUn
+          $rmPsiUn.Arguments = '/d /s /c "rmdir /s /q "' + $root + '""'
+          $rmPsiUn.UseShellExecute = $false
+          $rmPsiUn.CreateNoWindow = $true
+          $rmPsiUn.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+          $rmProcUn = [System.Diagnostics.Process]::Start($rmPsiUn)
+          [void]$rmProcUn.WaitForExit(30000)
+          $rmProcUn.Dispose()
+        }
+      } catch { }
+      if (Test-Path -LiteralPath $root) {
+        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+      }
+      if (Test-Path -LiteralPath $root) {
+        throw 'uninstall-cleanup-locked'
+      }
+
+      Write-ManageStatus $StatusPath "Hoàn tất: Đã dừng dịch vụ, sao lưu cấu hình ($backupBase) và gỡ bỏ trợ lý OpenClaw sạch sẽ! Bạn có thể bấm Cài đặt mới ngay."
+      exit 0
     }
 
     $instance = if (Test-Path -LiteralPath $instancePath -PathType Leaf) {
@@ -302,6 +394,9 @@ function Invoke-ManageWorkerMain {
     }
 
     if ($action -eq 'update-config') {
+      if (Get-Command Normalize-EmTroLyCustomerInputs -ErrorAction SilentlyContinue) {
+        $req = Normalize-EmTroLyCustomerInputs -Inputs $req
+      }
       $assistantName = ([string]$req.assistant_name).Trim()
       $baseUrl = ([string]$req.base_url).Trim().TrimEnd('/')
       $model = ([string]$req.model).Trim()
@@ -820,6 +915,7 @@ try {
       'editor-codex-probe-failed' = 'Codex CLI chưa vượt qua bước kiểm tra API Key. Hãy kiểm tra khóa API và mạng.'
       'editor-activation-failed' = 'Antigravity IDE chưa kích hoạt được tiện ích Codex Extension.'
       'editor-version-unsupported' = 'Phiên bản Antigravity trên máy chưa tương thích cấu trúc chuẩn.'
+      'uninstall-cleanup-locked' = 'Một tệp trong thư mục OpenClaw đang được mở bởi chương trình khác. Hãy đóng các cửa sổ đang mở thư mục openclaw rồi thử lại.'
     }
     $friendly = if ($errMap.ContainsKey($errCode)) { $errMap[$errCode] } else { "Không thể hoàn tất thao tác ($errCode). Dữ liệu cũ vẫn được giữ an toàn." }
     try {

@@ -884,6 +884,7 @@ $xamlText = @'
                   <Button x:Name="DiagZaloQrBtn" Style="{StaticResource SoftAccentBtn}" Content="Lấy mã QR Zalo" Margin="0,0,10,8"/>
                   <Button x:Name="DiagZaloBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Đồng bộ Zalo" Margin="0,0,10,8"/>
                   <Button x:Name="DiagCodexBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Sửa Antigravity &amp; Codex" Margin="0,0,10,8"/>
+                  <Button x:Name="DiagUninstallBtn" Style="{StaticResource SoftDangerBtn}" Content="Gỡ trợ lý để cài lại" Margin="0,0,10,8"/>
                 </WrapPanel>
               </StackPanel>
             </Border>
@@ -1246,6 +1247,7 @@ $diagRestartBtn     = Get-Ui 'DiagRestartBtn'
 $diagZaloQrBtn      = Get-Ui 'DiagZaloQrBtn'
 $diagZaloBtn        = Get-Ui 'DiagZaloBtn'
 $diagCodexBtn       = Get-Ui 'DiagCodexBtn'
+$diagUninstallBtn   = Get-Ui 'DiagUninstallBtn'
 $diagExportBtn      = Get-Ui 'DiagExportBtn'
 $diagShortcutBtn    = Get-Ui 'DiagShortcutBtn'
 $diagChangeLicenseBtn = Get-Ui 'DiagChangeLicenseBtn'
@@ -2143,6 +2145,37 @@ function Apply-ManageModeUI {
 }
 
 function Test-FormInputs([bool]$ForManageConfig = $false) {
+  if (Get-Command Normalize-EmTroLyCustomerInputs -ErrorAction SilentlyContinue) {
+    $normForm = Normalize-EmTroLyCustomerInputs -Inputs @{
+      assistant_name = $assistantBox.Text
+      base_url       = $baseUrlBox.Text
+      model          = [string]$modelBox.SelectedItem
+      owner_ids      = $ownersBox.Text
+      group_id       = $groupBox.Text
+      gateway_port   = $portBox.Text
+      qr_owner_id    = $qrOwnerBox.Text
+      telegram_token = $tokenBox.Text
+      ai_api_key     = $apiKeyBox.Text
+      audience       = $audienceBox.Text
+      addressing     = $addressingBox.Text
+      style          = $styleBox.Text
+      configure_zalo = [bool]$zaloCheck.Checked
+    }
+    $prevHydrate = $script:draftHydrating
+    $script:draftHydrating = $true
+    try {
+      $assistantBox.Text = $normForm.assistant_name
+      $baseUrlBox.Text   = $normForm.base_url
+      $ownersBox.Text    = $normForm.owner_ids
+      $groupBox.Text     = $normForm.group_id
+      $portBox.Text      = $normForm.gateway_port
+      $qrOwnerBox.Text   = $normForm.qr_owner_id
+      if (-not [string]::IsNullOrWhiteSpace($tokenBox.Text)) { $tokenBox.Text = $normForm.telegram_token }
+      if (-not [string]::IsNullOrWhiteSpace($apiKeyBox.Text)) { $apiKeyBox.Text = $normForm.ai_api_key }
+    } finally {
+      $script:draftHydrating = $prevHydrate
+    }
+  }
   if ([string]::IsNullOrWhiteSpace($assistantBox.Text)) { Show-Error 'Hãy nhập tên trợ lý hiển thị.'; return $false }
   if ($baseUrlBox.Text.Trim().TrimEnd('/') -cne 'https://codex.anhlaptrinh.vn/v1') { Show-Error 'Chỉ hỗ trợ máy chủ chính thức https://codex.anhlaptrinh.vn/v1.'; return $false }
   if ([string]$modelBox.SelectedItem -notin @('gpt-6.2-sol', 'GPT-6.1-terra', 'gpt-6.2-astra')) { Show-Error 'Model phải là gpt-6.2-sol, GPT-6.1-terra hoặc gpt-6.2-astra.'; return $false }
@@ -2627,6 +2660,23 @@ $installTimer.Add_Tick({
         Reset-ProgressVisualState
         $installProgressBar.Value = 100
         $progressPercentText.Text = '100%'
+        if ($wasManage -eq 'uninstall-instance') {
+          $script:isManageMode = $false
+          $script:installCompleted = $false
+          $script:zaloConnectedState = $false
+          $script:zaloInstalledState = $false
+          $manageEditBanner.Visibility = [System.Windows.Visibility]::Collapsed
+          $installOptionsCard.Visibility = [System.Windows.Visibility]::Visible
+          $tokenFieldLabel.Text = 'Telegram Bot Token'
+          $apiKeyFieldLabel.Text = 'Provider API Key'
+          if (-not [string]::IsNullOrWhiteSpace($script:sessionApiKeyFallback) -and [string]::IsNullOrWhiteSpace($apiKeyBox.Text)) {
+            $apiKeyBox.Text = $script:sessionApiKeyFallback
+          }
+          [void](Update-CodexAvailability)
+          Show-Info $detail 'Đã gỡ trợ lý thành công'
+          Set-NavActive 'home'
+          return
+        }
         Apply-ManageModeUI
         [void](Update-CodexAvailability)
         if ($wasManage -eq 'install-zalo' -or $script:openZaloQrAfterManage) {
@@ -3292,6 +3342,19 @@ $zaloQrBackBtn.Add_Click({
   Set-NavActive 'home'
 })
 $diagCodexBtn.Add_Click({ Start-ManageAction 'reinstall-codex' })
+$diagUninstallBtn.Add_Click({
+  if ($script:installRunning -or $script:retryEditor) { return }
+  $confirmUn = [System.Windows.MessageBox]::Show(
+    $window,
+    "Bạn có chắc chắn muốn dừng Gateway, sao lưu cấu hình (openclaw.json) và gỡ sạch thư mục trợ lý OpenClaw để cài lại từ đầu không?`n`n(Lưu ý: Antigravity IDE & Codex CLI vẫn được giữ nguyên để lần cài lại diễn ra siêu nhanh!)",
+    'Xác nhận gỡ trợ lý để cài lại',
+    [System.Windows.MessageBoxButton]::YesNo,
+    [System.Windows.MessageBoxImage]::Warning
+  )
+  if ($confirmUn -eq [System.Windows.MessageBoxResult]::Yes) {
+    Start-ManageAction 'uninstall-instance'
+  }
+})
 $diagExportBtn.Add_Click({ Invoke-ExportSupportReportAction })
 $diagShortcutBtn.Add_Click({
   $sc = Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot

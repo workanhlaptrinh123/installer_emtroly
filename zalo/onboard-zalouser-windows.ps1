@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [Parameter(Mandatory=$true)][string]$Root,
   [Parameter(Mandatory=$true)][string]$TelegramAccount,
@@ -89,6 +89,7 @@ function Stop-SelectedGateway {
   if ($stopSucceeded) { return }
 
   $pidPath = Join-Path $Root 'user-gateway.pid.json'
+  $stopSentinel = Join-Path $Root 'user-gateway.stop'
   if (-not (Test-Path -LiteralPath $pidPath)) {
     throw 'Could not safely identify the selected gateway.'
   }
@@ -104,11 +105,19 @@ function Stop-SelectedGateway {
     if ($commandLine.IndexOf($env:OPENCLAW_CLI_ENTRY, [StringComparison]::OrdinalIgnoreCase) -lt 0 -or $commandLine -notmatch '\bgateway\s+run\b') {
       throw 'Saved gateway PID does not belong to this OpenClaw instance.'
     }
+    [IO.File]::WriteAllText($stopSentinel, 'stop', [Text.UTF8Encoding]::new($false))
+    if ($record.PSObject.Properties['supervisorPid'] -and $record.supervisorPid) {
+      $supProc = Get-CimInstance Win32_Process -Filter "ProcessId = $($record.supervisorPid)" -ErrorAction SilentlyContinue
+      if ($supProc -and $supProc.CommandLine -like '*user-gateway.cjs*') {
+        Stop-Process -Id ([int]$record.supervisorPid) -Force -ErrorAction SilentlyContinue
+      }
+    }
     $target = Get-Process -Id $savedPid -ErrorAction Stop
     Stop-Process -InputObject $target -ErrorAction Stop
     $target.WaitForExit(30000) | Out-Null
     if (-not $target.HasExited) { throw 'Gateway did not exit.' }
     Remove-Item -LiteralPath $pidPath -Force -ErrorAction Stop
+    Remove-Item -LiteralPath $stopSentinel -Force -ErrorAction SilentlyContinue
   } catch {
     throw 'Could not stop the selected gateway for Zalo setup.'
   }

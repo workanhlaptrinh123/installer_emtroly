@@ -102,6 +102,8 @@ if ($CredentialData) {
 }
 if ([string]::IsNullOrWhiteSpace($tg) -or [string]::IsNullOrWhiteSpace($key)) { throw 'Telegram token and API key must not be empty.' }
 New-Item -ItemType Directory -Force -Path $root,$workspace,(Join-Path $workspace 'skills') | Out-Null
+$installingMarkerPath = Join-Path $root '.emtroly-installing.json'
+[IO.File]::WriteAllText($installingMarkerPath, (@{ pid = $PID; startedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); name = $Name } | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
 $status = 'Đang kiểm tra và cài Node.js, Python, FFmpeg nếu máy còn thiếu…'
 Write-NativeInstallStatus $status
 $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -273,6 +275,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Gateway restart failed.' }
 Invoke-OpenClaw --version
 Invoke-OpenClaw gateway status --require-rpc
 if ($LASTEXITCODE -ne 0) { throw 'Gateway status check failed.' }
+Remove-Item -LiteralPath $installingMarkerPath -Force -ErrorAction SilentlyContinue
 if ($zaloSelected) {
   Write-NativeInstallStatus 'Trợ lý đã sẵn sàng; /zaloqr và /zalostatus đã hoạt động.'
 }

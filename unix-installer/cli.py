@@ -11,6 +11,7 @@ import python_runtime
 import runner
 import service
 import settings
+import uninstaller
 
 
 DEFAULT_OWNERS = "8764883034,8342048167,6980864856,1828236146,8977732250"
@@ -106,7 +107,7 @@ def collect():
     print("Các ID này có thể chạy lệnh và truy cập tệp của user này, kể cả ID không phải của bạn.")
     print("Chỉ tiếp tục nếu bạn tin tưởng TẤT CẢ các ID; nhấn Ctrl+C và chạy lại để thay đổi.")
     values["accept_full_access"] = prompt("Nhập DONGY để cấp quyền cho các ID trên và bắt đầu") == "DONGY"
-    return values
+    return settings.normalize(values)
 
 
 def safe_error(error, values):
@@ -119,14 +120,19 @@ def safe_error(error, values):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Cài Em Trợ Lý trên Ubuntu qua terminal.")
+    parser = argparse.ArgumentParser(description="Cài Em Trợ Lý trên macOS / Linux qua terminal.")
     parser.add_argument("--check", action="store_true", help="Chỉ kiểm tra điều kiện, không cài.")
+    parser.add_argument("--uninstall", metavar="MEMBER", help="Gỡ cài đặt an toàn instance đã chọn (ví dụ: emtroly).")
     args = parser.parse_args(argv)
     values = {}
     try:
-        preflight(interactive=not args.check)
+        preflight(interactive=not (args.check or args.uninstall))
         if args.check:
             print("Điều kiện user/systemd đạt. Chưa tải môi trường hoặc kiểm tra Telegram/provider.")
+            return 0
+        if args.uninstall:
+            res = uninstaller.uninstall_instance(args.uninstall)
+            print(f"Đã gỡ cài đặt {res['member']} ({res['root']}). Sao lưu cấu hình tại: {res['backup']}")
             return 0
         bootstrap_python()
         values = collect()

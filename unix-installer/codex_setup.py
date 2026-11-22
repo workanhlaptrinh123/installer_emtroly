@@ -13,6 +13,8 @@ import shutil
 import subprocess
 import tempfile
 
+import net_utils
+
 
 NON_HEALABLE_CODES = {
     "invalid-settings",
@@ -219,6 +221,7 @@ def install_codex_cli_first(values: dict, home: Path, node: Path, npm: Path, pro
 
     final_bin = find_codex_binary(home, isolated_only=not should_install_npm)
     if final_bin:
+        net_utils.clear_macos_quarantine(final_bin)
         shim = register_codex_shim(home, final_bin, c_home, extra_bin_dir=node.parent)
         return {"installed": True, "executable": str(final_bin), "codex_home": str(c_home), "shim": shim}
     return {"installed": False, "executable": "", "codex_home": str(c_home), "shim": None}
@@ -333,6 +336,8 @@ def install_antigravity_and_extension(values: dict, home: Path, progress=lambda 
             f"--extensions-dir {shlex.quote(str(ext_dir))} --new-window\n"
         )
         _write_private_file(launcher, launcher_body, 0o755)
+        net_utils.clear_macos_quarantine(launcher)
+        net_utils.clear_macos_quarantine(ext_dir)
     elif platform.system() == "Linux":
         apps_dir = home / ".local/share/applications"
         apps_dir.mkdir(parents=True, exist_ok=True)

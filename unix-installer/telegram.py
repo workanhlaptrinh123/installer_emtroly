@@ -5,13 +5,33 @@ import re
 import time
 import urllib.request
 
+import net_utils
+import settings
+
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
 
 
+def normalize_token(token: str) -> str:
+    cleaned = settings.clean_text(token)
+    cleaned = re.sub(r"\s+", "", cleaned)
+    m = re.fullmatch(r"(?i)bot([0-9]{5,}:[A-Za-z0-9_-]{20,})", cleaned)
+    return m.group(1) if m else cleaned
+
+
+def privacy_warning(bot_me) -> str:
+    if isinstance(bot_me, dict) and bot_me.get("can_read_all_group_messages") is False:
+        return (
+            "Lưu ý: Bot đang bật Privacy Mode — hãy mở @BotFather gõ /setprivacy → chọn Bot → Disable "
+            "(hoặc cấp quyền Admin nhóm cho Bot) để Bot đọc được mọi tin nhắn trong nhóm."
+        )
+    return ""
+
+
 def api(token, method, body=None):
+    token = normalize_token(token)
     if not re.fullmatch(r"[0-9]{5,}:[A-Za-z0-9_-]{20,}", token):
         raise ValueError("Invalid Telegram token")
     if method not in {"getMe", "getMyCommands", "setMyCommands", "getUpdates"}:
@@ -22,7 +42,8 @@ def api(token, method, body=None):
     payload = None if body is None else json.dumps(body).encode("utf-8")
     request = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
     try:
-        with urllib.request.build_opener(_NoRedirect()).open(request, timeout=45) as response:
+        opener = urllib.request.build_opener(_NoRedirect())
+        with net_utils.urlopen_with_retry(request, timeout=45, opener=opener) as response:
             result = json.loads(response.read(1024 * 1024))
     except Exception:
         raise RuntimeError("Telegram request failed; check the connection and bot token") from None
@@ -82,6 +103,8 @@ def fetch_ids_from_updates(token):
         "group_id": groups[0] if groups else "",
         "owners": owners,
         "groups": groups,
+        "can_read_all_group_messages": me.get("can_read_all_group_messages"),
+        "privacy_warning": privacy_warning(me),
     }
 
 

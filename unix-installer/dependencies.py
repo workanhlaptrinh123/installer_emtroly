@@ -11,6 +11,8 @@ import tempfile
 import urllib.parse
 import urllib.request
 
+import net_utils
+
 NODE_VERSION = "24.21.0"
 MAX_ARCHIVE_BYTES = 150 * 1024 * 1024
 NODE_DIGESTS = {
@@ -22,7 +24,7 @@ NODE_DIGESTS = {
 
 
 def _download(url, timeout):
-    response = urllib.request.urlopen(url, timeout=timeout)
+    response = net_utils.urlopen_with_retry(url, timeout=timeout)
     parsed = urllib.parse.urlsplit(response.geturl())
     if parsed.scheme != "https" or parsed.hostname != "nodejs.org" or parsed.port not in (None, 443):
         response.close()
@@ -125,6 +127,7 @@ def install_node(dependencies):
         with tarfile.open(archive_path, "r:gz") as archive:
             members = _safe_archive(archive, root_name)
             archive.extractall(temporary, members=members)
+        net_utils.clear_macos_quarantine(temporary / root_name)
         _verify_node(temporary / root_name)
         if target.exists() or target.is_symlink():
             raise ValueError("Node runtime appeared during installation; retry")
