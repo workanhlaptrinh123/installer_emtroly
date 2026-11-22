@@ -1,4 +1,4 @@
-# Smart Helpers cho giao diện Em Trợ Lý (Windows 11 WPF):
+﻿# Smart Helpers cho giao diện Em Trợ Lý (Windows 11 WPF):
 # - Đọc phiên bản ứng dụng từ MANIFEST.txt
 # - Tự động lấy Telegram Owner ID & Group ID từ Bot Token (getUpdates)
 # - Kiểm tra nhanh kết nối Telegram Bot + Provider API Key trước khi cài
@@ -481,27 +481,30 @@ function Install-EmTroLyAppShortcut {
     if (Test-Path -LiteralPath $icoSrc -PathType Leaf) {
       Copy-Item -LiteralPath $icoSrc -Destination (Join-Path $emWinDir 'alt.ico') -Force
     }
-    $hostCandidates = @(
-      (Join-Path $PayloadRoot 'windows-installer\EmTroLyHost.exe'),
-      (Join-Path $PayloadRoot 'Mo-Giao-Dien-EmTroLy.exe')
-    )
-    $hostDst = Join-Path $emUiDir 'AnhLapTrinh-EmTroLy.exe'
-    foreach ($hc in $hostCandidates) {
-      if (Test-Path -LiteralPath $hc -PathType Leaf) {
-        Copy-Item -LiteralPath $hc -Destination $hostDst -Force
-        break
-      }
-    }
   }
 
-  $hostExe = Join-Path $emUiDir 'AnhLapTrinh-EmTroLy.exe'
+  $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  $wscriptExe = Join-Path $env:SystemRoot 'System32\wscript.exe'
+  $wizardDst = Join-Path $emWinDir 'wizard.ps1'
   $icoDst = Join-Path $emWinDir 'alt.ico'
+  $vbsPath = Join-Path $emUiDir 'launch-emtroly-ui.vbs'
   $desktopDir = [Environment]::GetFolderPath('Desktop')
   $startMenuDir = Join-Path ([Environment]::GetFolderPath('Programs')) 'Anh Lap Trinh'
   $createdPath = ''
 
-  if ((Test-Path -LiteralPath $hostExe -PathType Leaf) -and $desktopDir -and (Test-Path -LiteralPath $desktopDir -PathType Container)) {
+  if ((Test-Path -LiteralPath $wizardDst -PathType Leaf) -and (Test-Path -LiteralPath $wscriptExe -PathType Leaf) -and $desktopDir -and (Test-Path -LiteralPath $desktopDir -PathType Container)) {
     try {
+      $vbsBody = @"
+Option Explicit
+Dim shell, command
+Set shell = CreateObject("WScript.Shell")
+shell.CurrentDirectory = "$($emUiDir.Replace('"','""'))"
+command = Chr(34) & "$($psExe.Replace('"','""'))" & Chr(34) & " -STA -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " & Chr(34) & "$($wizardDst.Replace('"','""'))" & Chr(34) & " -PayloadRoot " & Chr(34) & "$($emUiDir.Replace('"','""'))" & Chr(34)
+shell.Run command, 0, False
+Set shell = Nothing
+"@
+      [IO.File]::WriteAllText($vbsPath, $vbsBody, [System.Text.Encoding]::Unicode)
+
       $wsh = New-Object -ComObject WScript.Shell
       $targets = @((Join-Path $desktopDir 'Em Tro Ly - Anh Lap Trinh.lnk'))
       if ($startMenuDir) {
@@ -510,8 +513,8 @@ function Install-EmTroLyAppShortcut {
       }
       foreach ($lnkPath in $targets) {
         $sc = $wsh.CreateShortcut($lnkPath)
-        $sc.TargetPath = $hostExe
-        $sc.Arguments = "-PayloadRoot `"$emUiDir`""
+        $sc.TargetPath = $wscriptExe
+        $sc.Arguments = '//B //Nologo "' + $vbsPath + '"'
         $sc.WorkingDirectory = $emUiDir
         $sc.Description = 'Anh Lap Trinh - Em Tro Ly (Quan ly, Cau hinh & Codex CLI)'
         if (Test-Path -LiteralPath $icoDst -PathType Leaf) {

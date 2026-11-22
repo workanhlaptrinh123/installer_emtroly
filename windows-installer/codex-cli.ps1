@@ -318,20 +318,10 @@ function Register-EmTroLyCodexCli {
       if (Test-Path -LiteralPath $icoSrc -PathType Leaf) {
         Copy-Item -LiteralPath $icoSrc -Destination (Join-Path $emWinDir 'alt.ico') -Force
       }
-      $hostDst = Join-Path $emUiDir 'AnhLapTrinh-EmTroLy.exe'
-      foreach ($hostSrc in @((Join-Path $PayloadRoot 'windows-installer\EmTroLyHost.exe'), (Join-Path $PayloadRoot 'Mo-Giao-Dien-EmTroLy.exe'))) {
-        if (Test-Path -LiteralPath $hostSrc -PathType Leaf) {
-          Copy-Item -LiteralPath $hostSrc -Destination $hostDst -Force
-          break
-        }
-      }
       $uiLauncher = Join-Path $binDir 'emtroly-ui.cmd'
       $uiWizard = Join-Path $emWinDir 'wizard.ps1'
-      if ((Test-Path -LiteralPath $hostDst -PathType Leaf) -and $hostDst -notmatch '[\r\n"%&|<>^]') {
-        $uiBody = "@echo off`r`nstart `"`" `"$hostDst`" -PayloadRoot `"$emUiDir`" -CodexMode`r`n"
-        [IO.File]::WriteAllText($uiLauncher, $uiBody, $shimEnc)
-      } elseif ((Test-Path -LiteralPath $uiWizard -PathType Leaf) -and $uiWizard -notmatch '[\r\n"%&|<>^]') {
-        $uiBody = "@echo off`r`nstart `"`" `"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`" -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uiWizard`" -PayloadRoot `"$emUiDir`" -CodexMode`r`n"
+      if ((Test-Path -LiteralPath $uiWizard -PathType Leaf) -and $uiWizard -notmatch '[\r\n"%&|<>^]') {
+        $uiBody = "@echo off`r`nstart `"`" `"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`" -STA -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uiWizard`" -PayloadRoot `"$emUiDir`" -CodexMode`r`n"
         [IO.File]::WriteAllText($uiLauncher, $uiBody, $shimEnc)
       }
     } catch { }

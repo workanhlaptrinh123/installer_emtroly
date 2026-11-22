@@ -22,8 +22,9 @@ Name "installer_emtroly"
 OutFile "${OUTFILE}"
 Icon "${ICON_FILE}"
 RequestExecutionLevel user
+ManifestDPIAware true
 SilentInstall silent
-SetCompressor /SOLID lzma
+SetCompressor zlib
 
 VIProductVersion "${FILE_VERSION}"
 VIAddVersionKey "ProductName" "Anh Lap Trinh - Em Tro Ly"
@@ -31,6 +32,8 @@ VIAddVersionKey "ProductVersion" "${RELEASE_VERSION}"
 VIAddVersionKey "FileVersion" "${FILE_VERSION}"
 VIAddVersionKey "FileDescription" "Anh Lap Trinh - Em Tro Ly"
 VIAddVersionKey "CompanyName" "Anh Lap Trinh"
+VIAddVersionKey "LegalCopyright" "Copyright (c) Anh Lap Trinh"
+VIAddVersionKey "OriginalFilename" "caidattroly.exe"
 
 Section
   ${IfNot} ${RunningX64}
@@ -46,13 +49,7 @@ Section
   File /r "${PAYLOAD_DIR}/*"
   !endif
   ClearErrors
-  IfFileExists "$PLUGINSDIR\windows-installer\EmTroLyHost.exe" launch_host launch_ps
-  launch_host:
-    ExecWait '"$PLUGINSDIR\windows-installer\EmTroLyHost.exe" -PayloadRoot "$PLUGINSDIR"' $0
-    Goto check_launch
-  launch_ps:
-    ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$PLUGINSDIR\windows-installer\wizard.ps1" -PayloadRoot "$PLUGINSDIR"' $0
-  check_launch:
+  ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -STA -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$PLUGINSDIR\windows-installer\wizard.ps1" -PayloadRoot "$PLUGINSDIR"' $0
   IfErrors launch_error
   SetErrorLevel $0
   Goto done
