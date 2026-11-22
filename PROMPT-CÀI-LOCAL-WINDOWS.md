@@ -1,6 +1,6 @@
 # Cài trợ lý cá nhân Windows bằng bộ cài `.exe` — OpenClaw 2026.11.4
 
-Ưu tiên chạy `caidattroly.exe` trong release V6. Bộ cài
+Ưu tiên chạy `emtroly.exe` trong release V6. Bộ cài
 mở wizard để nhập các trường cần thiết, kiểm tra provider/Telegram, cài user-scope
 và mặc định bật Zalo/mention/QR cùng Full Exec cho các Telegram Owner IDs đã nhập.
 QR owner mặc định là Owner ID đầu tiên; Zalo là bắt buộc. Bộ cài chỉ cài plugin,

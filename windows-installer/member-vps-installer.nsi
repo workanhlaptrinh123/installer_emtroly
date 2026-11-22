@@ -33,7 +33,7 @@ VIAddVersionKey "FileVersion" "${FILE_VERSION}"
 VIAddVersionKey "FileDescription" "Anh Lap Trinh - Em Tro Ly"
 VIAddVersionKey "CompanyName" "Anh Lap Trinh"
 VIAddVersionKey "LegalCopyright" "Copyright (c) Anh Lap Trinh"
-VIAddVersionKey "OriginalFilename" "caidattroly.exe"
+VIAddVersionKey "OriginalFilename" "emtroly.exe"
 
 Section
   ${IfNot} ${RunningX64}

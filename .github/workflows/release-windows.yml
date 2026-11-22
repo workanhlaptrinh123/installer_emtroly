@@ -56,12 +56,12 @@ jobs:
       - name: Build native bundle
         run: PYTHON_BIN="$PYTHON_BIN" ./build-native-bundle.sh
 
-      - name: Build caidattroly.exe
+      - name: Build emtroly.exe
         run: |
           NSIS="/c/Program Files (x86)/NSIS/makensis.exe" \
           PYTHON_BIN="$PYTHON_BIN" \
           RELEASE_VERSION="${{ steps.version.outputs.version }}" \
-          ./build-windows-installer.sh caidattroly.exe
+          ./build-windows-installer.sh emtroly.exe
 
       - name: Scan installer with Microsoft Defender
         shell: powershell
@@ -81,16 +81,16 @@ jobs:
             Start-Sleep -Seconds 3
           } while ((Get-Date) -lt $deadline)
           $status | Select-Object AMRunningMode, AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled
-          ./windows-installer/scan-release.ps1 -FilePath ./caidattroly.exe
+          ./windows-installer/scan-release.ps1 -FilePath ./emtroly.exe
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: caidattroly-${{ steps.version.outputs.version }}-${{ github.run_number }}
+          name: emtroly-${{ steps.version.outputs.version }}-${{ github.run_number }}
           retention-days: 7
           path: |
-            caidattroly.exe
-            caidattroly.exe.sha256
+            emtroly.exe
+            emtroly.exe.sha256
             native-full-bundle.tar.gz
             native-full-bundle.sha256
             MANIFEST.txt
@@ -103,8 +103,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
-            caidattroly.exe \
-            caidattroly.exe.sha256 \
+            emtroly.exe \
+            emtroly.exe.sha256 \
             native-full-bundle.tar.gz \
             native-full-bundle.sha256 \
             MANIFEST.txt \

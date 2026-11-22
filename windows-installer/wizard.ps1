@@ -2930,6 +2930,9 @@ function Start-ZaloQrLoginSession([switch]$ForceNewQr) {
     if ($targetOwner -match '^[1-9][0-9]*$') {
       $argList += @('--owner-id', $targetOwner)
     }
+    if ($ForceNewQr) {
+      $argList += '--force'
+    }
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $nodeExe

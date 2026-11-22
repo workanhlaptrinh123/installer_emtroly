@@ -1,4 +1,4 @@
-param (
+﻿param (
     [string]$Mode = "Daily", # "Daily" hoặc "5Mins"
     [string]$Time = "09:00AM"
 )

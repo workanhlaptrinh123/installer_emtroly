@@ -35,7 +35,7 @@ $motwDir = Join-Path $env:TEMP ('defender-motw-' + [guid]::NewGuid().ToString('N
 try {
   $motwFile = Join-Path $motwDir ([IO.Path]::GetFileName($file))
   Copy-Item -LiteralPath $file -Destination $motwFile -Force
-  Set-Content -LiteralPath ($motwFile + ':Zone.Identifier') -Value "[ZoneTransfer]`r`nZoneId=3`r`nReferrerUrl=https://github.com/`r`nHostUrl=https://objects.githubusercontent.com/caidattroly.exe" -Encoding ASCII
+  Set-Content -LiteralPath ($motwFile + ':Zone.Identifier') -Value "[ZoneTransfer]`r`nZoneId=3`r`nReferrerUrl=https://github.com/`r`nHostUrl=https://objects.githubusercontent.com/emtroly.exe" -Encoding ASCII
   try { Set-MpPreference -MAPSReporting Advanced -SubmitSamplesConsent SendSafeSamples -ErrorAction SilentlyContinue } catch { }
   & $scanner -Scan -ScanType 3 -File $motwFile
   $motwExit = $LASTEXITCODE

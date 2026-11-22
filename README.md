@@ -88,7 +88,7 @@ local update.
 
 ### Standalone Windows `.exe` installer — 2026-11-16
 
-Artifact: `caidattroly.exe` with the adjacent `caidattroly.exe.sha256`
+Artifact: `emtroly.exe` with the adjacent `emtroly.exe.sha256`
 file. Double-clicking the executable opens a Windows Forms wizard. The wizard
 asks for assistant name, provider HTTPS URL, model, Telegram owner
 IDs, negative Telegram Group ID, bot token, provider API key, optional profile

@@ -6,10 +6,10 @@ Tren Linux co san NSIS, chay:
 
 ```bash
 PYTHON_BIN=python3 ./build-native-bundle.sh
-NSIS=/path/to/makensis PYTHON_BIN=python3 RELEASE_VERSION=2026.11.17 ./build-windows-installer.sh caidattroly.exe
+NSIS=/path/to/makensis PYTHON_BIN=python3 RELEASE_VERSION=2026.11.17 ./build-windows-installer.sh emtroly.exe
 ```
 
-Script tao `caidattroly.exe`, file checksum va bundle native. Cac artifact nay
+Script tao `emtroly.exe`, file checksum va bundle native. Cac artifact nay
 duoc bo qua khoi Git va duoc dua len GitHub Release.
 
 ## Phat hanh tu dong
@@ -27,5 +27,5 @@ GitHub Actions chay tren Windows, cai NSIS, build bo cai, tao checksum va
 dang file vao GitHub Release. Khong commit Telegram token, API key, Zalo
 session, cookie, database, runtime state hoac file `.env`.
 
-`caidattroly.exe` la bo cai moi. Ban hien tai khong tu dong nang cap cac
+`emtroly.exe` la bo cai moi. Ban hien tai khong tu dong nang cap cac
 instance da cai; muon cap nhat tai cho can them luong upgrade rieng.

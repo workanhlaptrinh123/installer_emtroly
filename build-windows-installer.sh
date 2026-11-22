@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT="${1:-$BASE/caidattroly.exe}"
+OUT="${1:-$BASE/emtroly.exe}"
 NSIS="${NSIS:-$(command -v makensis || true)}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 RELEASE_VERSION="${RELEASE_VERSION:-$(sed -n 's/^installer_version=//p' "$BASE/MANIFEST.txt")}"

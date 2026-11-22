@@ -874,6 +874,133 @@ Write-Output 'SESSION2_RESTORED_AND_CLEARED'
             self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
             self.assertIn("SESSION2_RESTORED_AND_CLEARED", r2.stdout)
 
+    @unittest.skipUnless(NODE, "Requires Node.js")
+    def test_zalo_qr_gateway_rpc_fast_path_and_telegram_plugin_auth(self):
+        import base64
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        import threading
+
+        # >= 32 bytes valid PNG
+        valid_png = base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+        )
+        qr_data_url = "data:image/png;base64," + base64.b64encode(valid_png).decode("ascii")
+        tg_received = {"photos": 0, "messages": 0}
+
+        class MockTg(BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length", "0"))
+                _ = self.rfile.read(length)
+                if self.path.endswith("/sendPhoto"):
+                    tg_received["photos"] += 1
+                    body = json.dumps({"ok": True, "result": {"message_id": 555}}).encode("utf-8")
+                else:
+                    tg_received["messages"] += 1
+                    body = json.dumps({"ok": True, "result": {"message_id": 556}}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        srv = HTTPServer(("127.0.0.1", 0), MockTg)
+        port = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory(prefix="emtroly-zalo-rpc-") as td:
+                temp = Path(td)
+                oc = temp / "openclaw"
+                rt = oc / "runtime/2026.11.4/node_modules/openclaw"
+                plugin_dir = oc / "tools/telegram-zalo-owner-login"
+                rt.mkdir(parents=True)
+                plugin_dir.mkdir(parents=True)
+
+                fake_cli = rt / "openclaw.mjs"
+                fake_cli.write_text(
+                    "const a = process.argv.slice(2);\n"
+                    "if (a[0] === 'gateway' && a[1] === 'call') {\n"
+                    "  const m = a[2];\n"
+                    f"  if (m === 'web.login.start') console.log(JSON.stringify({{qrDataUrl: {json.dumps(qr_data_url)}, message: 'Scan QR'}}));\n"
+                    "  else if (m === 'web.login.wait') console.log(JSON.stringify({connected: true, message: 'Login successful.'}));\n"
+                    "  else console.log(JSON.stringify({ok: true, channels: {zalouser: {running: false}}}));\n"
+                    "  process.exit(0);\n"
+                    "}\n"
+                    "process.exit(1);\n",
+                    encoding="utf-8",
+                )
+                (oc / "installer-instance.json").write_text(json.dumps({"cli_entry": str(fake_cli)}), encoding="utf-8")
+                (oc / "telegram.token").write_text("123456:FAKE_TG_TOKEN_FOR_ZALO_RPC_TEST_999\n", encoding="utf-8")
+                (oc / "openclaw.json").write_text(
+                    json.dumps({"commands": {"ownerAllowFrom": ["telegram:6980864856"]}}),
+                    encoding="utf-8",
+                )
+
+                # 1. Test GUI Bridge (`zalo-qr-session.mjs`) fast RPC path
+                st_file = temp / "state.json"
+                qr_out = temp / "gui.png"
+                env = {**os.environ, "EMTROLY_TELEGRAM_API_BASE": f"http://127.0.0.1:{port}"}
+                res1 = subprocess.run(
+                    [NODE, str(ROOT / "windows-installer/zalo-qr-session.mjs"), "--root", str(oc), "--state-file", str(st_file), "--qr-out", str(qr_out), "--force", "--timeout-seconds", "15"],
+                    env=env,
+                    capture_output=True,
+                    timeout=15,
+                    **TEXT_KWARGS,
+                )
+                self.assertEqual(res1.returncode, 0, res1.stdout + res1.stderr)
+                self.assertTrue(qr_out.is_file())
+                self.assertEqual(qr_out.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+                self.assertEqual(tg_received["photos"], 1)
+                self.assertEqual(tg_received["messages"], 1)
+
+                # 2. Test Telegram `/zaloqr` plugin (`assets/index.mjs`) context auth + RPC QR delivery
+                shutil.copy2(ROOT / "native/skills/telegram-zalo-owner-login/assets/index.mjs", plugin_dir / "index.mjs")
+                (plugin_dir / "settings.json").write_text(
+                    json.dumps(
+                        {
+                            "pluginId": "telegram-zalo-owner-login",
+                            "runtimeRoot": str(oc),
+                            "runtimeHome": str(temp),
+                            "agentId": "main",
+                            "telegramAccount": "emtroly",
+                            "zaloAccount": "default",
+                            "cliCommand": NODE,
+                            "cliPrefix": [str(fake_cli)],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                plugin_test_mjs = temp / "test-plugin.mjs"
+                plugin_test_mjs.write_text(
+                    f"import {{ authorizedCommandContext, authorizedToolContext, loginAndSendQr }} from {json.dumps((plugin_dir / 'index.mjs').as_uri())};\n"
+                    "// OpenClaw 2026.11.4 DM command context (no agentId / assertOwnerCurrent, prefixed from/to)\n"
+                    "const okDm = authorizedCommandContext({ isAuthorizedSender: true, senderIsOwner: true, senderId: '6980864856', from: 'telegram:6980864856', to: 'telegram:emtroly:6980864856', accountId: 'emtroly', sessionKey: 'agent:main:telegram:direct:6980864856' });\n"
+                    "if (!okDm) throw new Error('valid-dm-command-rejected');\n"
+                    "// Group chat MUST be rejected\n"
+                    "const badGrp = authorizedCommandContext({ isAuthorizedSender: true, senderIsOwner: true, senderId: '6980864856', from: 'telegram:group:-5444081554', to: '-5444081554', accountId: 'emtroly', sessionKey: 'agent:main:telegram:group:-5444081554' });\n"
+                    "if (badGrp) throw new Error('group-command-accepted');\n"
+                    "// Non-owner MUST be rejected\n"
+                    "const badUser = authorizedCommandContext({ isAuthorizedSender: true, senderIsOwner: false, senderId: '999999', from: 'telegram:999999', accountId: 'emtroly' });\n"
+                    "if (badUser) throw new Error('non-owner-accepted');\n"
+                    "// Tool context with prefixed requesterSenderId\n"
+                    "const okTool = authorizedToolContext({ senderIsOwner: true, requesterSenderId: 'telegram:6980864856', messageChannel: 'telegram', agentAccountId: 'emtroly', sessionKey: 'agent:main:telegram:direct:6980864856', assertInvocationCurrent: () => {} });\n"
+                    "if (!okTool) throw new Error('valid-tool-ctx-rejected');\n"
+                    "// End-to-end loginAndSendQr via RPC + direct Telegram sendPhoto\n"
+                    "const out = await loginAndSendQr('6980864856', () => {});\n"
+                    "if (out.status !== 'login_completed' || out.telegramMessageId !== '555') throw new Error('unexpected-result:' + JSON.stringify(out));\n"
+                    "console.log('PLUGIN_AUTH_AND_QR_OK');\n",
+                    encoding="utf-8",
+                )
+                res2 = subprocess.run([NODE, str(plugin_test_mjs)], env=env, capture_output=True, timeout=15, **TEXT_KWARGS)
+                self.assertEqual(res2.returncode, 0, res2.stdout + res2.stderr)
+                self.assertIn("PLUGIN_AUTH_AND_QR_OK", res2.stdout)
+                self.assertEqual(tg_received["photos"], 2)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
 
 # =============================================================================
 # 3. STATIC INTEGRITY CHECKS (UTF-8 BOM + PowerShell AST across repository)

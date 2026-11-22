@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
  * Live Zalo QR Login Bridge for Em Tro Ly (WPF GUI + Telegram Owner Delivery)
- * - Spawns official `openclaw channels login --channel zalouser --account default --verbose`
- * - Captures generated QR PNG immediately for instant display inside the WPF GUI
- * - Simultaneously delivers the QR PNG to the configured Telegram Owner ID via Bot API
- * - Detects phone scan completion (`Login successful.`), restarts/enables zalouser channel if needed,
- *   notifies Telegram Owner, and writes `{ phase: "connected", connected: true }` for the GUI!
+ * - Primary fast path: calls in-process Gateway RPC `web.login.start` + `web.login.wait`
+ *   (generates QR in ~3-5s with zero SQLite plugin-lifecycle lease contention!)
+ * - Fallback path: spawns `openclaw channels login --channel zalouser --account default --verbose`
+ *   for compatibility with isolated unit-test mocks or legacy runtimes
+ * - Simultaneously renders QR PNG in WPF GUI and delivers it to Telegram Owner via Bot API
  */
 
 import { spawn, spawnSync } from "node:child_process";
@@ -22,6 +22,7 @@ function parseArgs(argv) {
     accountId: "default",
     timeoutSeconds: 160,
     syncStatus: false,
+    force: false,
     telegramApiBase: process.env.EMTROLY_TELEGRAM_API_BASE || "https://api.telegram.org",
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -33,6 +34,7 @@ function parseArgs(argv) {
     else if (a === "--account") opts.accountId = argv[++i] || "default";
     else if (a === "--timeout-seconds") opts.timeoutSeconds = Number(argv[++i] || "160");
     else if (a === "--sync-status") opts.syncStatus = true;
+    else if (a === "--force") opts.force = true;
   }
   if (!opts.root) {
     throw new Error("Missing required --root");
@@ -66,6 +68,28 @@ function writeState(stateFile, payload) {
   const tmp = `${stateFile}.tmp-${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify({ updatedAt: Date.now(), ...payload }), { encoding: "utf8", mode: 0o600 });
   fs.renameSync(tmp, stateFile);
+}
+
+function isValidPngBuffer(bytes) {
+  return Boolean(
+    bytes &&
+      bytes.length >= 24 &&
+      bytes[0] === 0x89 &&
+      bytes[1] === 0x50 &&
+      bytes[2] === 0x4e &&
+      bytes[3] === 0x47,
+  );
+}
+
+function decodeQrDataUrlToPngBuffer(qrDataUrl) {
+  if (typeof qrDataUrl !== "string" || !qrDataUrl.trim()) return null;
+  const raw = qrDataUrl.trim().replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/i, "");
+  try {
+    const buf = Buffer.from(raw, "base64");
+    return isValidPngBuffer(buf) ? buf : null;
+  } catch {
+    return null;
+  }
 }
 
 function resolveCliEntry(root) {
@@ -164,16 +188,84 @@ async function sendTelegramText(apiBase, token, ownerId, text) {
   } catch {}
 }
 
+function extractLastJsonObject(text) {
+  if (!text) return null;
+  const trimmed = text.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {}
+  for (let i = trimmed.lastIndexOf("{"); i >= 0; i = trimmed.lastIndexOf("{", i - 1)) {
+    try {
+      return JSON.parse(trimmed.slice(i));
+    } catch {}
+  }
+  return null;
+}
+
 function runGatewayCall(cliEntry, env, method, params, timeoutMs = 20_000) {
   try {
     const res = spawnSync(
       process.execPath,
       [cliEntry, "gateway", "call", method, "--params", JSON.stringify(params), "--timeout", String(timeoutMs), "--json"],
-      { env, encoding: "utf8", timeout: timeoutMs + 5_000, windowsHide: true },
+      { env, encoding: "utf8", timeout: timeoutMs + 8_000, windowsHide: true },
     );
-    if (res.status === 0 && res.stdout) return JSON.parse(res.stdout);
+    if (res.status === 0 && res.stdout) {
+      return extractLastJsonObject(res.stdout);
+    }
   } catch {}
   return null;
+}
+
+function runGatewayCallAsync(cliEntry, env, method, params, timeoutMs = 20_000) {
+  return new Promise((resolve) => {
+    const child = spawn(
+      process.execPath,
+      [cliEntry, "gateway", "call", method, "--params", JSON.stringify(params), "--timeout", String(timeoutMs), "--json"],
+      { env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stdout = "";
+    const timer = setTimeout(() => {
+      try { child.kill("SIGTERM"); } catch {}
+      resolve(null);
+    }, timeoutMs + 8_000);
+    child.stdout.on("data", (d) => { stdout += d.toString("utf8"); });
+    child.once("error", () => { clearTimeout(timer); resolve(null); });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      if (code === 0 && stdout) resolve(extractLastJsonObject(stdout));
+      else resolve(null);
+    });
+  });
+}
+
+async function finishConnected(opts, cliEntry, childEnv, ownerId, tgToken, qrHandled, tgDeliveryState) {
+  runGatewayCall(cliEntry, childEnv, "channels.start", { channel: "zalouser", accountId: opts.accountId }, 20_000);
+  writePersistentZaloStatus(opts.root, {
+    gatewayHealthy: true,
+    linked: true,
+    connected: true,
+    running: true,
+    telegramRunning: true,
+  });
+  if (ownerId && tgToken) {
+    await sendTelegramText(
+      opts.telegramApiBase,
+      tgToken,
+      ownerId,
+      "✅ Đăng nhập Zalo thành công! Trợ lý OpenClaw đã kết nối tài khoản Zalo cá nhân của bạn.",
+    );
+  }
+  writeState(opts.stateFile, {
+    phase: "connected",
+    qrReady: qrHandled,
+    connected: true,
+    telegramSent: tgDeliveryState.sent,
+    message: "Đăng nhập Zalo thành công! Kênh Zalo cá nhân của trợ lý đã hoạt động.",
+    telegramNote: tgDeliveryState.sent
+      ? "✓ Đã gửi thông báo đăng nhập Zalo thành công vào Telegram Chủ sở hữu."
+      : tgDeliveryState.note,
+  });
+  process.exit(0);
 }
 
 async function main() {
@@ -197,7 +289,7 @@ async function main() {
         { env: childEnv, encoding: "utf8", timeout: 14_000, windowsHide: true },
       );
       if (res.status === 0 && res.stdout) {
-        const health = JSON.parse(res.stdout);
+        const health = extractLastJsonObject(res.stdout);
         const zRoot = health?.channels?.zalouser ?? {};
         const zAcc = zRoot?.accounts?.[opts.accountId] ?? zRoot;
         const linked = zAcc?.linked === true || zRoot?.linked === true;
@@ -228,15 +320,149 @@ async function main() {
     telegramNote: "Chuẩn bị gửi mã QR tới Telegram chủ sở hữu...",
   });
 
-  // Stop active zalouser listener cleanly if already running so login session acquires socket cleanly
   const chStatus = runGatewayCall(cliEntry, childEnv, "channels.status", {}, 12_000);
   const wasRunning = chStatus?.channels?.zalouser?.running === true;
-  if (wasRunning) {
-    runGatewayCall(cliEntry, childEnv, "channels.stop", { channel: "zalouser", accountId: opts.accountId }, 15_000);
-  }
 
   const startedAt = Date.now();
   const expiresAt = startedAt + opts.timeoutSeconds * 1000;
+  let tgDeliveryState = { sent: false, note: "Đang gửi đồng thời mã QR qua Telegram..." };
+  let cancelled = false;
+
+  // =========================================================================
+  // 1. PRIMARY FAST PATH: In-Gateway `web.login.start` + `web.login.wait`
+  //    Avoids 5-minute SQLite plugin-lifecycle lease contention completely!
+  // =========================================================================
+  const rpcStartTimeoutMs = Math.min(30_000, Math.max(4_000, opts.timeoutSeconds * 1000));
+  const webStart = await runGatewayCallAsync(
+    cliEntry,
+    childEnv,
+    "web.login.start",
+    {
+      channel: "zalouser",
+      accountId: opts.accountId,
+      force: Boolean(opts.force),
+      timeoutMs: rpcStartTimeoutMs,
+    },
+    rpcStartTimeoutMs,
+  );
+
+  if (webStart && (typeof webStart.qrDataUrl === "string" || typeof webStart.message === "string" || webStart.connected === true)) {
+    if (!opts.force && (webStart.connected === true || /already (linked|connected)/i.test(String(webStart.message || "")))) {
+      await finishConnected(opts, cliEntry, childEnv, ownerId, tgToken, false, {
+        sent: false,
+        note: "✓ Tài khoản Zalo cá nhân đã được liên kết sẵn.",
+      });
+    }
+
+    const pngBuffer = decodeQrDataUrlToPngBuffer(webStart.qrDataUrl);
+    if (pngBuffer) {
+      const tmpQr = `${opts.qrOut}.tmp-${process.pid}`;
+      fs.writeFileSync(tmpQr, pngBuffer, { mode: 0o600 });
+      fs.renameSync(tmpQr, opts.qrOut);
+
+      const onSignalRpc = () => {
+        cancelled = true;
+        if (wasRunning) {
+          runGatewayCall(cliEntry, childEnv, "channels.start", { channel: "zalouser", accountId: opts.accountId }, 10_000);
+        }
+        process.exit(2);
+      };
+      process.on("SIGTERM", onSignalRpc);
+      process.on("SIGINT", onSignalRpc);
+
+      writeState(opts.stateFile, {
+        phase: "qr_ready",
+        qrReady: true,
+        connected: false,
+        startedAt,
+        expiresAt,
+        telegramSent: false,
+        message: "Mở Zalo trên điện thoại và quét mã QR để đăng nhập.",
+        telegramNote: ownerId ? "Đang gửi đồng thời mã QR vào Telegram Chủ sở hữu..." : "Hãy quét mã QR trực tiếp trên màn hình.",
+      });
+
+      if (ownerId && tgToken) {
+        tgDeliveryState = await sendTelegramQrPhoto(
+          opts.telegramApiBase,
+          tgToken,
+          ownerId,
+          opts.qrOut,
+          "Mã QR đăng nhập Zalo cá nhân cho trợ lý OpenClaw (Anh Lập Trình).\nHãy mở Zalo trên điện thoại → Quét mã QR và bấm Đăng nhập ngay nhé!",
+        );
+        if (!cancelled) {
+          writeState(opts.stateFile, {
+            phase: "qr_ready",
+            qrReady: true,
+            connected: false,
+            startedAt,
+            expiresAt,
+            telegramSent: tgDeliveryState.sent,
+            message: "Mở Zalo trên điện thoại và quét mã QR để đăng nhập.",
+            telegramNote: tgDeliveryState.note,
+          });
+        }
+      }
+
+      while (!cancelled && Date.now() < expiresAt) {
+        const remainMs = expiresAt - Date.now();
+        if (remainMs <= 0) break;
+        const sliceMs = Math.min(18_000, Math.max(2_000, remainMs));
+        const waitRes = await runGatewayCallAsync(
+          cliEntry,
+          childEnv,
+          "web.login.wait",
+          {
+            channel: "zalouser",
+            accountId: opts.accountId,
+            timeoutMs: sliceMs,
+          },
+          sliceMs,
+        );
+        if (waitRes?.connected === true) {
+          await finishConnected(opts, cliEntry, childEnv, ownerId, tgToken, true, tgDeliveryState);
+        }
+        const waitMsg = String(waitRes?.message || "");
+        if (/declined/i.test(waitMsg)) {
+          if (wasRunning) {
+            runGatewayCall(cliEntry, childEnv, "channels.start", { channel: "zalouser", accountId: opts.accountId }, 12_000);
+          }
+          writeState(opts.stateFile, {
+            phase: "error",
+            qrReady: false,
+            connected: false,
+            telegramSent: tgDeliveryState.sent,
+            message: "Bạn đã từ chối đăng nhập trên điện thoại. Bấm \"Tạo mã QR mới\" nếu muốn thử lại.",
+            telegramNote: tgDeliveryState.note,
+          });
+          process.exit(1);
+        }
+        if (/expired|no active zalo qr/i.test(waitMsg)) {
+          break;
+        }
+      }
+
+      if (wasRunning) {
+        runGatewayCall(cliEntry, childEnv, "channels.start", { channel: "zalouser", accountId: opts.accountId }, 15_000);
+      }
+      writeState(opts.stateFile, {
+        phase: "expired",
+        qrReady: false,
+        connected: false,
+        telegramSent: tgDeliveryState.sent,
+        message: "Mã QR đã hết thời gian chờ quét. Hãy bấm \"Tạo mã QR mới\" để lấy mã mới.",
+        telegramNote: tgDeliveryState.note,
+      });
+      process.exit(2);
+    }
+  }
+
+  // =========================================================================
+  // 2. FALLBACK PATH: CLI `channels login --channel zalouser`
+  //    Used when Gateway `web.login.start` is unavailable or in unit-test mocks
+  // =========================================================================
+  if (wasRunning) {
+    runGatewayCall(cliEntry, childEnv, "channels.stop", { channel: "zalouser", accountId: opts.accountId }, 15_000);
+  }
 
   const loginArgs = [cliEntry, "channels", "login", "--channel", "zalouser", "--account", opts.accountId, "--verbose"];
   const child = spawn(process.execPath, loginArgs, {
@@ -247,7 +473,6 @@ async function main() {
 
   let combinedOutput = "";
   let qrHandled = false;
-  let tgDeliveryState = { sent: false, note: "Đang gửi đồng thời mã QR qua Telegram..." };
   let settled = false;
 
   const cleanupChild = () => {
@@ -270,10 +495,7 @@ async function main() {
     if (!srcPng || !fs.existsSync(srcPng)) return;
     try {
       const bytes = fs.readFileSync(srcPng);
-      // Verify valid PNG magic header
-      if (bytes.length < 24 || bytes[0] !== 0x89 || bytes[1] !== 0x50 || bytes[2] !== 0x4e || bytes[3] !== 0x47) {
-        return;
-      }
+      if (!isValidPngBuffer(bytes)) return;
       fs.copyFileSync(srcPng, opts.qrOut);
       qrHandled = true;
 
@@ -338,33 +560,7 @@ async function main() {
   const loginSucceeded = exitResult.code === 0 && (qrHandled || /Login successful\./i.test(cleanFinal));
 
   if (loginSucceeded) {
-    runGatewayCall(cliEntry, childEnv, "channels.start", { channel: "zalouser", accountId: opts.accountId }, 20_000);
-    writePersistentZaloStatus(opts.root, {
-      gatewayHealthy: true,
-      linked: true,
-      connected: true,
-      running: true,
-      telegramRunning: true,
-    });
-    if (ownerId && tgToken) {
-      await sendTelegramText(
-        opts.telegramApiBase,
-        tgToken,
-        ownerId,
-        "✅ Đăng nhập Zalo thành công! Trợ lý OpenClaw đã kết nối tài khoản Zalo cá nhân của bạn.",
-      );
-    }
-    writeState(opts.stateFile, {
-      phase: "connected",
-      qrReady: qrHandled,
-      connected: true,
-      telegramSent: tgDeliveryState.sent,
-      message: "Đăng nhập Zalo thành công! Kênh Zalo cá nhân của trợ lý đã hoạt động.",
-      telegramNote: tgDeliveryState.sent
-        ? "✓ Đã gửi thông báo đăng nhập Zalo thành công vào Telegram Chủ sở hữu."
-        : tgDeliveryState.note,
-    });
-    process.exit(0);
+    await finishConnected(opts, cliEntry, childEnv, ownerId, tgToken, qrHandled, tgDeliveryState);
   }
 
   if (wasRunning) {

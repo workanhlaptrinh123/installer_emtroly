@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$Token = "chatbot",
   [int]$Port = 18789,
   [string]$Bind = "loopback",
