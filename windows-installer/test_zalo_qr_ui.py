@@ -220,6 +220,66 @@ class ZaloQrDualDeliveryTests(unittest.TestCase):
                 self.assertEqual(ps_res.returncode, 0, ps_res.stdout + ps_res.stderr)
 
 
+class LicenseAuthorityGateTests(unittest.TestCase):
+    @unittest.skipUnless(SHELL and os.name == "nt", "Requires Windows PowerShell")
+    def test_license_gate_accepts_valid_codex_key_and_locks_down_on_revocation(self):
+        state = {"revoked": False}
+
+        class MockProviderHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                auth = self.headers.get("Authorization", "")
+                if state["revoked"] or auth != "Bearer sk-valid-anhlaptrinh-customer":
+                    raw = json.dumps({"error": {"message": "Invalid API Key"}}).encode("utf-8")
+                    self.send_response(401)
+                else:
+                    raw = json.dumps({"data": [{"id": "gpt-6.2-sol"}, {"id": "gpt-6.2-astra"}]}).encode("utf-8")
+                    self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def log_message(self, format, *args):
+                return
+
+        server = HTTPServer(("127.0.0.1", 0), MockProviderHandler)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory(prefix="emtroly-lic-test-") as temporary:
+                temp = Path(temporary)
+                helpers_ps1 = ROOT / "windows-installer/wizard-helpers.ps1"
+                probe = temp / "lic-probe.ps1"
+                probe.write_text(
+                    f'$env:USERPROFILE = "{temp / "home"}"\n'
+                    f'$env:LOCALAPPDATA = "{temp / "local"}"\n'
+                    f'$env:EMTROLY_LICENSE_API_BASE = "http://127.0.0.1:{port}/v1"\n'
+                    f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{helpers_ps1}", [Text.Encoding]::UTF8)))\n'
+                    "$badDomain = Test-EmTroLyLicenseKey -ApiKey 'sk-valid-anhlaptrinh-customer' -AuthorityBaseUrl 'https://api.openai.com/v1'\n"
+                    "if ($badDomain.Valid) { throw 'external-domain-must-be-rejected' }\n"
+                    "$ok = Test-EmTroLyLicenseKey -ApiKey 'sk-valid-anhlaptrinh-customer'\n"
+                    "if (-not $ok.Valid -or $ok.Revoked) { throw ('valid-key-rejected:' + $ok.Message) }\n"
+                    "Save-EmTroLyLicenseKey -ApiKey 'sk-valid-anhlaptrinh-customer'\n"
+                    "if ((Get-EmTroLySavedLicenseKey) -cne 'sk-valid-anhlaptrinh-customer') { throw 'saved-key-mismatch' }\n"
+                    "$bad = Test-EmTroLyLicenseKey -ApiKey 'sk-wrong-key'\n"
+                    "if ($bad.Valid -or -not $bad.Revoked) { throw 'wrong-key-not-flagged-revoked' }\n"
+                    "Invoke-EmTroLyRevokeLockdown\n"
+                    "if ((Get-EmTroLySavedLicenseKey) -ne '') { throw 'revoked-key-not-cleared' }\n",
+                    encoding="utf-8-sig",
+                )
+                res = subprocess.run(
+                    [SHELL, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe)],
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
+                self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+
 class LatestModelsValidationTests(unittest.TestCase):
     def test_unix_settings_accept_three_latest_models_only(self):
         sys.path.insert(0, str(ROOT / "unix-installer"))

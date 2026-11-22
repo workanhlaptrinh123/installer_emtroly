@@ -1,4 +1,4 @@
-function Test-IsAutoHealableError([string]$ErrorCode, [string]$Stage = '') {
+﻿function Test-IsAutoHealableError([string]$ErrorCode, [string]$Stage = '') {
   if ([string]::IsNullOrWhiteSpace($ErrorCode)) { return $false }
   $nonHealable = @(
     'invalid-member',

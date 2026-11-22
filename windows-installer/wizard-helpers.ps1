@@ -455,7 +455,7 @@ function Export-EmTroLySupportReport {
 function Install-EmTroLyAppShortcut {
   param([string]$PayloadRoot = '')
   if (-not $env:LOCALAPPDATA) { return [pscustomobject]@{ Created = $false; Path = '' } }
-  $emUiDir = Join-Path $env:LOCALAPPDATA 'EmTroLy\UI'
+  $emUiDir = Join-Path $env:LOCALAPPDATA 'EmTroLyUI'
   $emWinDir = Join-Path $emUiDir 'windows-installer'
   [void][IO.Directory]::CreateDirectory($emWinDir)
 
@@ -525,5 +525,171 @@ function Install-EmTroLyAppShortcut {
   return [pscustomobject]@{
     Created = (-not [string]::IsNullOrWhiteSpace($createdPath))
     Path    = $createdPath
+  }
+}
+
+function Get-EmTroLySavedLicenseKey {
+  if ($env:LOCALAPPDATA) {
+    $licFile = Join-Path $env:LOCALAPPDATA 'EmTroLyUI\license.key'
+    if (Test-Path -LiteralPath $licFile -PathType Leaf) {
+      try {
+        $v = ([IO.File]::ReadAllText($licFile, [System.Text.Encoding]::UTF8)).Trim()
+        if ($v) { return $v }
+      } catch { }
+    }
+  }
+  if ($env:USERPROFILE) {
+    $secFile = Join-Path $env:USERPROFILE 'openclaw\member-provider.secret'
+    if (Test-Path -LiteralPath $secFile -PathType Leaf) {
+      try {
+        $v2 = ([IO.File]::ReadAllText($secFile, [System.Text.Encoding]::UTF8)).Trim()
+        if ($v2) { return $v2 }
+      } catch { }
+    }
+  }
+  if ($env:LOCALAPPDATA) {
+    $authFile = Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex\auth.json'
+    if (Test-Path -LiteralPath $authFile -PathType Leaf) {
+      try {
+        $aObj = [IO.File]::ReadAllText($authFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        $v3 = ([string]$aObj.OPENAI_API_KEY).Trim()
+        if ($v3) { return $v3 }
+      } catch { }
+    }
+  }
+  return ''
+}
+
+function Save-EmTroLyLicenseKey {
+  param([Parameter(Mandatory=$true)][string]$ApiKey)
+  $cleanKey = $ApiKey.Trim()
+  if ([string]::IsNullOrWhiteSpace($cleanKey)) { return }
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+
+  if ($env:LOCALAPPDATA) {
+    $uiDir = Join-Path $env:LOCALAPPDATA 'EmTroLyUI'
+    [void][IO.Directory]::CreateDirectory($uiDir)
+    $licFile = Join-Path $uiDir 'license.key'
+    [IO.File]::WriteAllText($licFile, "$cleanKey`n", $utf8NoBom)
+    try { & icacls $licFile /inheritance:r /grant:r "${currentUser}:(F)" '*S-1-5-18:(F)' *> $null } catch { }
+
+    $authFile = Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex\auth.json'
+    if (Test-Path -LiteralPath $authFile -PathType Leaf) {
+      try {
+        $authJson = @{ OPENAI_API_KEY = $cleanKey } | ConvertTo-Json -Compress
+        [IO.File]::WriteAllText($authFile, $authJson, $utf8NoBom)
+      } catch { }
+    }
+  }
+
+  if ($env:USERPROFILE) {
+    $secFile = Join-Path $env:USERPROFILE 'openclaw\member-provider.secret'
+    if (Test-Path -LiteralPath $secFile -PathType Leaf) {
+      try {
+        [IO.File]::WriteAllText($secFile, "$cleanKey`n", $utf8NoBom)
+        & icacls $secFile /inheritance:r /grant:r "${currentUser}:(F)" '*S-1-5-18:(F)' *> $null
+      } catch { }
+    }
+  }
+}
+
+function Invoke-EmTroLyRevokeLockdown {
+  if ($env:LOCALAPPDATA) {
+    $licFile = Join-Path $env:LOCALAPPDATA 'EmTroLyUI\license.key'
+    Remove-Item -LiteralPath $licFile -Force -ErrorAction SilentlyContinue
+  }
+  if ($env:USERPROFILE) {
+    $instLauncher = Join-Path $env:USERPROFILE 'openclaw\openclaw-instance.ps1'
+    if (Test-Path -LiteralPath $instLauncher -PathType Leaf) {
+      try {
+        $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        if (Test-Path -LiteralPath $psExe -PathType Leaf) {
+          [void](Start-Process -FilePath $psExe -ArgumentList ('-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $instLauncher + '" gateway stop') -WindowStyle Hidden)
+        }
+      } catch { }
+    }
+  }
+}
+
+function Test-EmTroLyLicenseKey {
+  param(
+    [string]$ApiKey = '',
+    [string]$AuthorityBaseUrl = ''
+  )
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  $trimmedKey = if ($null -ne $ApiKey) { $ApiKey.Trim() } else { '' }
+  if ([string]::IsNullOrWhiteSpace($trimmedKey)) {
+    return [pscustomobject]@{
+      Valid        = $false
+      Revoked      = $false
+      NetworkError = $false
+      Models       = @()
+      Message      = 'Vui lòng nhập Khóa kích hoạt (Provider API Key) do Anh Lập Trình cấp.'
+    }
+  }
+
+  $targetBase = if (-not [string]::IsNullOrWhiteSpace($AuthorityBaseUrl)) {
+    $AuthorityBaseUrl.Trim().TrimEnd('/')
+  } elseif (-not [string]::IsNullOrWhiteSpace($env:EMTROLY_LICENSE_API_BASE)) {
+    $env:EMTROLY_LICENSE_API_BASE.Trim().TrimEnd('/')
+  } else {
+    'https://codex.anhlaptrinh.vn/v1'
+  }
+
+  $isTestLocal = (-not [string]::IsNullOrWhiteSpace($env:EMTROLY_LICENSE_API_BASE)) -and ($targetBase -match '^http://127\.0\.0\.1:\d+')
+  if (-not $isTestLocal -and $targetBase -cne 'https://codex.anhlaptrinh.vn/v1') {
+    return [pscustomobject]@{
+      Valid        = $false
+      Revoked      = $true
+      NetworkError = $false
+      Models       = @()
+      Message      = 'Chỉ chấp nhận khóa bản quyền chính thức từ máy chủ codex.anhlaptrinh.vn.'
+    }
+  }
+
+  try {
+    $headers = @{ Authorization = "Bearer $trimmedKey"; Accept = 'application/json' }
+    $resp = Invoke-RestMethod -UseBasicParsing -Method Get -Uri "$targetBase/models" -Headers $headers -TimeoutSec 15 -MaximumRedirection 0
+    $ids = @($resp.data | ForEach-Object { [string]$_.id } | Where-Object { $_ })
+    if ($ids.Count -eq 0) {
+      return [pscustomobject]@{
+        Valid        = $false
+        Revoked      = $true
+        NetworkError = $false
+        Models       = @()
+        Message      = 'Khóa kích hoạt chưa được cấp quyền mô hình trên hệ thống Anh Lập Trình.'
+      }
+    }
+    return [pscustomobject]@{
+      Valid        = $true
+      Revoked      = $false
+      NetworkError = $false
+      Models       = $ids
+      Message      = 'Đã xác thực bản quyền thành công trên hệ thống Anh Lập Trình.'
+    }
+  } catch {
+    $statusCode = 0
+    try {
+      if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+        $statusCode = [int]$_.Exception.Response.StatusCode
+      }
+    } catch { }
+    if ($statusCode -in @(401, 403)) {
+      return [pscustomobject]@{
+        Valid        = $false
+        Revoked      = $true
+        NetworkError = $false
+        Models       = @()
+        Message      = 'Khóa kích hoạt không hợp lệ hoặc đã bị thu hồi quyền sử dụng. Vui lòng liên hệ Anh Lập Trình.'
+      }
+    }
+    return [pscustomobject]@{
+      Valid        = $false
+      Revoked      = $false
+      NetworkError = $true
+      Models       = @()
+      Message      = 'Không kết nối được máy chủ xác thực codex.anhlaptrinh.vn (hoặc khóa sai). Hãy kiểm tra mạng rồi thử lại.'
+    }
   }
 }

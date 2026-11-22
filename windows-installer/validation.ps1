@@ -1,4 +1,4 @@
-function Test-MemberInstallerSettings {
+﻿function Test-MemberInstallerSettings {
   param([Parameter(Mandatory=$true)][psobject]$Settings)
   if ([string]$Settings.member -cnotmatch '^[a-z][a-z0-9_-]{0,63}$') { throw 'invalid-member' }
   if ([string]::IsNullOrWhiteSpace([string]$Settings.assistant_name)) { throw 'missing-assistant-name' }

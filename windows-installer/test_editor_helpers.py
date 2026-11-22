@@ -313,7 +313,7 @@ if (Test-GoogleAuthenticodeSignature -Path $source -ExpectedHash $hash) { throw 
         with tempfile.TemporaryDirectory(prefix='emtroly-preflight-') as temporary:
             temp = Path(temporary)
             module = temp / 'install-antigravity-codex.ps1'
-            text = MODULE.read_text(encoding='utf-8')
+            text = MODULE.read_text(encoding='utf-8-sig')
             desktop = "([Environment]::GetFolderPath('Desktop'))"
             self.assertEqual(text.count(desktop), 1)
             module.write_text(text.replace(desktop, '$env:TEST_DESKTOP'), encoding='utf-8-sig')
@@ -370,7 +370,7 @@ class EditorWindowsFixtureTests(unittest.TestCase):
             temp = Path(temporary)
             driver = temp / 'driver.ps1'
             staged_module = temp / 'install-antigravity-codex.ps1'
-            module_source = MODULE.read_text(encoding='utf-8')
+            module_source = MODULE.read_text(encoding='utf-8-sig')
             transport = 'Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Path -TimeoutSec 900'
             self.assertEqual(module_source.count(transport), 1)
             module_source = module_source.replace(transport, "[IO.File]::WriteAllText($Path, 'fixture')")
@@ -488,7 +488,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $backups[0].FullName 'Programs\EmTro
         with tempfile.TemporaryDirectory(prefix='emtroly-repair ') as temporary:
             temp = Path(temporary)
             repair = temp / 'repair-antigravity-shortcut.ps1'
-            repair.write_text(REPAIR.read_text(encoding='utf-8'), encoding='utf-8-sig')
+            repair.write_text(REPAIR.read_text(encoding='utf-8-sig'), encoding='utf-8-sig')
             driver = temp / 'driver.ps1'
             driver.write_text(r'''
 param($RepairPath, $Directory)

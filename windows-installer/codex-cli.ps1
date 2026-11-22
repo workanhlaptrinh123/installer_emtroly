@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [switch]$RunWorker,
   [string]$RequestFile = '',
@@ -294,7 +294,7 @@ function Register-EmTroLyCodexCli {
 
   if (-not [string]::IsNullOrWhiteSpace($PayloadRoot)) {
     try {
-      $emUiDir = Join-Path $env:LOCALAPPDATA 'EmTroLy\UI'
+      $emUiDir = Join-Path $env:LOCALAPPDATA 'EmTroLyUI'
       $emWinDir = Join-Path $emUiDir 'windows-installer'
       [void][IO.Directory]::CreateDirectory($emWinDir)
       foreach ($name in @('wizard.ps1', 'wizard-helpers.ps1', 'codex-cli.ps1', 'auto-heal-codex.ps1', 'manage-instance.ps1', 'validation.ps1')) {

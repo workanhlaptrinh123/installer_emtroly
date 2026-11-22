@@ -81,6 +81,12 @@ public static class Program {
                 using (PowerShell ps = PowerShell.Create()) {
                     ps.Runspace = rs;
                     string scriptText = File.ReadAllText(wizard, Encoding.UTF8);
+                    if (scriptText.IndexOf("LicenseGateOverlay", StringComparison.Ordinal) < 0 ||
+                        scriptText.IndexOf("Test-EmTroLyLicenseKey", StringComparison.Ordinal) < 0) {
+                        MessageBox.Show("Tệp giao diện thiếu thành phần xác thực bản quyền chính thức của Anh Lập Trình.", "Anh Lập Trình - Em Trợ Lý", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return 1;
+                    }
+                    Environment.SetEnvironmentVariable("EMTROLY_HOST_VERIFIED", "1");
                     ps.AddScript(scriptText).AddParameter("PayloadRoot", root);
                     if (codexMode) {
                         ps.AddParameter("CodexMode", true);

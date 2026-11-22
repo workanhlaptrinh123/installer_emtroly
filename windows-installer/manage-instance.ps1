@@ -304,6 +304,7 @@ function Invoke-ManageWorkerMain {
       $style = ([string]$req.style).Trim()
 
       if ([string]::IsNullOrWhiteSpace($assistantName)) { throw 'missing-assistant-name' }
+      if ($baseUrl -cne 'https://codex.anhlaptrinh.vn/v1') { throw 'invalid-base-url' }
       $uri = $null
       if (-not [uri]::TryCreate($baseUrl, [UriKind]::Absolute, [ref]$uri) -or $uri.Scheme -ne 'https' -or -not $uri.Host -or $uri.UserInfo -or $uri.Query -or $uri.Fragment) {
         throw 'invalid-base-url'
@@ -602,8 +603,9 @@ requires_openai_auth = true
 
       $codexState = Find-EmTroLyCodexCli
       $repairScript = Join-Path $PayloadDir 'windows-installer\repair-antigravity-shortcut.ps1'
-      if ($codexState.Available -and $codexState.Source -eq 'emtroly' -and $env:LOCALAPPDATA) {
-        Write-ManageStatus $StatusPath 'Đang đồng bộ khóa API, mô hình cho Codex CLI và sửa lại lối tắt Antigravity...'
+      $shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'EmTroLy - Antigravity.lnk'
+      if ($codexState.Available -and $codexState.Source -eq 'emtroly' -and $env:LOCALAPPDATA -and (Test-Path -LiteralPath $repairScript -PathType Leaf)) {
+        Write-ManageStatus $StatusPath 'Đang đồng bộ khóa API, mô hình cho Codex CLI và kiểm tra Antigravity IDE...'
         $emCodex = Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex'
         [void][IO.Directory]::CreateDirectory($emCodex)
         $cfgToml = @"
@@ -621,16 +623,16 @@ requires_openai_auth = true
 "@
         [IO.File]::WriteAllText((Join-Path $emCodex 'config.toml'), $cfgToml, $utf8NoBom)
         [IO.File]::WriteAllText((Join-Path $emCodex 'auth.json'), (@{ OPENAI_API_KEY = $apiKey } | ConvertTo-Json -Compress), $utf8NoBom)
-        if (Test-Path -LiteralPath $repairScript -PathType Leaf) {
-          $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-          [void](Invoke-SafeSubProcess -FilePath $psExe -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $repairScript) -TimeoutSeconds 120)
+        $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $repRes = Invoke-SafeSubProcess -FilePath $psExe -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $repairScript) -TimeoutSeconds 120
+        if ($repRes.ExitCode -eq 0 -and (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) {
+          [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadDir)
+          Write-ManageStatus $StatusPath 'Hoàn tất: Đã cập nhật cấu hình Codex CLI, đăng ký lệnh codex và khôi phục lối tắt Antigravity IDE!'
+          exit 0
         }
-        [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadDir)
-        Write-ManageStatus $StatusPath 'Hoàn tất: Đã cập nhật cấu hình Codex CLI, đăng ký lệnh codex và khôi phục lối tắt Antigravity!'
-        exit 0
       }
 
-      Write-ManageStatus $StatusPath 'Đang cài đặt Antigravity IDE và Codex CLI riêng cho Em Trợ Lý...'
+      Write-ManageStatus $StatusPath 'Đang tải và cài đặt Antigravity IDE + Codex Extension riêng cho Em Trợ Lý...'
       $jobFile = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'EmTroLy\installer-job.txt' } else { '' }
       $jobId = if ($jobFile -and (Test-Path -LiteralPath $jobFile -PathType Leaf)) {
         ([IO.File]::ReadAllText($jobFile)).Trim()
@@ -638,15 +640,47 @@ requires_openai_auth = true
       if ($jobId -cnotmatch '^[a-f0-9]{32}$') { $jobId = [guid]::NewGuid().ToString('N') }
       $editorInstaller = Join-Path $PayloadDir 'windows-installer\install-antigravity-codex.ps1'
       if (-not (Test-Path -LiteralPath $editorInstaller -PathType Leaf)) { throw 'editor-module-missing' }
-      $editorSettings = [pscustomobject]@{
-        model = $model
-        base_url = $baseUrl
-        ai_api_key = $apiKey
-        job_id = $jobId
+
+      $edTempDir = Join-Path $env:TEMP ('emtroly-reinstall-ed-' + [guid]::NewGuid().ToString('N'))
+      New-CodexPrivateDirectory $edTempDir
+      try {
+        $edSettingsPath = Join-Path $edTempDir 'ed-settings.json'
+        $edErrPath = Join-Path $edTempDir 'ed-err.txt'
+        $edDriverPath = Join-Path $edTempDir 'run-ed.ps1'
+        $edPayload = @{
+          model = $model
+          base_url = $baseUrl
+          ai_api_key = $apiKey
+          job_id = $jobId
+        } | ConvertTo-Json -Compress
+        [IO.File]::WriteAllText($edSettingsPath, $edPayload, $utf8NoBom)
+        $driverCode = @'
+param($InstallerPath, $SettingsJsonPath, $StatusPath, $ErrPath)
+$ErrorActionPreference = 'Stop'
+try {
+  $s = [IO.File]::ReadAllText($SettingsJsonPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
+  Remove-Item -LiteralPath $SettingsJsonPath -Force -ErrorAction SilentlyContinue
+  & $InstallerPath -Settings $s -StatusFile $StatusPath
+  exit 0
+} catch {
+  [IO.File]::WriteAllText($ErrPath, [string]$_.Exception.Message, (New-Object Text.UTF8Encoding($false)))
+  exit 1
+}
+'@
+        [IO.File]::WriteAllText($edDriverPath, $driverCode, (New-Object System.Text.UTF8Encoding($true)))
+        $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $edRun = Invoke-SafeSubProcess -FilePath $psExe -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $edDriverPath, '-InstallerPath', $editorInstaller, '-SettingsJsonPath', $edSettingsPath, '-StatusPath', $StatusPath, '-ErrPath', $edErrPath) -TimeoutSeconds 2400
+        if ($edRun.ExitCode -ne 0) {
+          $thrownCode = if (Test-Path -LiteralPath $edErrPath -PathType Leaf) { ([IO.File]::ReadAllText($edErrPath, [Text.Encoding]::UTF8)).Trim() } else { 'editor-install-failed' }
+          if (-not $thrownCode) { $thrownCode = 'editor-install-failed' }
+          throw $thrownCode
+        }
+      } finally {
+        Remove-Item -LiteralPath $edTempDir -Recurse -Force -ErrorAction SilentlyContinue
       }
-      & $editorInstaller -Settings $editorSettings -StatusFile $StatusPath *> $null
+
       [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadDir)
-      Write-ManageStatus $StatusPath 'Hoàn tất: Đã cài đặt xong Antigravity IDE, Codex Extension và lệnh Codex CLI!'
+      Write-ManageStatus $StatusPath 'Hoàn tất: Đã cài đặt xong Antigravity IDE, Codex Extension và lệnh Codex CLI (lối tắt EmTroLy - Antigravity đã có trên Desktop)!'
       exit 0
     }
 
@@ -731,6 +765,14 @@ requires_openai_auth = true
       'subprocess-timeout' = 'Quá thời gian chờ xử lý tác vụ nền. Hãy kiểm tra lại trạng thái Gateway hoặc thử lại.'
       'gateway-health-failed' = 'Gateway chưa phản hồi trạng thái sẵn sàng.'
       'zalo-plugin-not-loaded' = 'Chưa hoàn tất cài đặt hoặc kích hoạt plugin Zalo.'
+      'editor-data-recovery-failed' = 'Không thể dọn thư mục cài dở của Antigravity/Codex. Hãy đóng các cửa sổ Antigravity đang mở rồi thử lại.'
+      'editor-download-failed' = 'Không tải được Antigravity IDE hoặc Codex Extension. Hãy kiểm tra kết nối Internet và ổ đĩa trống.'
+      'editor-download-checksum' = 'Gói tải Antigravity/Codex không khớp mã kiểm tra SHA-256.'
+      'editor-install-failed' = 'Bộ cài Antigravity IDE chưa hoàn tất. Hãy đóng Antigravity đang chạy rồi thử lại.'
+      'editor-extension-install-failed' = 'Không cài được tiện ích Codex Extension vào Antigravity IDE.'
+      'editor-codex-probe-failed' = 'Codex CLI chưa vượt qua bước kiểm tra API Key. Hãy kiểm tra khóa API và mạng.'
+      'editor-activation-failed' = 'Antigravity IDE chưa kích hoạt được tiện ích Codex Extension.'
+      'editor-version-unsupported' = 'Phiên bản Antigravity trên máy chưa tương thích cấu trúc chuẩn.'
     }
     $friendly = if ($errMap.ContainsKey($errCode)) { $errMap[$errCode] } else { "Không thể hoàn tất thao tác ($errCode). Dữ liệu cũ vẫn được giữ an toàn." }
     Write-ManageStatus $StatusPath $friendly

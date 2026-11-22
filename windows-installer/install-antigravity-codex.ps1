@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [Parameter(Mandatory=$true)][psobject]$Settings,
   [Parameter(Mandatory=$true)][string]$StatusFile,
@@ -35,8 +35,7 @@ function Write-EditorStatus([string]$Text) {
   [IO.File]::WriteAllText($StatusFile, $Text, (New-Object Text.UTF8Encoding($false)))
 }
 
-function New-PrivateDirectory([string]$Path) {
-  if (Test-Path -LiteralPath $Path) { throw 'editor-data-exists' }
+function Set-PrivateDirectoryAcl([string]$Path) {
   $acl = New-Object Security.AccessControl.DirectorySecurity
   $acl.SetAccessRuleProtection($true, $false)
   $inherit = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
@@ -46,7 +45,16 @@ function New-PrivateDirectory([string]$Path) {
     $rule = New-Object Security.AccessControl.FileSystemAccessRule($identity, [Security.AccessControl.FileSystemRights]::FullControl, $inherit, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
     $acl.AddAccessRule($rule)
   }
-  [void][IO.Directory]::CreateDirectory($Path, $acl)
+  if (Test-Path -LiteralPath $Path -PathType Container) {
+    Set-Acl -LiteralPath $Path -AclObject $acl
+  } else {
+    [void][IO.Directory]::CreateDirectory($Path, $acl)
+  }
+}
+
+function New-PrivateDirectory([string]$Path) {
+  if (Test-Path -LiteralPath $Path) { throw 'editor-data-exists' }
+  Set-PrivateDirectoryAcl $Path
 }
 
 function Get-VerifiedDownload([string]$Url, [string]$Path, [string]$Hash) {
@@ -55,7 +63,14 @@ function Get-VerifiedDownload([string]$Url, [string]$Path, [string]$Hash) {
 }
 
 function Invoke-HiddenProcess([string]$Executable, [string]$Arguments, [int]$TimeoutSeconds) {
-  $process = Start-Process -FilePath $Executable -ArgumentList $Arguments -WindowStyle Hidden -PassThru
+  $spCmd = Get-Command Start-Process -ErrorAction SilentlyContinue
+  $process = if ($spCmd -and $spCmd.CommandType -eq 'Cmdlet' -and $downloadDir -and (Test-Path -LiteralPath $downloadDir -PathType Container)) {
+    $emptyIn = Join-Path $downloadDir 'empty.stdin'
+    if (-not (Test-Path -LiteralPath $emptyIn -PathType Leaf)) { [IO.File]::WriteAllText($emptyIn, '') }
+    Start-Process -FilePath $Executable -ArgumentList $Arguments -RedirectStandardInput $emptyIn -WindowStyle Hidden -PassThru
+  } else {
+    Start-Process -FilePath $Executable -ArgumentList $Arguments -WindowStyle Hidden -PassThru
+  }
   if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
     Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
     throw 'editor-process-timeout'
@@ -244,7 +259,25 @@ if (Test-Path -LiteralPath $base -PathType Container) {
     return
   } else {
     $recoveryBackup = Get-EditorRecoveryBackupPath
-    try { Move-Item -LiteralPath $base -Destination $recoveryBackup -ErrorAction Stop } catch { throw 'editor-data-recovery-failed' }
+    try {
+      Move-Item -LiteralPath $base -Destination $recoveryBackup -ErrorAction Stop
+    } catch {
+      # Legacy EmTroLy\UI may be locked if launched from an older Desktop shortcut; move all editor items safely
+      $children = @(Get-ChildItem -LiteralPath $base -Force -ErrorAction SilentlyContinue)
+      $nonUi = @($children | Where-Object { $_.Name -ine 'UI' })
+      if ($children.Count -gt 0 -and ($children.Count -gt $nonUi.Count)) {
+        try {
+          [void][IO.Directory]::CreateDirectory($recoveryBackup)
+          foreach ($ch in $nonUi) {
+            Move-Item -LiteralPath $ch.FullName -Destination (Join-Path $recoveryBackup $ch.Name) -ErrorAction Stop
+          }
+        } catch {
+          throw 'editor-data-recovery-failed'
+        }
+      } else {
+        throw 'editor-data-recovery-failed'
+      }
+    }
   }
 }
 
@@ -334,7 +367,11 @@ $oldActivationMarker = $env:EMTROLY_CODEX_ACTIVATION_MARKER
 try {
   if ($recoveryBackup) { Write-EditorStatus 'Đã lưu thư mục Em Trợ Lý cài dở; tiếp tục cài Codex trên dữ liệu mới...' }
   if (-not $resuming) {
-    New-PrivateDirectory $base
+    if (Test-Path -LiteralPath $base -PathType Container) {
+      Set-PrivateDirectoryAcl $base
+    } else {
+      New-PrivateDirectory $base
+    }
     [IO.File]::WriteAllText($receipt, $jobId)
   }
   New-PrivateDirectory $downloadDir
@@ -399,8 +436,19 @@ requires_openai_auth = true
   $env:NODE_OPTIONS = $null
   Write-EditorStatus 'Đang cài Codex Extension vào thư mục riêng...'
   $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
-  $cliArgs = '/d /v:off /s /c "' + (Quote-Cmd $editorCli) + ' --user-data-dir ' + (Quote-Cmd $userData) + ' --extensions-dir ' + (Quote-Cmd $extensions) + ' --install-extension ' + (Quote-Cmd $vsix) + ' --do-not-include-pack-dependencies"'
-  if ((Invoke-HiddenProcess $cmd $cliArgs 900) -ne 0) { throw 'editor-extension-install-failed' }
+  $extLog = Join-Path $downloadDir 'ext-install.log'
+  $cliArgs = '/d /v:off /s /c "' + (Quote-Cmd $editorCli) + ' --user-data-dir ' + (Quote-Cmd $userData) + ' --extensions-dir ' + (Quote-Cmd $extensions) + ' --install-extension ' + (Quote-Cmd $vsix) + ' --force --do-not-include-pack-dependencies > ' + (Quote-Cmd $extLog) + ' 2>&1"'
+  $extInstalledOk = $false
+  for ($extAttempt = 1; $extAttempt -le 3; $extAttempt++) {
+    if ((Invoke-HiddenProcess $cmd $cliArgs 900) -eq 0) {
+      $extInstalledOk = $true
+      break
+    }
+    if ($extAttempt -lt 3) {
+      Start-Sleep -Seconds 3
+    }
+  }
+  if (-not $extInstalledOk) { throw 'editor-extension-install-failed' }
   $installed = @(Get-ChildItem -LiteralPath $extensions -Directory -Filter 'openai.chatgpt-*' | Where-Object {
     $manifest = Join-Path $_.FullName 'package.json'
     if (-not (Test-Path -LiteralPath $manifest)) { return $false }

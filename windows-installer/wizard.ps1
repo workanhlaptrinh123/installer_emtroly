@@ -296,6 +296,15 @@ $xamlText = @'
 
         <!-- Bottom Status & Version -->
         <StackPanel DockPanel.Dock="Bottom" Margin="2,12,2,0">
+          <!-- License Verified Badge -->
+          <Border x:Name="SidebarLicensePill" Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="8" Padding="10,6" Margin="0,0,0,6" Visibility="Collapsed">
+            <StackPanel Orientation="Horizontal">
+              <Border Width="18" Height="18" CornerRadius="9" Background="#2563EB" VerticalAlignment="Center" Margin="0,0,8,0">
+                <Path Data="M 4,9.2 L 7.4,12.5 L 14,5.6" Stroke="#FFFFFF" StrokeThickness="2.1" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+              </Border>
+              <TextBlock Text="Bản quyền: Đã xác thực" FontSize="11.5" FontWeight="Bold" Foreground="#1E40AF" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Border>
           <!-- Zalo Connected Icon Pill (Visible when installed & Zalo enabled) -->
           <Border x:Name="SidebarZaloPill" Background="#ECFDF5" BorderBrush="#6EE7B7" BorderThickness="1" CornerRadius="8" Padding="10,7" Margin="0,0,0,6" Cursor="Hand" Visibility="Collapsed">
             <StackPanel Orientation="Horizontal">
@@ -453,8 +462,8 @@ $xamlText = @'
               <Border Style="{StaticResource CardBorder}" Margin="7,0,0,0">
                 <DockPanel>
                   <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
-                    <Button x:Name="DashCodexRepairBtn" Style="{StaticResource SecondaryBtn}" Content="Sửa / Cài lại Codex" Margin="0,0,8,0"/>
-                    <Button x:Name="DashOpenCodexBtn" Style="{StaticResource SoftAccentBtn}" Content="Dùng Codex CLI"/>
+                    <Button x:Name="DashCodexRepairBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Sửa Antigravity" Padding="12,7" Margin="0,0,8,0"/>
+                    <Button x:Name="DashOpenCodexBtn" Style="{StaticResource SoftAccentBtn}" Content="Dùng Codex CLI" Padding="12,7"/>
                   </StackPanel>
                   <StackPanel>
                     <DockPanel Margin="0,0,0,6">
@@ -578,7 +587,9 @@ $xamlText = @'
               <StackPanel>
                 <TextBlock Text="2. Tùy chọn cài đặt trọn gói A–Z" FontSize="15" FontWeight="Bold" Margin="0,0,0,10"/>
                 <CheckBox x:Name="ZaloCheck" Content="Cài đặt Zalo cá nhân &amp; lệnh quét mã /zaloqr (bỏ tích nếu không cần Zalo)" FontSize="13.5" FontWeight="SemiBold" Margin="0,0,0,8"/>
-                <CheckBox x:Name="ExistingEditorCheck" Content="Chỉ cài OpenClaw cơ bản (tích chọn nếu muốn bỏ qua Antigravity IDE &amp; Codex CLI)" FontSize="13" Foreground="#334155" Margin="0,0,0,10"/>
+                <Border Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="8" Padding="11,7" Margin="0,0,0,10">
+                  <TextBlock Text="✓ Mặc định tự động cài đặt đầy đủ cả Antigravity IDE, tiện ích Codex Extension &amp; lệnh Codex CLI." FontSize="12.5" FontWeight="SemiBold" Foreground="#065F46" TextWrapping="Wrap"/>
+                </Border>
                 <Border Background="#FFFBEB" BorderBrush="#FDE68A" BorderThickness="1" CornerRadius="8" Padding="12,10">
                   <StackPanel>
                     <CheckBox x:Name="FullAccessCheck" Content="Tôi hiểu và đồng ý cấp quyền Full Exec cho Owner &amp; nhóm Telegram đã chọn" FontSize="13" FontWeight="Bold" Foreground="#92400E"/>
@@ -634,6 +645,7 @@ $xamlText = @'
                       <TextBox x:Name="StyleBox" Style="{StaticResource ModernInput}"/>
                     </StackPanel>
                   </Grid>
+                  <CheckBox x:Name="ExistingEditorCheck" Content="Bỏ qua cài đặt Antigravity IDE &amp; Codex CLI (chỉ tích khi máy chỉ cần chạy bot ngầm)" FontSize="12.5" Foreground="#64748B" Margin="0,12,0,0"/>
                 </StackPanel>
               </Expander>
             </Border>
@@ -807,7 +819,7 @@ $xamlText = @'
                   <Button x:Name="DiagRestartBtn" Style="{StaticResource SecondaryBtn}" Content="Khởi động lại Gateway" Margin="0,0,10,8"/>
                   <Button x:Name="DiagZaloQrBtn" Style="{StaticResource SoftAccentBtn}" Content="Lấy mã QR Zalo" Margin="0,0,10,8"/>
                   <Button x:Name="DiagZaloBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Đồng bộ Zalo" Margin="0,0,10,8"/>
-                  <Button x:Name="DiagCodexBtn" Style="{StaticResource SecondaryBtn}" Content="Sửa / Cài lại Codex" Margin="0,0,10,8"/>
+                  <Button x:Name="DiagCodexBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Sửa Antigravity &amp; Codex" Margin="0,0,10,8"/>
                 </WrapPanel>
               </StackPanel>
             </Border>
@@ -899,6 +911,67 @@ $xamlText = @'
 
       </Grid>
     </DockPanel>
+
+    <!-- FULL-WINDOW CUSTOMER LICENSE ACTIVATION GATE -->
+    <Border x:Name="LicenseGateOverlay" Grid.Column="0" Grid.ColumnSpan="2" Panel.ZIndex="999" Background="#F4F7FB" Visibility="Visible">
+      <Grid>
+        <Border Width="510" VerticalAlignment="Center" HorizontalAlignment="Center" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="16" Padding="32,28">
+          <StackPanel>
+            <!-- Brand Logo -->
+            <Border Width="220" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12" Padding="14,10" HorizontalAlignment="Center" Margin="0,0,0,16">
+              <Image x:Name="LicenseLogoImage" Height="48" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+            </Border>
+
+            <!-- Shield Lock Badge -->
+            <Border Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="14" Padding="12,4" HorizontalAlignment="Center" Margin="0,0,0,10">
+              <StackPanel Orientation="Horizontal">
+                <Border Width="16" Height="16" CornerRadius="8" Background="#2563EB" VerticalAlignment="Center" Margin="0,0,6,0">
+                  <Path Data="M 3.5,8.2 L 6.6,11.2 L 12.6,5" Stroke="#FFFFFF" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                </Border>
+                <TextBlock Text="BẢO MẬT KHÁCH HÀNG CHÍNH THỨC" FontSize="11" FontWeight="Bold" Foreground="#1D4ED8" VerticalAlignment="Center"/>
+              </StackPanel>
+            </Border>
+
+            <TextBlock Text="Kích hoạt Em Trợ Lý" FontSize="21" FontWeight="Bold" Foreground="#0F172A" HorizontalAlignment="Center"/>
+            <TextBlock Text="Nhập Khóa kích hoạt (Provider API Key trên codex.anhlaptrinh.vn) để mở khóa cài đặt &amp; quản lý" FontSize="12.5" Foreground="#64748B" TextAlignment="Center" TextWrapping="Wrap" Margin="0,5,0,18"/>
+
+            <!-- Auto-Checking Saved Key View -->
+            <StackPanel x:Name="LicenseCheckingBox" Visibility="Collapsed" Margin="0,6,0,12">
+              <ProgressBar Height="8" IsIndeterminate="True" Foreground="#2563EB" Background="#DBEAFE" BorderThickness="0" Margin="0,0,0,10"/>
+              <TextBlock Text="Đang xác thực bản quyền với máy chủ codex.anhlaptrinh.vn..." FontSize="13" FontWeight="SemiBold" Foreground="#1D4ED8" HorizontalAlignment="Center"/>
+            </StackPanel>
+
+            <!-- Interactive Key Entry View -->
+            <StackPanel x:Name="LicenseInputBox" Visibility="Visible">
+              <DockPanel Margin="0,0,0,6">
+                <CheckBox x:Name="LicenseShowCheck" DockPanel.Dock="Right" Content="Hiện mã" FontSize="12" Foreground="#475569" VerticalAlignment="Center"/>
+                <TextBlock Style="{StaticResource FieldLabel}" Text="Khóa kích hoạt / Provider API Key" Margin="0"/>
+              </DockPanel>
+              <Grid Margin="0,0,0,12">
+                <PasswordBox x:Name="LicensePwdBox" Style="{StaticResource ModernPassword}" Height="40"/>
+                <TextBox x:Name="LicensePlainBox" Style="{StaticResource ModernInput}" Height="40" Visibility="Collapsed"/>
+              </Grid>
+
+              <Border x:Name="LicenseMsgBanner" Background="#FEF2F2" BorderBrush="#FECACA" BorderThickness="1" CornerRadius="8" Padding="12,9" Margin="0,0,0,14" Visibility="Collapsed">
+                <TextBlock x:Name="LicenseMsgText" Text="" FontSize="12.5" Foreground="#B91C1C" TextWrapping="Wrap"/>
+              </Border>
+
+              <Grid Margin="0,2,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="10"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Button x:Name="LicenseExitBtn" Grid.Column="0" Style="{StaticResource SecondaryBtn}" Content="Thoát" Height="40" MinWidth="96"/>
+                <Button x:Name="LicenseActivateBtn" Grid.Column="2" Style="{StaticResource PrimaryBtn}" Content="Kích hoạt &amp; Mở khóa phần mềm" Height="40"/>
+              </Grid>
+            </StackPanel>
+
+            <TextBlock Text="Chỉ khóa API hợp lệ do Anh Lập Trình cấp trên codex.anhlaptrinh.vn mới sử dụng được ứng dụng." FontSize="11.5" Foreground="#94A3B8" TextAlignment="Center" TextWrapping="Wrap" Margin="0,16,0,0"/>
+          </StackPanel>
+        </Border>
+      </Grid>
+    </Border>
   </Grid>
 </Window>
 '@
@@ -958,6 +1031,19 @@ function New-WpfSecretBoxAdapter($pwdBox, $plainBox) {
 
 # Bind Named Controls
 $logoImage          = Get-Ui 'LogoImage'
+$licenseLogoImage   = Get-Ui 'LicenseLogoImage'
+$licenseGateOverlay = Get-Ui 'LicenseGateOverlay'
+$licenseCheckingBox = Get-Ui 'LicenseCheckingBox'
+$licenseInputBox    = Get-Ui 'LicenseInputBox'
+$licenseShowCheck   = Get-Ui 'LicenseShowCheck'
+$licensePwdBox      = Get-Ui 'LicensePwdBox'
+$licensePlainBox    = Get-Ui 'LicensePlainBox'
+$licenseKeyBox      = New-WpfSecretBoxAdapter $licensePwdBox $licensePlainBox
+$licenseMsgBanner   = Get-Ui 'LicenseMsgBanner'
+$licenseMsgText     = Get-Ui 'LicenseMsgText'
+$licenseActivateBtn = Get-Ui 'LicenseActivateBtn'
+$licenseExitBtn     = Get-Ui 'LicenseExitBtn'
+$sidebarLicensePill = Get-Ui 'SidebarLicensePill'
 $sidebarZaloPill    = Get-Ui 'SidebarZaloPill'
 $sidebarZaloIconCircle = Get-Ui 'SidebarZaloIconCircle'
 $sidebarZaloCheckIcon = Get-Ui 'SidebarZaloCheckIcon'
@@ -1130,6 +1216,7 @@ if (Test-Path -LiteralPath $logoPath -PathType Leaf) {
     $bmp.Freeze()
     $ms.Dispose()
     $logoImage.Source = $bmp
+    if ($licenseLogoImage) { $licenseLogoImage.Source = $bmp }
   } catch { }
 }
 
@@ -1182,6 +1269,8 @@ $script:zaloConnectedState = $false
 $script:zaloInstalledState = $false
 $script:zaloSyncProc = $null
 $script:lastZaloSyncAt = [datetime]::MinValue
+$script:licenseVerified = $false
+$script:licenseCheckRunning = $false
 
 $codexGuideText = "Hướng dẫn nhanh:`r`n1. Chọn thư mục cần chỉnh sửa (mặc định là thư mục trợ lý OpenClaw).`r`n2. Nhập yêu cầu bằng tiếng Việt vào ô phía trên (hoặc bấm 1 mẫu gợi ý).`r`n3. Bấm `"Thực hiện bằng Codex`" để Codex CLI tự đọc và sửa tệp giúp bạn."
 $codexDirBox.Text = Get-CodexDefaultWorkspace
@@ -1552,21 +1641,27 @@ function Update-DashboardCards {
     $cardZaloStatus.Text = 'Chưa cài đặt Zalo (bấm nút bên dưới để cài và hiện mã QR đăng nhập).'
   }
 
-  if ($st.CodexInstalled) {
+  if ($st.CodexInstalled -and $dash.HasAntigravityShortcut) {
     $cardCodexDot.Fill = New-Brush '#059669'
     $cardCodexBadge.Background = New-Brush '#ECFDF5'
     $cardCodexBadge.BorderBrush = New-Brush '#A7F3D0'
     $cardCodexBadgeText.Foreground = New-Brush '#065F46'
-    $cardCodexBadgeText.Text = '✓ Sẵn sàng'
-    $scNote = if ($dash.HasAntigravityShortcut) { 'Đã có lối tắt Antigravity trên Desktop.' } else { 'Sẵn sàng dòng lệnh codex.' }
-    $cardCodexStatus.Text = "Codex CLI sẵn sàng · $scNote"
+    $cardCodexBadgeText.Text = '✓ Đã cài đặt'
+    $cardCodexStatus.Text = 'Antigravity IDE & Codex CLI đã sẵn sàng · Đã có lối tắt trên Desktop.'
+  } elseif ($st.CodexInstalled) {
+    $cardCodexDot.Fill = New-Brush '#D97706'
+    $cardCodexBadge.Background = New-Brush '#FFFBEB'
+    $cardCodexBadge.BorderBrush = New-Brush '#FDE68A'
+    $cardCodexBadgeText.Foreground = New-Brush '#B45309'
+    $cardCodexBadgeText.Text = '● Thiếu lối tắt IDE'
+    $cardCodexStatus.Text = 'Đã có Codex CLI nhưng chưa cài đủ Antigravity IDE riêng — bấm "Cài / Sửa Antigravity & Codex" bên dưới.'
   } else {
     $cardCodexDot.Fill = New-Brush '#D97706'
     $cardCodexBadge.Background = New-Brush '#FFFBEB'
     $cardCodexBadge.BorderBrush = New-Brush '#FDE68A'
     $cardCodexBadgeText.Foreground = New-Brush '#B45309'
     $cardCodexBadgeText.Text = '● Chưa cài'
-    $cardCodexStatus.Text = 'Chưa phát hiện Codex CLI — bấm Sửa / Cài lại Codex để cài đặt tự động.'
+    $cardCodexStatus.Text = 'Chưa cài Antigravity IDE & Codex CLI — bấm "Cài / Sửa Antigravity & Codex" để cài đặt tự động.'
   }
 
   Update-ZaloGlobalBadges
@@ -1806,7 +1901,7 @@ function Apply-ManageModeUI {
 
 function Test-FormInputs([bool]$ForManageConfig = $false) {
   if ([string]::IsNullOrWhiteSpace($assistantBox.Text)) { Show-Error 'Hãy nhập tên trợ lý hiển thị.'; return $false }
-  if ([string]::IsNullOrWhiteSpace($baseUrlBox.Text) -or $baseUrlBox.Text -notmatch '^https://') { Show-Error 'Provider Base URL phải bắt đầu bằng https://.'; return $false }
+  if ($baseUrlBox.Text.Trim().TrimEnd('/') -cne 'https://codex.anhlaptrinh.vn/v1') { Show-Error 'Chỉ hỗ trợ máy chủ chính thức https://codex.anhlaptrinh.vn/v1.'; return $false }
   if ([string]$modelBox.SelectedItem -notin @('gpt-6.2-sol', 'GPT-6.1-terra', 'gpt-6.2-astra')) { Show-Error 'Model phải là gpt-6.2-sol, GPT-6.1-terra hoặc gpt-6.2-astra.'; return $false }
   if ($ownersBox.Text.Trim() -notmatch '^[1-9][0-9]*(,[1-9][0-9]*)*$') { Show-Error 'Telegram Owner IDs không hợp lệ (nhập số dương, cách nhau bởi dấu phẩy).'; return $false }
   if ($groupBox.Text.Trim() -notmatch '^-[1-9][0-9]*$') { Show-Error 'Telegram Group ID phải là số âm (ví dụ: -1001234567890).'; return $false }
@@ -1838,7 +1933,122 @@ function Test-FormInputs([bool]$ForManageConfig = $false) {
   return $true
 }
 
+function Show-LicenseGate([string]$ErrorMessage = '') {
+  $script:licenseVerified = $false
+  $sidebarLicensePill.Visibility = [System.Windows.Visibility]::Collapsed
+  $licenseGateOverlay.Visibility = [System.Windows.Visibility]::Visible
+  $licenseCheckingBox.Visibility = [System.Windows.Visibility]::Collapsed
+  $licenseInputBox.Visibility = [System.Windows.Visibility]::Visible
+  $licenseActivateBtn.IsEnabled = $true
+  $licenseActivateBtn.Content = 'Kích hoạt & Mở khóa phần mềm'
+  if (-not [string]::IsNullOrWhiteSpace($ErrorMessage)) {
+    $licenseMsgBanner.Visibility = [System.Windows.Visibility]::Visible
+    $licenseMsgText.Text = $ErrorMessage
+  } else {
+    $licenseMsgBanner.Visibility = [System.Windows.Visibility]::Collapsed
+    $licenseMsgText.Text = ''
+  }
+}
+
+function Unlock-LicenseGate([string]$VerifiedKey) {
+  $script:licenseVerified = $true
+  $cleanKey = if ($VerifiedKey) { $VerifiedKey.Trim() } else { '' }
+  if ($cleanKey) {
+    $script:sessionApiKeyFallback = $cleanKey
+    if (Get-Command Save-EmTroLyLicenseKey -ErrorAction SilentlyContinue) {
+      Save-EmTroLyLicenseKey -ApiKey $cleanKey
+    }
+    if (-not $script:isManageMode -and [string]::IsNullOrWhiteSpace($apiKeyBox.Text)) {
+      $apiKeyBox.Text = $cleanKey
+      $apiKeyFieldLabel.Text = 'Provider API Key (✓ Đã tự động điền từ khóa kích hoạt bản quyền)'
+    }
+    if ($script:retryEditor -and [string]::IsNullOrWhiteSpace($retryKeyPwdBox.Password)) {
+      $retryKeyPwdBox.Password = $cleanKey
+    }
+  }
+  $licenseKeyBox.Clear()
+  $licenseGateOverlay.Visibility = [System.Windows.Visibility]::Collapsed
+  $sidebarLicensePill.Visibility = [System.Windows.Visibility]::Visible
+  if ($script:isManageMode) {
+    Update-DashboardCards
+  }
+}
+
+function Invoke-LicenseVerifyFlow([string]$CandidateKey, [bool]$IsStartupAuto = $false) {
+  if ($script:licenseCheckRunning) { return }
+  $keyToCheck = if ($null -ne $CandidateKey) { $CandidateKey.Trim() } else { '' }
+  if ([string]::IsNullOrWhiteSpace($keyToCheck)) {
+    $emptyMsg = if ($IsStartupAuto) { '' } else { 'Vui lòng nhập Khóa kích hoạt (Provider API Key) do Anh Lập Trình cấp.' }
+    Show-LicenseGate $emptyMsg
+    return
+  }
+
+  $script:licenseCheckRunning = $true
+  $licenseGateOverlay.Visibility = [System.Windows.Visibility]::Visible
+  if ($IsStartupAuto) {
+    $licenseInputBox.Visibility = [System.Windows.Visibility]::Collapsed
+    $licenseCheckingBox.Visibility = [System.Windows.Visibility]::Visible
+  } else {
+    $licenseCheckingBox.Visibility = [System.Windows.Visibility]::Collapsed
+    $licenseInputBox.Visibility = [System.Windows.Visibility]::Visible
+    $licenseActivateBtn.IsEnabled = $false
+    $licenseActivateBtn.Content = 'Đang xác thực...'
+    $licenseMsgBanner.Visibility = [System.Windows.Visibility]::Collapsed
+  }
+
+  Start-AsyncUiTask -Params @{ HelperPath = $wizardHelperPath; Key = $keyToCheck; Auto = $IsStartupAuto } -Work {
+    param($HelperPath, $Key, $Auto)
+    . ([ScriptBlock]::Create([IO.File]::ReadAllText($HelperPath, [System.Text.Encoding]::UTF8)))
+    $chk = Test-EmTroLyLicenseKey -ApiKey $Key
+    return [pscustomobject]@{ Result = $chk; Key = $Key; Auto = $Auto }
+  } -OnComplete {
+    param($payload, $err)
+    $script:licenseCheckRunning = $false
+    if ($err -or -not $payload -or -not $payload.Result) {
+      Show-LicenseGate 'Không thể kết nối máy chủ xác thực codex.anhlaptrinh.vn. Hãy kiểm tra mạng và thử lại.'
+      return
+    }
+    $r = $payload.Result
+    if ($r.Valid) {
+      Unlock-LicenseGate $payload.Key
+      return
+    }
+    if ($r.Revoked -and (Get-Command Invoke-EmTroLyRevokeLockdown -ErrorAction SilentlyContinue)) {
+      Invoke-EmTroLyRevokeLockdown
+    }
+    $errMsg = if ($payload.Auto -and $r.Revoked) {
+      'Khóa bản quyền lưu trên máy đã hết hạn hoặc bị thu hồi trên codex.anhlaptrinh.vn. Vui lòng nhập khóa kích hoạt mới.'
+    } else {
+      [string]$r.Message
+    }
+    Show-LicenseGate $errMsg
+  }
+}
+
+$licenseWatchTimer = New-Object System.Windows.Threading.DispatcherTimer
+$licenseWatchTimer.Interval = [TimeSpan]::FromMinutes(10)
+$licenseWatchTimer.Add_Tick({
+  if ($SmokeTest -or -not $script:licenseVerified -or $script:installRunning -or $script:licenseCheckRunning) { return }
+  $savedKey = if (Get-Command Get-EmTroLySavedLicenseKey -ErrorAction SilentlyContinue) { Get-EmTroLySavedLicenseKey } else { $script:sessionApiKeyFallback }
+  if ([string]::IsNullOrWhiteSpace($savedKey)) { return }
+  Start-AsyncUiTask -Params @{ HelperPath = $wizardHelperPath; Key = $savedKey } -Work {
+    param($HelperPath, $Key)
+    . ([ScriptBlock]::Create([IO.File]::ReadAllText($HelperPath, [System.Text.Encoding]::UTF8)))
+    return (Test-EmTroLyLicenseKey -ApiKey $Key)
+  } -OnComplete {
+    param($res, $err)
+    if (-not $err -and $res -and $res.Revoked) {
+      if (Get-Command Invoke-EmTroLyRevokeLockdown -ErrorAction SilentlyContinue) { Invoke-EmTroLyRevokeLockdown }
+      Show-LicenseGate 'Quyền sử dụng khóa API này vừa bị thu hồi trên hệ thống Anh Lập Trình. Vui lòng nhập khóa kích hoạt mới.'
+    }
+  }
+})
+
 function Start-ManageAction([string]$ActionName, [string]$ErrorDetail = '') {
+  if (-not $script:licenseVerified -and -not $SmokeTest) {
+    Show-LicenseGate 'Vui lòng kích hoạt bản quyền trước khi thực hiện thao tác.'
+    return
+  }
   if ($script:installRunning) { return }
   if ($ActionName -eq 'update-config') {
     if (-not (Test-FormInputs -ForManageConfig $true)) { return }
@@ -1901,7 +2111,9 @@ function Start-ManageAction([string]$ActionName, [string]$ErrorDetail = '') {
       '" -WorkerPayloadRoot "' + $PayloadRoot + '" -WorkerLogFile "' + $script:safeLog + '"'
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
+    $psi.RedirectStandardInput = $true
     $script:runnerProcess = [Diagnostics.Process]::Start($psi)
+    try { $script:runnerProcess.StandardInput.Close() } catch { }
     $script:runnerDeadline = (Get-Date).AddMinutes(45)
     if (-not [string]::IsNullOrWhiteSpace($apiKeyBox.Text)) {
       $script:sessionApiKeyFallback = $apiKeyBox.Text.Trim()
@@ -1919,6 +2131,10 @@ function Start-ManageAction([string]$ActionName, [string]$ErrorDetail = '') {
 }
 
 function Start-Install {
+  if (-not $script:licenseVerified -and -not $SmokeTest) {
+    Show-LicenseGate 'Vui lòng kích hoạt bản quyền trước khi bắt đầu cài đặt.'
+    return
+  }
   if ($script:isManageMode -and -not $script:retryEditor) {
     if ($script:currentView -eq 'home') {
       Set-NavActive 'config'
@@ -1989,7 +2205,9 @@ function Start-Install {
     if ($script:retryEditor) { $startInfo.Arguments += ' -EditorOnly' }
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $true
     $script:runnerProcess = [Diagnostics.Process]::Start($startInfo)
+    try { $script:runnerProcess.StandardInput.Close() } catch { }
     $script:runnerDeadline = (Get-Date).AddMinutes(90)
 
     if (-not [string]::IsNullOrWhiteSpace($apiKeyBox.Text)) {
@@ -2275,6 +2493,10 @@ function Show-ZaloConnectedView([string]$TelegramNote = '') {
 }
 
 function Start-ZaloQrLoginSession([switch]$ForceNewQr) {
+  if (-not $script:licenseVerified -and -not $SmokeTest) {
+    Show-LicenseGate 'Vui lòng kích hoạt bản quyền trước khi kết nối Zalo.'
+    return
+  }
   $st = Get-EmTroLyInstalledState
   if (-not $st.OpenClawInstalled) {
     Show-Error 'Hãy cài đặt trợ lý OpenClaw trước khi kết nối mã QR Zalo.'
@@ -2367,6 +2589,10 @@ function Start-ZaloQrLoginSession([switch]$ForceNewQr) {
 
 # Codex CLI Interactive Tab Worker
 function Start-CodexTask {
+  if (-not $script:licenseVerified -and -not $SmokeTest) {
+    Show-LicenseGate 'Vui lòng kích hoạt bản quyền trước khi sử dụng Codex CLI.'
+    return
+  }
   if ($script:codexRunning) { return }
   $info = Update-CodexAvailability
   if (-not $info.Available) {
@@ -2747,6 +2973,23 @@ $codexStopBtn.Add_Click({
 })
 $codexClearBtn.Add_Click({ $codexOutputBox.Text = $codexGuideText })
 
+$licenseShowCheck.Add_Checked({ $licenseKeyBox.UseSystemPasswordChar = $false })
+$licenseShowCheck.Add_Unchecked({ $licenseKeyBox.UseSystemPasswordChar = $true })
+$licenseActivateBtn.Add_Click({ Invoke-LicenseVerifyFlow -CandidateKey $licenseKeyBox.Text -IsStartupAuto $false })
+$licenseExitBtn.Add_Click({ $window.Close() })
+$licensePwdBox.Add_KeyDown({
+  param($s, $e)
+  if ($e.Key -eq [System.Windows.Input.Key]::Return) {
+    Invoke-LicenseVerifyFlow -CandidateKey $licenseKeyBox.Text -IsStartupAuto $false
+  }
+})
+$licensePlainBox.Add_KeyDown({
+  param($s, $e)
+  if ($e.Key -eq [System.Windows.Input.Key]::Return) {
+    Invoke-LicenseVerifyFlow -CandidateKey $licenseKeyBox.Text -IsStartupAuto $false
+  }
+})
+
 $primaryActionBtn.Add_Click({ Start-Install })
 $stopTaskButton.Add_Click({
   if (-not $script:installRunning) { return }
@@ -2776,6 +3019,7 @@ $window.Add_Closing({
     Cleanup-CodexRun
   }
   Stop-ZaloQrSession
+  if ($licenseWatchTimer) { $licenseWatchTimer.Stop() }
   if ($liveSyncTimer) { $liveSyncTimer.Stop() }
   if ($script:zaloSyncProc) {
     try { if (-not $script:zaloSyncProc.HasExited) { $script:zaloSyncProc.Kill() } } catch { }
@@ -2822,6 +3066,16 @@ if ($SmokeTest) {
 
 $window.Add_ContentRendered({
   $window.Activate()
+  if (-not $SmokeTest) {
+    $savedLic = if (Get-Command Get-EmTroLySavedLicenseKey -ErrorAction SilentlyContinue) { Get-EmTroLySavedLicenseKey } else { '' }
+    if (-not [string]::IsNullOrWhiteSpace($savedLic)) {
+      Invoke-LicenseVerifyFlow -CandidateKey $savedLic -IsStartupAuto $true
+    } else {
+      Show-LicenseGate ''
+      [void]$licensePwdBox.Focus()
+    }
+    $licenseWatchTimer.Start()
+  }
 })
 [void]$window.ShowDialog()
 Stop-ZaloQrSession

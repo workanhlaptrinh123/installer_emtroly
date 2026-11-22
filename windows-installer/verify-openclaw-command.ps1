@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 try {
   $root = [string]$env:EMTROLY_PROBE_ROOT
   $expectedVersion = [string]$env:EMTROLY_PROBE_VERSION
