@@ -49,7 +49,7 @@ Section
   File /r "${PAYLOAD_DIR}/*"
   !endif
   ClearErrors
-  ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -STA -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$PLUGINSDIR\windows-installer\wizard.ps1" -PayloadRoot "$PLUGINSDIR"' $0
+  ExecWait '"$WINDIR\Sysnative\wscript.exe" //B //Nologo "$PLUGINSDIR\windows-installer\launch-wizard.vbs" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" "$PLUGINSDIR\windows-installer\wizard.ps1" "$PLUGINSDIR" "-WindowStyle Hidden"' $0
   IfErrors launch_error
   SetErrorLevel $0
   Goto done

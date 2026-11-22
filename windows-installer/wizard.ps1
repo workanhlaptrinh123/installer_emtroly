@@ -330,7 +330,7 @@ $xamlText = @'
         <StackPanel>
           <Button x:Name="NavHomeBtn" Style="{StaticResource NavBtn}" Content="  Cài đặt nhanh" Margin="0,0,0,4"/>
           <Button x:Name="NavConfigBtn" Style="{StaticResource NavBtn}" Content="  Tiến trình cài đặt" Margin="0,0,0,4"/>
-          <Button x:Name="NavCodexBtn" Style="{StaticResource NavBtn}" Content="  Codex CLI" Margin="0,0,0,4"/>
+          <Button x:Name="NavCodexBtn" Style="{StaticResource NavBtn}" Content="  Công cụ Codex CLI" Margin="0,0,0,4"/>
           <Button x:Name="NavDiagBtn" Style="{StaticResource NavBtn}" Content="  Chẩn đoán &amp; Hỗ trợ" Margin="0,0,0,4"/>
         </StackPanel>
       </DockPanel>
@@ -705,7 +705,7 @@ $xamlText = @'
             </Border>
 
             <!-- Auto-Heal Note + Retry/Manual Auto-Heal Controls -->
-            <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="14,12" Margin="0,0,0,12">
+            <Border x:Name="AutoHealNoteBorder" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,0,12">
               <TextBlock x:Name="AutoHealProgressNote" Text="Tự động sửa lỗi (Auto-Heal): Nếu phát sinh lỗi kỹ thuật trong quá trình cài đặt, Codex CLI sẽ tự chẩn đoán và khắc phục rồi nghiệm thu lại giúp bạn." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
             </Border>
 
@@ -717,11 +717,44 @@ $xamlText = @'
               </StackPanel>
             </Border>
 
-            <!-- Manual Auto-Heal Trigger (Shown if fresh install fails) -->
-            <StackPanel x:Name="InstallFailureActions" Orientation="Horizontal" Visibility="Collapsed">
-              <Button x:Name="BtnInstallAutoHeal" Style="{StaticResource PrimaryBtn}" Content="Tự sửa lỗi bằng Codex" Margin="0,0,10,0"/>
-              <Button x:Name="BtnProgressExport" Style="{StaticResource SecondaryBtn}" Content="Xuất báo cáo hỗ trợ"/>
-            </StackPanel>
+            <!-- Rich In-Place Error & Diagnostic Card (Shown directly in GUI on any install / auto-heal failure) -->
+            <Border x:Name="InstallFailureActions" Background="#FFFFFF" BorderBrush="#FCA5A5" BorderThickness="1.5" CornerRadius="12" Padding="18,15" Margin="0,0,0,12" Visibility="Collapsed">
+              <StackPanel>
+                <!-- Header Row: Badge + Quick Copy / Open Codex CLI -->
+                <DockPanel Margin="0,0,0,10">
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="BtnCopyErrorDetail" Style="{StaticResource SecondaryBtn}" Content="Sao chép lỗi" Height="30" Padding="11,3" FontSize="12" Margin="0,0,8,0"/>
+                    <Button x:Name="BtnOpenCodexFromError" Style="{StaticResource SoftAccentBtn}" Content="Mở Công cụ Codex CLI →" Height="30" Padding="11,3" FontSize="12"/>
+                  </StackPanel>
+                  <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Background="#FEF2F2" BorderBrush="#FECACA" BorderThickness="1" CornerRadius="12" Padding="10,3" Margin="0,0,8,0">
+                      <StackPanel Orientation="Horizontal">
+                        <Ellipse Width="7" Height="7" Fill="#DC2626" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBlock Text="CHI TIẾT SỰ CỐ &amp; CHẨN ĐOÁN" FontSize="11" FontWeight="Bold" Foreground="#B91C1C" VerticalAlignment="Center"/>
+                      </StackPanel>
+                    </Border>
+                    <Border x:Name="ErrorStepPill" Background="#FFFBEB" BorderBrush="#FDE68A" BorderThickness="1" CornerRadius="10" Padding="8,2" VerticalAlignment="Center">
+                      <TextBlock x:Name="ErrorStepText" Text="Cần kiểm tra" FontSize="11.5" FontWeight="SemiBold" Foreground="#B45309"/>
+                    </Border>
+                  </StackPanel>
+                </DockPanel>
+
+                <!-- Friendly Cause Explanation -->
+                <TextBlock x:Name="ErrorSummaryHeading" Text="Nguyên nhân ghi nhận trên máy:" FontSize="13.5" FontWeight="Bold" Foreground="#991B1B" TextWrapping="Wrap" Margin="0,0,0,8"/>
+
+                <!-- Scrollable Technical & Codex Log Viewer -->
+                <Border Background="#FFF8F8" BorderBrush="#FECACA" BorderThickness="1" CornerRadius="8" Padding="2" Margin="0,0,0,11">
+                  <TextBox x:Name="ErrorDetailBox" FontFamily="Segoe UI" FontSize="12.5" Foreground="#1E293B" Background="Transparent" BorderThickness="0" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MaxHeight="126" Padding="10,7"/>
+                </Border>
+
+                <!-- Action Buttons -->
+                <WrapPanel>
+                  <Button x:Name="BtnInstallAutoHeal" Style="{StaticResource PrimaryBtn}" Content="Tự sửa lỗi bằng Codex" Margin="0,0,10,6"/>
+                  <Button x:Name="BtnBackToSetup" Style="{StaticResource SecondaryBtn}" Content="Quay lại kiểm tra cấu hình" Margin="0,0,10,6"/>
+                  <Button x:Name="BtnProgressExport" Style="{StaticResource SecondaryBtn}" Content="Xuất báo cáo hỗ trợ (.txt)" Margin="0,0,0,6"/>
+                </WrapPanel>
+              </StackPanel>
+            </Border>
           </StackPanel>
         </ScrollViewer>
 
@@ -1131,14 +1164,23 @@ $addressingBox      = Get-Ui 'AddressingBox'
 $styleBox           = Get-Ui 'StyleBox'
 
 $coreReadyText      = Get-Ui 'CoreReadyText'
+$progressCard       = Get-Ui 'ProgressCard'
 $statusText         = Get-Ui 'StatusText'
 $progressPercentText = Get-Ui 'ProgressPercentText'
 $installProgressBar = Get-Ui 'InstallProgressBar'
 $installChecklistCard = Get-Ui 'InstallChecklistCard'
+$autoHealNoteBorder = Get-Ui 'AutoHealNoteBorder'
 $autoHealProgressNote = Get-Ui 'AutoHealProgressNote'
 $retryEditorPanel   = Get-Ui 'RetryEditorPanel'
 $retryKeyPwdBox     = Get-Ui 'RetryKeyPwdBox'
 $installFailureActions = Get-Ui 'InstallFailureActions'
+$errorStepPill      = Get-Ui 'ErrorStepPill'
+$errorStepText      = Get-Ui 'ErrorStepText'
+$errorSummaryHeading = Get-Ui 'ErrorSummaryHeading'
+$errorDetailBox     = Get-Ui 'ErrorDetailBox'
+$btnCopyErrorDetail = Get-Ui 'BtnCopyErrorDetail'
+$btnOpenCodexFromError = Get-Ui 'BtnOpenCodexFromError'
+$btnBackToSetup     = Get-Ui 'BtnBackToSetup'
 $btnInstallAutoHeal = Get-Ui 'BtnInstallAutoHeal'
 $btnProgressExport  = Get-Ui 'BtnProgressExport'
 
@@ -1250,6 +1292,8 @@ $script:secretFile = $null
 $script:safeLog = $null
 $script:sessionApiKeyFallback = ''
 $script:lastInstallErrorDetail = ''
+$script:lastFullErrorReport = ''
+$script:lastActiveStepIndex = 1
 $script:gatewayDashboardUrl = ''
 
 $script:codexProcess = $null
@@ -1474,6 +1518,7 @@ function Update-ProgressFromStatus([string]$Message) {
   elseif ($Message -match 'OpenClaw|kỹ năng|Full Exec|Gateway|lệnh openclaw') { $activeStep = 3; $pct = 55 }
   elseif ($Message -match 'Node\.js|Python|FFmpeg|môi trường') { $activeStep = 2; $pct = 32 }
   else { $activeStep = 1; $pct = 14 }
+  $script:lastActiveStepIndex = $activeStep
 
   if ($script:currentManageAction) {
     $installProgressBar.IsIndeterminate = $true
@@ -2012,6 +2057,89 @@ function Invoke-LicenseVerifyFlow([string]$CandidateKey, [bool]$IsStartupAuto = 
   }
 }
 
+function Reset-ProgressVisualState {
+  $progressCard.Background = New-Brush '#EFF6FF'
+  $progressCard.BorderBrush = New-Brush '#BFDBFE'
+  $progressPercentText.Foreground = New-Brush '#2563EB'
+  $installProgressBar.Foreground = New-Brush '#2563EB'
+  $installProgressBar.Background = New-Brush '#DBEAFE'
+  if ($autoHealNoteBorder) { $autoHealNoteBorder.Visibility = [System.Windows.Visibility]::Visible }
+  $installFailureActions.Visibility = [System.Windows.Visibility]::Collapsed
+  $btnCopyErrorDetail.Content = 'Sao chép lỗi'
+}
+
+function Show-RichFailureDiagnostics([string]$SummaryMessage, [object]$DiagPayload = $null, [bool]$IsManageFailure = $false) {
+  $progressCard.Background = New-Brush '#FEF2F2'
+  $progressCard.BorderBrush = New-Brush '#FCA5A5'
+  $installProgressBar.IsIndeterminate = $false
+  $installProgressBar.Foreground = New-Brush '#DC2626'
+  $installProgressBar.Background = New-Brush '#FEE2E2'
+  if ([int]$installProgressBar.Value -lt 12) { $installProgressBar.Value = 25 }
+  $progressPercentText.Text = 'Gặp sự cố'
+  $progressPercentText.Foreground = New-Brush '#DC2626'
+
+  $stepIdx = [Math]::Max(1, [Math]::Min(5, [int]$script:lastActiveStepIndex))
+  if (-not $IsManageFailure) {
+    Set-ChecklistStep $stepIdx 'error' 'Gặp lỗi'
+  }
+
+  $stageMap = @{
+    'input' = 'Bước 1 · Kiểm tra thông tin đầu vào'
+    'provider' = 'Bước 1 · Kết nối máy chủ AI (codex.anhlaptrinh.vn)'
+    'telegram' = 'Bước 1 · Kiểm tra Telegram Bot Token'
+    'install' = 'Bước 3 · Cài đặt OpenClaw & Gateway'
+    'command' = 'Bước 3 · Đăng ký lệnh openclaw vào PATH'
+    'zalo-verify' = 'Bước 4 · Kích hoạt plugin Zalo & /zaloqr'
+    'telegram-menu' = 'Bước 4 · Đồng bộ menu lệnh Telegram'
+    'editor' = 'Bước 5 · Cài Antigravity IDE & Codex CLI'
+    'auto-heal' = 'Tự động chẩn đoán & sửa lỗi (Codex CLI)'
+    'reinstall-codex' = 'Cài / Sửa Antigravity IDE & Codex CLI'
+    'install-zalo' = 'Cài / Đồng bộ Zalo cá nhân'
+    'health-restart' = 'Khởi động lại & kiểm tra Gateway'
+    'update-config' = 'Cập nhật cấu hình nhanh'
+  }
+
+  $stageRaw = if ($DiagPayload -and $DiagPayload.stage) { [string]$DiagPayload.stage } elseif ($IsManageFailure) { 'auto-heal' } else { "Bước $stepIdx" }
+  $stageFriendly = if ($stageMap.ContainsKey($stageRaw)) { $stageMap[$stageRaw] } else { $stageRaw }
+  $codeRaw = if ($DiagPayload -and $DiagPayload.code) { [string]$DiagPayload.code } else { '' }
+  $timeRaw = if ($DiagPayload -and $DiagPayload.timestamp) { [string]$DiagPayload.timestamp } else { (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') }
+  $healSum = if ($DiagPayload -and $DiagPayload.autoHealSummary) { [string]$DiagPayload.autoHealSummary } else { '' }
+  $techRaw = if ($DiagPayload -and $DiagPayload.technicalDetail) { [string]$DiagPayload.technicalDetail } else { '' }
+
+  $errorStepText.Text = $stageFriendly
+  $errorSummaryHeading.Text = $SummaryMessage
+
+  $lines = New-Object System.Collections.Generic.List[string]
+  [void]$lines.Add("Thời điểm ghi nhận : $timeRaw")
+  [void]$lines.Add("Hạng mục thực hiện : $stageFriendly")
+  if ($codeRaw) { [void]$lines.Add("Mã chẩn đoán       : $codeRaw") }
+  [void]$lines.Add("Tóm tắt thông báo  : $SummaryMessage")
+  if ($healSum) {
+    [void]$lines.Add('')
+    [void]$lines.Add("--- Ghi chú từ Codex tự sửa lỗi ---")
+    [void]$lines.Add($healSum)
+  }
+  if ($techRaw) {
+    [void]$lines.Add('')
+    [void]$lines.Add("--- Nhật ký kỹ thuật chi tiết (đã ẩn mã bí mật) ---")
+    [void]$lines.Add($techRaw)
+  }
+
+  $fullReport = ($lines -join "`r`n")
+  $script:lastInstallErrorDetail = "$SummaryMessage`n$techRaw".Trim()
+  $script:lastFullErrorReport = $fullReport
+  $errorDetailBox.Text = $fullReport
+  if ($autoHealNoteBorder) { $autoHealNoteBorder.Visibility = [System.Windows.Visibility]::Collapsed }
+  $installFailureActions.Visibility = [System.Windows.Visibility]::Visible
+  $btnBackToSetup.Visibility = if ($script:isManageMode) { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
+
+  # Mirror full diagnostic log & ready-to-run prompt into Công cụ Codex CLI view so user also sees it immediately if they open Codex CLI!
+  $codexOutputBox.Text = "=== CHI TIẾT LỖI GẦN NHẤT TRÊN GIAO DIỆN ===`r`n`r`n$fullReport`r`n`r`n(Bấm nút `"Thực hiện bằng Codex`" phía trên nếu bạn muốn giao yêu cầu tùy chỉnh cho Codex CLI xử lý trực tiếp.)"
+  if ([string]::IsNullOrWhiteSpace($codexPromptBox.Text)) {
+    $codexPromptBox.Text = "Hãy kiểm tra và khắc phục sự cố sau trên máy giúp tôi ($stageFriendly - mã: $codeRaw): $SummaryMessage"
+  }
+}
+
 function Start-ManageAction([string]$ActionName, [string]$ErrorDetail = '') {
   if (-not $script:licenseVerified -and -not $SmokeTest) {
     Show-LicenseGate 'Vui lòng kích hoạt bản quyền trước khi thực hiện thao tác.'
@@ -2029,7 +2157,7 @@ function Start-ManageAction([string]$ActionName, [string]$ErrorDetail = '') {
 
   $script:currentManageAction = $ActionName
   $script:installRunning = $true
-  $installFailureActions.Visibility = [System.Windows.Visibility]::Collapsed
+  Reset-ProgressVisualState
   $retryEditorPanel.Visibility = [System.Windows.Visibility]::Collapsed
   $statusText.Text = 'Đang chuẩn bị thực hiện thao tác...'
   $installProgressBar.IsIndeterminate = $true
@@ -2128,7 +2256,7 @@ function Start-Install {
   }
 
   $script:installRunning = $true
-  $installFailureActions.Visibility = [System.Windows.Visibility]::Collapsed
+  Reset-ProgressVisualState
   $statusText.Text = 'Đang kiểm tra thông tin cài đặt...'
   Update-ProgressFromStatus $statusText.Text
   Set-NavActive 'progress'
@@ -2184,8 +2312,6 @@ function Start-Install {
         $retryKeyPwdBox.Password = $apiKeyBox.Text.Trim()
       }
     }
-    $tokenBox.Clear()
-    $apiKeyBox.Clear()
     $installTimer.Start()
   } catch {
     Cleanup-Secret
@@ -2228,6 +2354,12 @@ $installTimer.Add_Tick({
     if ($script:safeLog -and (Test-Path -LiteralPath $script:safeLog -PathType Leaf)) {
       try { $statusText.Text = [IO.File]::ReadAllText($script:safeLog, [System.Text.Encoding]::UTF8) } catch { }
     }
+    $diagPayload = $null
+    if ($script:safeLog -and (Test-Path -LiteralPath "$($script:safeLog).diag.json" -PathType Leaf)) {
+      try {
+        $diagPayload = [IO.File]::ReadAllText("$($script:safeLog).diag.json", [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+      } catch { }
+    }
     $detail = $statusText.Text
     if ($code -eq 0 -and -not $detail.StartsWith('Hoàn tất:')) { $code = 1 }
     $wasManage = $script:currentManageAction
@@ -2239,9 +2371,9 @@ $installTimer.Add_Tick({
     if ($wasManage) {
       if ($code -eq 0) {
         $script:resultCode = 0
+        Reset-ProgressVisualState
         $installProgressBar.Value = 100
         $progressPercentText.Text = '100%'
-        $installFailureActions.Visibility = [System.Windows.Visibility]::Collapsed
         Apply-ManageModeUI
         [void](Update-CodexAvailability)
         if ($wasManage -eq 'install-zalo' -or $script:openZaloQrAfterManage) {
@@ -2253,17 +2385,26 @@ $installTimer.Add_Tick({
         Set-NavActive 'home'
       } else {
         $script:openZaloQrAfterManage = $false
-        Show-Error $detail
-        $fallbackView = if ($script:isManageMode) { 'home' } else { 'config' }
-        Set-NavActive $fallbackView
+        $statusText.Text = "Chưa hoàn tất: $detail"
+        Show-RichFailureDiagnostics -SummaryMessage $detail -DiagPayload $diagPayload -IsManageFailure $true
+        $viewDashboard.Visibility   = [System.Windows.Visibility]::Collapsed
+        $viewSetupForm.Visibility   = [System.Windows.Visibility]::Collapsed
+        $viewCodex.Visibility       = [System.Windows.Visibility]::Collapsed
+        $viewDiagnostics.Visibility = [System.Windows.Visibility]::Collapsed
+        $viewZaloQr.Visibility      = [System.Windows.Visibility]::Collapsed
+        $viewProgress.Visibility    = [System.Windows.Visibility]::Visible
+        Set-Buttons
       }
       return
     }
 
     $script:resultCode = $code
     if ($code -eq 0) {
+      $tokenBox.Clear()
+      $apiKeyBox.Clear()
       $script:installCompleted = $true
       $script:retryEditor = $false
+      Reset-ProgressVisualState
       $retryEditorPanel.Visibility = [System.Windows.Visibility]::Collapsed
       Update-ProgressFromStatus $detail
       $codexDirBox.Text = Get-CodexDefaultWorkspace
@@ -2283,13 +2424,12 @@ $installTimer.Add_Tick({
       $coreReadyText.Text = '✓ OpenClaw & Telegram đã hoạt động tốt.'
       $statusText.Text = if ($code -eq 3) { $detail } else { 'Bước cài Codex bị gián đoạn. Nhập khóa API bên dưới rồi bấm Thử lại bước Codex.' }
       $retryEditorPanel.Visibility = [System.Windows.Visibility]::Visible
-      Set-ChecklistStep 5 'error' 'Chưa xong'
+      $script:lastActiveStepIndex = 5
+      Show-RichFailureDiagnostics -SummaryMessage $statusText.Text -DiagPayload $diagPayload -IsManageFailure $false
       Set-Buttons
     } else {
-      $script:lastInstallErrorDetail = $detail
-      $installFailureActions.Visibility = [System.Windows.Visibility]::Visible
-      $statusText.Text = "Cài đặt chưa thành công: $detail"
-      Show-Error ("Cài đặt chưa thành công.`n`n$detail`n`nBạn có thể bấm nút `"Tự sửa lỗi bằng Codex`" ngay bên dưới để Codex tự khắc phục.")
+      $statusText.Text = "Cài đặt chưa hoàn tất — xem chi tiết nguyên nhân ngay bên dưới."
+      Show-RichFailureDiagnostics -SummaryMessage $detail -DiagPayload $diagPayload -IsManageFailure $false
       Set-Buttons
     }
   }
@@ -2904,6 +3044,16 @@ $diagShortcutBtn.Add_Click({
   }
 })
 
+$btnCopyErrorDetail.Add_Click({
+  if (-not [string]::IsNullOrWhiteSpace($script:lastFullErrorReport)) {
+    try {
+      [System.Windows.Clipboard]::SetText($script:lastFullErrorReport)
+      $btnCopyErrorDetail.Content = '✓ Đã sao chép'
+    } catch { }
+  }
+})
+$btnOpenCodexFromError.Add_Click({ Set-NavActive 'codex' })
+$btnBackToSetup.Add_Click({ Set-NavActive 'home' })
 $btnInstallAutoHeal.Add_Click({ Start-ManageAction 'auto-heal' $script:lastInstallErrorDetail })
 $btnProgressExport.Add_Click({ Invoke-ExportSupportReportAction })
 

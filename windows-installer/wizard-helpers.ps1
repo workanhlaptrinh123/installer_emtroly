@@ -639,12 +639,30 @@ function Get-EmTroLySavedLicenseKey {
   return ''
 }
 
+function Set-EmTroLyPrivateFileAcl([string]$FilePath) {
+  if ([string]::IsNullOrWhiteSpace($FilePath) -or -not (Test-Path -LiteralPath $FilePath -PathType Leaf)) { return }
+  try {
+    $acl = New-Object System.Security.AccessControl.FileSecurity
+    $acl.SetAccessRuleProtection($true, $false)
+    $userSid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+    $sysSid = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
+    foreach ($sid in @($userSid, $sysSid)) {
+      $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        $sid,
+        [System.Security.AccessControl.FileSystemRights]::FullControl,
+        [System.Security.AccessControl.AccessControlType]::Allow
+      )
+      $acl.AddAccessRule($rule)
+    }
+    Set-Acl -LiteralPath $FilePath -AclObject $acl -ErrorAction SilentlyContinue
+  } catch { }
+}
+
 function Save-EmTroLyLicenseKey {
   param([Parameter(Mandatory=$true)][string]$ApiKey)
   $cleanKey = $ApiKey.Trim()
   if ([string]::IsNullOrWhiteSpace($cleanKey)) { return }
   $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-  $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 
   if ($env:LOCALAPPDATA) {
     $actFile = Get-EmTroLyActivationFilePath
@@ -654,7 +672,7 @@ function Save-EmTroLyLicenseKey {
         [void][IO.Directory]::CreateDirectory($actDir)
         $sealed = Protect-EmTroLyMachineActivationPayload -ApiKey $cleanKey
         [IO.File]::WriteAllText($actFile, "$sealed`n", [System.Text.Encoding]::ASCII)
-        & icacls $actFile /inheritance:r /grant:r "${currentUser}:(F)" '*S-1-5-18:(F)' *> $null
+        Set-EmTroLyPrivateFileAcl $actFile
       } catch { }
     }
 
@@ -662,7 +680,7 @@ function Save-EmTroLyLicenseKey {
     [void][IO.Directory]::CreateDirectory($uiDir)
     $licFile = Join-Path $uiDir 'license.key'
     [IO.File]::WriteAllText($licFile, "$cleanKey`n", $utf8NoBom)
-    try { & icacls $licFile /inheritance:r /grant:r "${currentUser}:(F)" '*S-1-5-18:(F)' *> $null } catch { }
+    Set-EmTroLyPrivateFileAcl $licFile
 
     $authFile = Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex\auth.json'
     if (Test-Path -LiteralPath $authFile -PathType Leaf) {
@@ -678,7 +696,7 @@ function Save-EmTroLyLicenseKey {
     if (Test-Path -LiteralPath $secFile -PathType Leaf) {
       try {
         [IO.File]::WriteAllText($secFile, "$cleanKey`n", $utf8NoBom)
-        & icacls $secFile /inheritance:r /grant:r "${currentUser}:(F)" '*S-1-5-18:(F)' *> $null
+        Set-EmTroLyPrivateFileAcl $secFile
       } catch { }
     }
   }
@@ -699,7 +717,13 @@ function Invoke-EmTroLyRevokeLockdown {
       try {
         $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
         if (Test-Path -LiteralPath $psExe -PathType Leaf) {
-          [void](Start-Process -FilePath $psExe -ArgumentList ('-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $instLauncher + '" gateway stop') -WindowStyle Hidden)
+          $psi = New-Object System.Diagnostics.ProcessStartInfo
+          $psi.FileName = $psExe
+          $psi.Arguments = '-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $instLauncher + '" gateway stop'
+          $psi.UseShellExecute = $false
+          $psi.CreateNoWindow = $true
+          $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+          [void][System.Diagnostics.Process]::Start($psi)
         }
       } catch { }
     }

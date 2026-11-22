@@ -216,6 +216,15 @@ function Invoke-CodexAutoHeal {
       try { $apiKey = [string](([IO.File]::ReadAllText($authPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json).OPENAI_API_KEY) } catch { }
     }
   }
+  if ([string]::IsNullOrWhiteSpace($apiKey) -and (Get-Command Get-EmTroLySavedLicenseKey -ErrorAction SilentlyContinue)) {
+    try { $apiKey = (Get-EmTroLySavedLicenseKey).Trim() } catch { }
+  }
+  if ([string]::IsNullOrWhiteSpace($apiKey) -and $env:LOCALAPPDATA) {
+    $licFallback = Join-Path $env:LOCALAPPDATA 'EmTroLyUI\license.key'
+    if (Test-Path -LiteralPath $licFallback -PathType Leaf) {
+      try { $apiKey = ([IO.File]::ReadAllText($licFallback, [System.Text.Encoding]::UTF8)).Trim() } catch { }
+    }
+  }
   if ([string]::IsNullOrWhiteSpace($apiKey)) {
     return [pscustomobject]@{ Invoked = $false; Reason = 'missing-api-key'; ExitCode = 2; Summary = 'Thiếu khóa API để chạy Codex tự sửa lỗi.' }
   }
@@ -280,7 +289,8 @@ requires_openai_auth = true
       'exec',
       '--skip-git-repo-check',
       '--color', 'never',
-      '--dangerously-bypass-approvals-and-sandbox',
+      '--sandbox', 'danger-full-access',
+      '-m', $model,
       '-C', ('"' + $workDir.Replace('"', '\"') + '"'),
       '-o', ('"' + $summaryFile.Replace('"', '\"') + '"'),
       '-'
@@ -324,11 +334,20 @@ requires_openai_auth = true
     if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
       try {
         $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
-        [void](Start-Process -FilePath $taskkill -ArgumentList "/PID $($proc.Id) /T /F" -WindowStyle Hidden -PassThru -Wait)
+        $tkPsi = New-Object System.Diagnostics.ProcessStartInfo
+        $tkPsi.FileName = $taskkill
+        $tkPsi.Arguments = "/PID $($proc.Id) /T /F"
+        $tkPsi.UseShellExecute = $false
+        $tkPsi.CreateNoWindow = $true
+        $tkPsi.RedirectStandardOutput = $true
+        $tkPsi.RedirectStandardError = $true
+        $tkProc = [System.Diagnostics.Process]::Start($tkPsi)
+        [void]$tkProc.WaitForExit(3000)
+        $tkProc.Dispose()
       } catch { }
       try { $proc.Kill() } catch { }
       $proc.Dispose()
-      return [pscustomobject]@{ Invoked = $true; ExitCode = 124; Summary = 'Hết thời gian chờ Codex CLI tự sửa lỗi.' }
+      return [pscustomobject]@{ Invoked = $true; ExitCode = 124; Summary = 'Hết thời gian chờ Codex CLI tự sửa lỗi.'; Transcript = 'Quá thời gian 300 giây khi chạy Codex CLI tự sửa lỗi.' }
     }
 
     $exitCode = $proc.ExitCode
@@ -336,15 +355,21 @@ requires_openai_auth = true
     $rawErr = $errTask.GetAwaiter().GetResult()
     $proc.Dispose()
 
+    $combinedRaw = ($rawOut + "`n" + $rawErr).Trim()
+    $filteredLines = @($combinedRaw -split "`r?`n" | Where-Object {
+      -not [string]::IsNullOrWhiteSpace($_) -and
+      $_ -notmatch 'ERROR\s+codex_core::session::session:\s+failed to load skill\s+.*SKILL\.md' -and
+      $_ -notmatch '^warning:\s+Model metadata for\s+.*\s+not found'
+    })
+    $safeTranscript = Remove-SensitiveStrings -Text (($filteredLines | Select-Object -Last 35) -join "`r`n") -Secrets $secretsToMask
+
     $summary = ''
     if (Test-Path -LiteralPath $summaryFile -PathType Leaf) {
       $summary = ([IO.File]::ReadAllText($summaryFile, [System.Text.Encoding]::UTF8)).Trim()
     }
     if ([string]::IsNullOrWhiteSpace($summary)) {
-      $combined = ($rawOut + "`n" + $rawErr).Trim()
-      $lines = @($combined -split "`r?`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-      if ($lines.Count -gt 0) {
-        $summary = ($lines | Select-Object -Last 3) -join ' '
+      if ($filteredLines.Count -gt 0) {
+        $summary = ($filteredLines | Select-Object -Last 3) -join ' '
       }
     }
     $safeSummary = Remove-SensitiveStrings -Text $summary -Secrets $secretsToMask
@@ -352,8 +377,14 @@ requires_openai_auth = true
       $safeSummary = $safeSummary.Substring(0, 317) + '...'
     }
 
-    $auditDir = if ($OpenClawRoot -and (Test-Path -LiteralPath $OpenClawRoot -PathType Container)) { Join-Path $OpenClawRoot 'logs' } else { '' }
-    if ($auditDir) {
+    $auditTargets = @()
+    if ($OpenClawRoot -and (Test-Path -LiteralPath $OpenClawRoot -PathType Container)) {
+      $auditTargets += (Join-Path $OpenClawRoot 'logs')
+    }
+    if ($env:LOCALAPPDATA) {
+      $auditTargets += (Join-Path $env:LOCALAPPDATA 'EmTroLyUI\logs')
+    }
+    foreach ($auditDir in $auditTargets) {
       try {
         [void][IO.Directory]::CreateDirectory($auditDir)
         $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
@@ -363,9 +394,10 @@ requires_openai_auth = true
     }
 
     return [pscustomobject]@{
-      Invoked  = $true
-      ExitCode = $exitCode
-      Summary  = $safeSummary
+      Invoked    = $true
+      ExitCode   = $exitCode
+      Summary    = $safeSummary
+      Transcript = $safeTranscript
     }
   } finally {
     if (Test-Path -LiteralPath $tempDir) {

@@ -93,10 +93,18 @@ function Test-FreshOpenClawCommand {
   try {
     $env:EMTROLY_PROBE_ROOT = $Root
     $env:EMTROLY_PROBE_VERSION = $Version
-    $arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $probe + '"'
-    $options = @{ FilePath = $shell; ArgumentList = $arguments; PassThru = $true }
-    if ($env:OS -eq 'Windows_NT') { $options.WindowStyle = 'Hidden' }
-    $process = Start-Process @options
+    $arguments = '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $probe + '"'
+    if ($env:OS -eq 'Windows_NT') {
+      $psi = New-Object System.Diagnostics.ProcessStartInfo
+      $psi.FileName = $shell
+      $psi.Arguments = $arguments
+      $psi.UseShellExecute = $false
+      $psi.CreateNoWindow = $true
+      $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+      $process = [System.Diagnostics.Process]::Start($psi)
+    } else {
+      $process = Start-Process -FilePath $shell -ArgumentList $arguments -PassThru
+    }
     if (-not $process.WaitForExit(120000)) {
       Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
       throw 'cli-probe-timeout'
@@ -121,9 +129,60 @@ $mutex = $null
 $stage = 'input'
 $settings = $null
 $lastAutoHealSummary = ''
+$lastTechnicalDetail = ''
+$diagJsonFile = "$LogFile.diag.json"
 $zaloStageFile = "$LogFile.zalo-stage"
 $zaloDetailFile = "$zaloStageFile.detail"
 $installCaptureFile = "$LogFile.capture"
+
+function Get-SafeRecentErrorTrace([object]$CaughtRecord, [psobject]$SettingsObj) {
+  $lines = @()
+  if ($CaughtRecord) {
+    if ($CaughtRecord.Exception -and $CaughtRecord.Exception.Message) {
+      $lines += ('Lỗi chính: ' + [string]$CaughtRecord.Exception.Message)
+    }
+    if ($CaughtRecord.InvocationInfo -and $CaughtRecord.InvocationInfo.PositionMessage) {
+      $pos = ([string]$CaughtRecord.InvocationInfo.PositionMessage -replace "\r?\n", ' | ').Trim()
+      if ($pos) { $lines += ('Vị trí: ' + $pos) }
+    }
+  }
+  foreach ($e in @($global:Error | Select-Object -First 6)) {
+    $txt = ([string]$e).Trim()
+    if ($txt -and $lines -notcontains $txt) { $lines += $txt }
+  }
+  $joined = ($lines -join "`r`n")
+  $secList = @()
+  if ($SettingsObj) {
+    if ($SettingsObj.PSObject.Properties['telegram_token']) { $secList += [string]$SettingsObj.telegram_token }
+    if ($SettingsObj.PSObject.Properties['ai_api_key']) { $secList += [string]$SettingsObj.ai_api_key }
+  }
+  if (Get-Command Remove-SensitiveStrings -ErrorAction SilentlyContinue) {
+    return (Remove-SensitiveStrings -Text $joined -Secrets $secList)
+  }
+  return $joined
+}
+
+function Remove-IncompleteOpenClawDirectory([string]$DirPath) {
+  if ([string]::IsNullOrWhiteSpace($DirPath) -or -not (Test-Path -LiteralPath $DirPath -PathType Container)) { return }
+  if (Test-Path -LiteralPath (Join-Path $DirPath 'openclaw.json') -PathType Leaf) { return }
+  try {
+    $cmdExe = Join-Path $env:SystemRoot 'System32\cmd.exe'
+    if (Test-Path -LiteralPath $cmdExe -PathType Leaf) {
+      $psi = New-Object System.Diagnostics.ProcessStartInfo
+      $psi.FileName = $cmdExe
+      $psi.Arguments = '/d /s /c "rmdir /s /q "' + $DirPath + '""'
+      $psi.UseShellExecute = $false
+      $psi.CreateNoWindow = $true
+      $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+      $p = [System.Diagnostics.Process]::Start($psi)
+      [void]$p.WaitForExit(25000)
+      $p.Dispose()
+    }
+  } catch { }
+  if (Test-Path -LiteralPath $DirPath) {
+    Remove-Item -LiteralPath $DirPath -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
 try {
   try {
     $settings = [IO.File]::ReadAllText($SettingsFile, [Text.Encoding]::UTF8) | ConvertFrom-Json
@@ -235,15 +294,19 @@ try {
       }
     }
 
+    $createdRootInThisRun = (-not (Test-Path -LiteralPath $root))
     try {
       $global:LASTEXITCODE = 0
+      $global:Error.Clear()
       $env:MEMBER_INSTALL_ZALO_STAGE_FILE = $zaloStageFile
       $env:MEMBER_INSTALL_STATUS_FILE = $LogFile
-      & $installer @arguments *> $installCaptureFile
+      & $installer @arguments | Out-Null
       if ($LASTEXITCODE -ne 0) { throw 'installer-failed' }
       Invoke-CorePostInstallChecks
     } catch {
       $coreErr = [string]$_.Exception.Message
+      $lastTechnicalDetail = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
+      [IO.File]::WriteAllText($installCaptureFile, $lastTechnicalDetail, (New-Object Text.UTF8Encoding($false)))
       $canHeal = (Get-Command Invoke-CodexAutoHeal -ErrorAction SilentlyContinue) -and
         (Get-Command Test-IsAutoHealableError -ErrorAction SilentlyContinue) -and
         (Test-IsAutoHealableError -ErrorCode $coreErr -Stage $stage)
@@ -253,23 +316,33 @@ try {
       for ($healTry = 1; $healTry -le 2; $healTry++) {
         $captureDetail = if (Test-Path -LiteralPath $installCaptureFile -PathType Leaf) {
           try { ([IO.File]::ReadAllText($installCaptureFile, [Text.Encoding]::UTF8)) } catch { '' }
-        } else { '' }
+        } else { $lastTechnicalDetail }
         if (Test-Path -LiteralPath $zaloStageFile -PathType Leaf) {
           try {
             $zStage = ([IO.File]::ReadAllText($zaloStageFile, [Text.Encoding]::ASCII)).Trim()
             if ($zStage) { $captureDetail = "Zalo stage=$zStage`n" + $captureDetail }
           } catch { }
         }
+        if ($createdRootInThisRun -and -not (Test-Path -LiteralPath (Join-Path $root 'openclaw.json') -PathType Leaf)) {
+          Remove-IncompleteOpenClawDirectory -DirPath $root
+        }
         $healResult = Invoke-CodexAutoHeal -Stage $stage -ErrorCode $coreErr -ErrorDetail $captureDetail -OpenClawRoot $root -PayloadRoot $PayloadRoot -Settings $settings -StatusFile $LogFile -Attempt $healTry
         if (-not $healResult.Invoked) { break }
         if ($healResult.Summary) { $lastAutoHealSummary = $healResult.Summary }
+        if ($healResult.PSObject.Properties['Transcript'] -and $healResult.Transcript) {
+          $lastTechnicalDetail = ($lastTechnicalDetail + "`r`n`r`n--- Nhật ký Codex tự sửa lỗi (lần $healTry) ---`r`n" + $healResult.Transcript).Trim()
+        }
         Write-SafeStatus "Codex CLI đã xử lý sự cố (lần $healTry/2). Đang kiểm tra nghiệm thu lại..."
         try {
+          if ($createdRootInThisRun -and -not (Test-Path -LiteralPath (Join-Path $root 'openclaw.json') -PathType Leaf)) {
+            Remove-IncompleteOpenClawDirectory -DirPath $root
+          }
           if (-not (Test-Path -LiteralPath (Join-Path $root 'openclaw.json') -PathType Leaf) -and -not (Test-Path -LiteralPath $root)) {
             Remove-Item -LiteralPath $zaloStageFile -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath $zaloDetailFile -Force -ErrorAction SilentlyContinue
             $global:LASTEXITCODE = 0
-            & $installer @arguments *> $installCaptureFile
+            $global:Error.Clear()
+            & $installer @arguments | Out-Null
             if ($LASTEXITCODE -ne 0) { throw 'installer-failed' }
           }
           Invoke-CorePostInstallChecks
@@ -279,6 +352,8 @@ try {
           break
         } catch {
           $coreErr = [string]$_.Exception.Message
+          $retryTrace = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
+          if ($retryTrace) { $lastTechnicalDetail = ($lastTechnicalDetail + "`r`n" + $retryTrace).Trim() }
           if (-not (Test-IsAutoHealableError -ErrorCode $coreErr -Stage $stage)) { throw }
         }
       }
@@ -314,9 +389,12 @@ try {
   $editorSettings = [pscustomobject]@{ model=$job.model; base_url='https://codex.anhlaptrinh.vn/v1'; ai_api_key=$settings.ai_api_key; job_id=$job.id }
   Write-SafeStatus 'Trợ lý đã sẵn sàng. Đang cài đặt Antigravity IDE và Codex CLI...'
   try {
-    & $editorInstaller -Settings $editorSettings -StatusFile $LogFile *> $installCaptureFile
+    $global:Error.Clear()
+    & $editorInstaller -Settings $editorSettings -StatusFile $LogFile | Out-Null
   } catch {
     $edErr = [string]$_.Exception.Message
+    $lastTechnicalDetail = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
+    [IO.File]::WriteAllText($installCaptureFile, $lastTechnicalDetail, (New-Object Text.UTF8Encoding($false)))
     $canHealEd = (Get-Command Invoke-CodexAutoHeal -ErrorAction SilentlyContinue) -and
       (Get-Command Test-IsAutoHealableError -ErrorAction SilentlyContinue) -and
       (Test-IsAutoHealableError -ErrorCode $edErr -Stage 'editor')
@@ -326,17 +404,23 @@ try {
     for ($edTry = 1; $edTry -le 2; $edTry++) {
       $edDetail = if (Test-Path -LiteralPath $installCaptureFile -PathType Leaf) {
         try { [IO.File]::ReadAllText($installCaptureFile, [Text.Encoding]::UTF8) } catch { '' }
-      } else { '' }
+      } else { $lastTechnicalDetail }
       $edHealRes = Invoke-CodexAutoHeal -Stage 'editor' -ErrorCode $edErr -ErrorDetail $edDetail -OpenClawRoot $root -PayloadRoot $PayloadRoot -Settings $editorSettings -StatusFile $LogFile -Attempt $edTry
       if (-not $edHealRes.Invoked) { break }
       if ($edHealRes.Summary) { $lastAutoHealSummary = $edHealRes.Summary }
+      if ($edHealRes.PSObject.Properties['Transcript'] -and $edHealRes.Transcript) {
+        $lastTechnicalDetail = ($lastTechnicalDetail + "`r`n`r`n--- Nhật ký Codex tự sửa lỗi (lần $edTry) ---`r`n" + $edHealRes.Transcript).Trim()
+      }
       Write-SafeStatus "Codex CLI đã xử lý sự cố bước Antigravity/Codex (lần $edTry/2). Đang kiểm tra lại..."
       try {
-        & $editorInstaller -Settings $editorSettings -StatusFile $LogFile *> $installCaptureFile
+        $global:Error.Clear()
+        & $editorInstaller -Settings $editorSettings -StatusFile $LogFile | Out-Null
         $healedEd = $true
         break
       } catch {
         $edErr = [string]$_.Exception.Message
+        $edRetryTrace = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
+        if ($edRetryTrace) { $lastTechnicalDetail = ($lastTechnicalDetail + "`r`n" + $edRetryTrace).Trim() }
         if (-not (Test-IsAutoHealableError -ErrorCode $edErr -Stage 'editor')) { throw }
       }
     }
@@ -453,6 +537,20 @@ try {
       }
     }
   }
+  if ([string]::IsNullOrWhiteSpace($lastTechnicalDetail)) {
+    $lastTechnicalDetail = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
+  }
+  try {
+    $diagObj = [ordered]@{
+      timestamp        = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+      stage            = $stage
+      code             = $code
+      friendlyMessage  = $message
+      autoHealSummary  = $lastAutoHealSummary
+      technicalDetail  = $lastTechnicalDetail
+    }
+    [IO.File]::WriteAllText($diagJsonFile, ($diagObj | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
+  } catch { }
   if ($botReady) {
     Write-SafeStatus ("Trợ lý đã sẵn sàng. Codex chưa cài xong. " + $message)
     exit 3

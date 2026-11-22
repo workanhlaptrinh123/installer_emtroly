@@ -211,7 +211,13 @@ function Invoke-SafeSubProcess {
     return [pscustomobject]@{ ExitCode = $rc; Stdout = $stdout }
   }
   # No stdout/stderr pipes: prevents long-lived detached daemons (gateway run) from deadlocking WaitForExit
-  $proc = Start-Process -FilePath $FilePath -ArgumentList $quoted -WindowStyle Hidden -PassThru
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $FilePath
+  $psi.Arguments = $quoted
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+  $proc = [Diagnostics.Process]::Start($psi)
   if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
     try { $proc.Kill() } catch { }
     $proc.Dispose()
@@ -276,6 +282,7 @@ function Invoke-ManageWorkerMain {
   $root = Join-Path $env:USERPROFILE 'openclaw'
   $configPath = Join-Path $root 'openclaw.json'
   $instancePath = Join-Path $root 'installer-instance.json'
+  $lastManageTechDetail = ''
 
   try {
     if ($action -notin @('update-config', 'install-zalo', 'reinstall-codex', 'health-restart', 'auto-heal')) {
@@ -606,6 +613,9 @@ requires_openai_auth = true
           try { $apiKey = [string](([IO.File]::ReadAllText($codexAuthFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json).OPENAI_API_KEY) } catch { }
         }
       }
+      if ([string]::IsNullOrWhiteSpace($apiKey) -and (Get-Command Get-EmTroLySavedLicenseKey -ErrorAction SilentlyContinue)) {
+        try { $apiKey = (Get-EmTroLySavedLicenseKey).Trim() } catch { }
+      }
       if ([string]::IsNullOrWhiteSpace($apiKey)) { throw 'missing-api-key' }
 
       $codexState = Find-EmTroLyCodexCli
@@ -717,7 +727,32 @@ try {
     }
 
     if ($action -eq 'auto-heal') {
+      if ((Test-Path -LiteralPath $root -PathType Container) -and -not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+        Write-ManageStatus $StatusPath 'Phát hiện thư mục OpenClaw cài dở chưa hoàn tất — đang tự động dọn sạch để sẵn sàng cài mới...'
+        $cmdExe = Join-Path $env:SystemRoot 'System32\cmd.exe'
+        if (Test-Path -LiteralPath $cmdExe -PathType Leaf) {
+          $rmPsi = New-Object System.Diagnostics.ProcessStartInfo
+          $rmPsi.FileName = $cmdExe
+          $rmPsi.Arguments = '/d /s /c "rmdir /s /q "' + $root + '""'
+          $rmPsi.UseShellExecute = $false
+          $rmPsi.CreateNoWindow = $true
+          $rmPsi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+          $rmProc = [System.Diagnostics.Process]::Start($rmPsi)
+          [void]$rmProc.WaitForExit(30000)
+          $rmProc.Dispose()
+        }
+        if (Test-Path -LiteralPath $root) {
+          Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        Write-ManageStatus $StatusPath 'Hoàn tất: Đã tự động dọn sạch thư mục OpenClaw cài dở trước đó! Bây giờ bạn chỉ cần về mục Cài đặt nhanh và bấm Cài đặt trọn gói A–Z.'
+        exit 0
+      }
+
       $state = Get-EmTroLyInstalledState
+      $resolvedKey = ([string]$req.ai_api_key).Trim()
+      if ([string]::IsNullOrWhiteSpace($resolvedKey) -and (Get-Command Get-EmTroLySavedLicenseKey -ErrorAction SilentlyContinue)) {
+        try { $resolvedKey = (Get-EmTroLySavedLicenseKey).Trim() } catch { }
+      }
       $healSettings = [pscustomobject]@{
         model          = if (-not [string]::IsNullOrWhiteSpace([string]$req.model)) { ([string]$req.model).Trim() } else { $state.Model }
         base_url       = if (-not [string]::IsNullOrWhiteSpace([string]$req.base_url)) { ([string]$req.base_url).Trim().TrimEnd('/') } else { $state.BaseUrl }
@@ -725,11 +760,16 @@ try {
         group_id       = if (-not [string]::IsNullOrWhiteSpace([string]$req.group_id)) { ([string]$req.group_id).Trim() } else { $state.GroupId }
         gateway_port   = if (-not [string]::IsNullOrWhiteSpace([string]$req.gateway_port)) { ([string]$req.gateway_port).Trim() } else { $state.GatewayPort }
         configure_zalo = $state.ZaloInstalled
-        ai_api_key     = ([string]$req.ai_api_key).Trim()
+        ai_api_key     = $resolvedKey
         telegram_token = ([string]$req.telegram_token).Trim()
       }
       $hintDetail = if ($req.PSObject.Properties['error_detail'] -and $req.error_detail) { [string]$req.error_detail } else { 'Người dùng yêu cầu tự động kiểm tra toàn diện log, cấu hình, PATH, Gateway và sửa mọi lỗi tồn đọng.' }
       $healRes = Invoke-CodexAutoHeal -Stage 'manual-diagnose-repair' -ErrorCode 'user-requested-auto-heal' -ErrorDetail $hintDetail -OpenClawRoot $root -PayloadRoot $PayloadDir -Settings $healSettings -StatusFile $StatusPath -Attempt 1
+      if ($healRes.PSObject.Properties['Transcript'] -and $healRes.Transcript) {
+        $lastManageTechDetail = [string]$healRes.Transcript
+      } elseif ($healRes.Summary) {
+        $lastManageTechDetail = [string]$healRes.Summary
+      }
       if (-not $healRes.Invoked) {
         if ($healRes.PSObject.Properties['Reason'] -and $healRes.Reason -eq 'missing-api-key') {
           throw 'missing-api-key'
@@ -763,9 +803,9 @@ try {
       'telegram-invalid-bot' = 'Telegram báo Token mới không hợp lệ. Token cũ vẫn được giữ nguyên.'
       'provider-unavailable' = 'Không kết nối được máy chủ AI với khóa API mới. Khóa cũ vẫn được giữ nguyên.'
       'provider-model-unavailable' = 'Máy chủ AI không hỗ trợ mô hình đã chọn.'
-      'missing-api-key' = 'Chưa tìm thấy khóa API. Hãy nhập Provider API Key ở thẻ 2. Bảo mật rồi thử lại.'
+      'missing-api-key' = 'Chưa tìm thấy khóa API. Hãy kiểm tra Provider API Key ở mục Cấu hình nhanh rồi thử lại.'
       'codex-autoheal-unavailable' = 'Chưa tìm thấy hoặc chưa tải được Codex CLI để tự sửa lỗi. Hãy kiểm tra kết nối Internet.'
-      'codex-autoheal-failed' = 'Codex CLI chưa thể tự khắc phục hết lỗi này. Hãy xem chi tiết tại thẻ Codex CLI.'
+      'codex-autoheal-failed' = 'Codex CLI chưa thể tự khắc phục hết lỗi này — xem chi tiết nguyên nhân ngay bên dưới.'
       'invalid-qr-owner' = 'QR Owner ID phải nằm trong danh sách Owner IDs.'
       'config-validation-failed' = 'Cấu hình mới không hợp lệ; hệ thống đã tự khôi phục bản cấu hình cũ an toàn.'
       'gateway-command-failed' = 'Đã lưu cấu hình nhưng chưa khởi động lại được Gateway. Hãy thử bấm Kiểm tra & Khởi động lại.'
@@ -782,6 +822,22 @@ try {
       'editor-version-unsupported' = 'Phiên bản Antigravity trên máy chưa tương thích cấu trúc chuẩn.'
     }
     $friendly = if ($errMap.ContainsKey($errCode)) { $errMap[$errCode] } else { "Không thể hoàn tất thao tác ($errCode). Dữ liệu cũ vẫn được giữ an toàn." }
+    try {
+      $posTrace = if ($_.InvocationInfo -and $_.InvocationInfo.PositionMessage) { ([string]$_.InvocationInfo.PositionMessage -replace "\r?\n", ' | ').Trim() } else { '' }
+      $techCombined = @()
+      if ($lastManageTechDetail) { $techCombined += $lastManageTechDetail }
+      if ($posTrace) { $techCombined += ('Vị trí: ' + $posTrace) }
+      if ($techCombined.Count -eq 0) { $techCombined += ("Mã chẩn đoán: $errCode") }
+      $diagManage = [ordered]@{
+        timestamp       = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        stage           = $action
+        code            = $errCode
+        friendlyMessage = $friendly
+        autoHealSummary = ''
+        technicalDetail = ($techCombined -join "`r`n")
+      }
+      [IO.File]::WriteAllText("$StatusPath.diag.json", ($diagManage | ConvertTo-Json -Depth 5), $utf8NoBom)
+    } catch { }
     Write-ManageStatus $StatusPath $friendly
     exit 1
   }

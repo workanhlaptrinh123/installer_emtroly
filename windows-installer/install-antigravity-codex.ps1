@@ -64,15 +64,22 @@ function Get-VerifiedDownload([string]$Url, [string]$Path, [string]$Hash) {
 
 function Invoke-HiddenProcess([string]$Executable, [string]$Arguments, [int]$TimeoutSeconds) {
   $spCmd = Get-Command Start-Process -ErrorAction SilentlyContinue
-  $process = if ($spCmd -and $spCmd.CommandType -eq 'Cmdlet' -and $downloadDir -and (Test-Path -LiteralPath $downloadDir -PathType Container)) {
-    $emptyIn = Join-Path $downloadDir 'empty.stdin'
-    if (-not (Test-Path -LiteralPath $emptyIn -PathType Leaf)) { [IO.File]::WriteAllText($emptyIn, '') }
-    Start-Process -FilePath $Executable -ArgumentList $Arguments -RedirectStandardInput $emptyIn -WindowStyle Hidden -PassThru
+  if ($spCmd -and $spCmd.CommandType -eq 'Function') {
+    $process = Start-Process -FilePath $Executable -ArgumentList $Arguments -WindowStyle Hidden -PassThru
   } else {
-    Start-Process -FilePath $Executable -ArgumentList $Arguments -WindowStyle Hidden -PassThru
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $Executable
+    $psi.Arguments = $Arguments
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+    $psi.RedirectStandardInput = $true
+    $process = [System.Diagnostics.Process]::Start($psi)
+    try { $process.StandardInput.Close() } catch { }
   }
   if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    try { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue } catch { }
+    try { if (-not $process.HasExited) { $process.Kill() } } catch { }
     throw 'editor-process-timeout'
   }
   return $process.ExitCode

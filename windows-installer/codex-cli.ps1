@@ -320,8 +320,20 @@ function Register-EmTroLyCodexCli {
       }
       $uiLauncher = Join-Path $binDir 'emtroly-ui.cmd'
       $uiWizard = Join-Path $emWinDir 'wizard.ps1'
+      $uiVbs = Join-Path $emUiDir 'launch-emtroly-codex-ui.vbs'
       if ((Test-Path -LiteralPath $uiWizard -PathType Leaf) -and $uiWizard -notmatch '[\r\n"%&|<>^]') {
-        $uiBody = "@echo off`r`nstart `"`" `"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`" -STA -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$uiWizard`" -PayloadRoot `"$emUiDir`" -CodexMode`r`n"
+        $psExePath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $codexVbsBody = @"
+Option Explicit
+Dim shell, command
+Set shell = CreateObject("WScript.Shell")
+shell.CurrentDirectory = "$($emUiDir.Replace('"','""'))"
+command = Chr(34) & "$($psExePath.Replace('"','""'))" & Chr(34) & " -STA -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " & Chr(34) & "$($uiWizard.Replace('"','""'))" & Chr(34) & " -PayloadRoot " & Chr(34) & "$($emUiDir.Replace('"','""'))" & Chr(34) & " -CodexMode"
+shell.Run command, 0, False
+Set shell = Nothing
+"@
+        [IO.File]::WriteAllText($uiVbs, $codexVbsBody, [System.Text.Encoding]::Unicode)
+        $uiBody = "@echo off`r`n`"%SystemRoot%\System32\wscript.exe`" //B //Nologo `"$uiVbs`"`r`n"
         [IO.File]::WriteAllText($uiLauncher, $uiBody, $shimEnc)
       }
     } catch { }
