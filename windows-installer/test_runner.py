@@ -158,7 +158,8 @@ class RunnerTests(unittest.TestCase):
             (payload / "windows-installer/install-antigravity-codex.ps1").write_text(
                 "param($Settings, $StatusFile, [switch]$CheckOnly)\n"
                 "if ($Settings.ai_api_key -ne $env:TEST_API_KEY) { throw 'fixture-private-error' }\n"
-                "if (-not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE 'openclaw/installer-codex-pending.json'))) { throw 'editor-before-bot' }\n"
+                "if ($env:EDITOR_ONLY_RETRY -ne '1' -and (Test-Path -LiteralPath (Join-Path $env:USERPROFILE 'openclaw/openclaw.json'))) { throw 'bot-installed-before-editor' }\n"
+                "if ($env:EDITOR_ONLY_RETRY -eq '1' -and -not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE 'openclaw/installer-codex-pending.json'))) { throw 'missing-pending-editor-job' }\n"
                 "if ($env:TEST_MODE -eq 'editor-existing') { throw 'editor-data-exists' }\n"
                 "if (-not $CheckOnly -and $env:TEST_MODE -eq 'editor-failure') { throw 'editor-codex-probe-failed' }\n"
                 "if (-not $CheckOnly -and $env:TEST_MODE -eq 'editor-activation-failure') { throw 'editor-activation-failed' }\n"
@@ -182,12 +183,22 @@ class RunnerTests(unittest.TestCase):
             log = root / "status.txt"
             user_home = root / "home"
             user_home.mkdir()
+            local_app = root / "local"
+            local_app.mkdir()
             if mode == "existing-root":
                 existing = user_home / "openclaw"
                 existing.mkdir()
                 (existing / "user-data.txt").write_text("do-not-overwrite", encoding="utf-8")
-            environment = {**os.environ, "USERPROFILE": str(user_home), "TEST_MODE": mode,
-                           "TEST_TOKEN": TOKEN, "TEST_API_KEY": API_KEY}
+            clean_path = os.pathsep.join(
+                p
+                for p in os.environ.get("PATH", "").split(os.pathsep)
+                if p
+                and not (Path(p) / "openclaw.cmd").exists()
+                and not (Path(p) / "openclaw.exe").exists()
+                and not (Path(p) / "openclaw.ps1").exists()
+            )
+            environment = {**os.environ, "PATH": clean_path, "USERPROFILE": str(user_home), "LOCALAPPDATA": str(local_app),
+                           "TEST_MODE": mode, "TEST_TOKEN": TOKEN, "TEST_API_KEY": API_KEY}
             process = subprocess.run(
                 [PWSH, "-NoLogo", "-NoProfile", "-File", str(driver),
                  "-Runner", str(RELEASE / "windows-installer/run-native-install.ps1"),
@@ -202,7 +213,7 @@ class RunnerTests(unittest.TestCase):
                 secret_file.write_text(json.dumps({"ai_api_key": API_KEY}))
                 proc_args = [PWSH, "-NoProfile", "-File", str(RELEASE / "windows-installer/run-native-install.ps1"),
                              "-SettingsFile", str(secret_file), "-PayloadRoot", str(payload), "-LogFile", str(log), "-EditorOnly"]
-                process = subprocess.run(proc_args, env={**environment, "TEST_MODE": "success"},
+                process = subprocess.run(proc_args, env={**environment, "TEST_MODE": "success", "EDITOR_ONLY_RETRY": "1"},
                                          capture_output=True, text=True, timeout=30)
                 self.assertFalse(pending.exists(), log.read_text(encoding="utf-8"))
             text = (log.read_text(encoding="utf-8") if log.exists() else "") + process.stdout + process.stderr

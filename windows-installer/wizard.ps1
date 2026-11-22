@@ -619,7 +619,7 @@ $xamlText = @'
                 <TextBlock Text="2. Tùy chọn cài đặt trọn gói A–Z" FontSize="15" FontWeight="Bold" Margin="0,0,0,10"/>
                 <CheckBox x:Name="ZaloCheck" Content="Cài đặt Zalo cá nhân &amp; lệnh quét mã /zaloqr (bỏ tích nếu không cần Zalo)" FontSize="13.5" FontWeight="SemiBold" Margin="0,0,0,8"/>
                 <Border Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="8" Padding="11,7" Margin="0,0,0,10">
-                  <TextBlock Text="✓ Mặc định tự động cài đặt đầy đủ cả Antigravity IDE, tiện ích Codex Extension &amp; lệnh Codex CLI." FontSize="12.5" FontWeight="SemiBold" Foreground="#065F46" TextWrapping="Wrap"/>
+                  <TextBlock Text="✓ Ưu tiên cài đặt Codex CLI → Antigravity IDE → Codex Extension trước tiên để nếu gặp lỗi trong lúc cài, Codex CLI sẽ tự động khắc phục ngay." FontSize="12.5" FontWeight="SemiBold" Foreground="#065F46" TextWrapping="Wrap"/>
                 </Border>
                 <Border Background="#FFFBEB" BorderBrush="#FDE68A" BorderThickness="1" CornerRadius="8" Padding="12,10">
                   <StackPanel>
@@ -676,7 +676,7 @@ $xamlText = @'
                       <TextBox x:Name="StyleBox" Style="{StaticResource ModernInput}"/>
                     </StackPanel>
                   </Grid>
-                  <CheckBox x:Name="ExistingEditorCheck" Content="Bỏ qua cài đặt Antigravity IDE &amp; Codex CLI (chỉ tích khi máy chỉ cần chạy bot ngầm)" FontSize="12.5" Foreground="#64748B" Margin="0,12,0,0"/>
+                  <CheckBox x:Name="ExistingEditorCheck" Content="Bỏ qua cài đặt Antigravity IDE (vẫn luôn cài đặt Codex CLI để tự sửa lỗi cài đặt)" FontSize="12.5" Foreground="#64748B" Margin="0,12,0,0"/>
                 </StackPanel>
               </Expander>
             </Border>
@@ -711,25 +711,25 @@ $xamlText = @'
                 <Grid Margin="0,0,0,9">
                   <Grid.ColumnDefinitions><ColumnDefinition Width="26"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                   <TextBlock x:Name="Step2Icon" Grid.Column="0" Text="○" FontSize="15" FontWeight="Bold" Foreground="#94A3B8" VerticalAlignment="Center"/>
-                  <TextBlock x:Name="Step2Text" Grid.Column="1" Text="Bước 2 · Chuẩn bị môi trường (Node.js, Python, FFmpeg)" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="Step2Text" Grid.Column="1" Text="Bước 2 · Ưu tiên cài Codex CLI → Antigravity IDE → Codex Extension" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
                   <TextBlock x:Name="Step2Badge" Grid.Column="2" Text="Chờ thực hiện" FontSize="12" Foreground="#94A3B8" VerticalAlignment="Center"/>
                 </Grid>
                 <Grid Margin="0,0,0,9">
                   <Grid.ColumnDefinitions><ColumnDefinition Width="26"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                   <TextBlock x:Name="Step3Icon" Grid.Column="0" Text="○" FontSize="15" FontWeight="Bold" Foreground="#94A3B8" VerticalAlignment="Center"/>
-                  <TextBlock x:Name="Step3Text" Grid.Column="1" Text="Bước 3 · Cài OpenClaw, tạo ảnh, kỹ năng văn phòng &amp; Gateway" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="Step3Text" Grid.Column="1" Text="Bước 3 · Chuẩn bị môi trường (Node.js, Python, FFmpeg)" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
                   <TextBlock x:Name="Step3Badge" Grid.Column="2" Text="Chờ thực hiện" FontSize="12" Foreground="#94A3B8" VerticalAlignment="Center"/>
                 </Grid>
                 <Grid Margin="0,0,0,9">
                   <Grid.ColumnDefinitions><ColumnDefinition Width="26"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                   <TextBlock x:Name="Step4Icon" Grid.Column="0" Text="○" FontSize="15" FontWeight="Bold" Foreground="#94A3B8" VerticalAlignment="Center"/>
-                  <TextBlock x:Name="Step4Text" Grid.Column="1" Text="Bước 4 · Cài đặt Zalo cá nhân &amp; lệnh /zaloqr, /zalostatus" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="Step4Text" Grid.Column="1" Text="Bước 4 · Cài OpenClaw, tạo ảnh, kỹ năng văn phòng &amp; Gateway" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
                   <TextBlock x:Name="Step4Badge" Grid.Column="2" Text="Chờ thực hiện" FontSize="12" Foreground="#94A3B8" VerticalAlignment="Center"/>
                 </Grid>
                 <Grid>
                   <Grid.ColumnDefinitions><ColumnDefinition Width="26"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                   <TextBlock x:Name="Step5Icon" Grid.Column="0" Text="○" FontSize="15" FontWeight="Bold" Foreground="#94A3B8" VerticalAlignment="Center"/>
-                  <TextBlock x:Name="Step5Text" Grid.Column="1" Text="Bước 5 · Cài Antigravity IDE, Codex Extension &amp; Codex CLI" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
+                  <TextBlock x:Name="Step5Text" Grid.Column="1" Text="Bước 5 · Cài đặt Zalo cá nhân &amp; lệnh /zaloqr, /zalostatus" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
                   <TextBlock x:Name="Step5Badge" Grid.Column="2" Text="Chờ thực hiện" FontSize="12" Foreground="#94A3B8" VerticalAlignment="Center"/>
                 </Grid>
               </StackPanel>
@@ -737,7 +737,7 @@ $xamlText = @'
 
             <!-- Auto-Heal Note + Retry/Manual Auto-Heal Controls -->
             <Border x:Name="AutoHealNoteBorder" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,0,12">
-              <TextBlock x:Name="AutoHealProgressNote" Text="Tự động sửa lỗi (Auto-Heal): Nếu phát sinh lỗi kỹ thuật trong quá trình cài đặt, Codex CLI sẽ tự chẩn đoán và khắc phục rồi nghiệm thu lại giúp bạn." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
+              <TextBlock x:Name="AutoHealProgressNote" Text="Tự động sửa lỗi (Auto-Heal): Bộ cài luôn cài đặt Codex CLI trước tiên — nếu gặp sự cố ở bất kỳ bước nào tiếp theo, Codex CLI sẽ tự chẩn đoán và khắc phục ngay." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
             </Border>
 
             <!-- Retry Codex Key Panel (Only when $retryEditor) -->
@@ -1546,8 +1546,8 @@ function Update-ProgressFromStatus([string]$Message) {
   if ($Message.StartsWith('Hoàn tất:')) {
     $pct = 100
     for ($s = 1; $s -le 5; $s++) {
-      if ($s -eq 4 -and -not $zaloOn) { Set-ChecklistStep 4 'skipped' }
-      elseif ($s -eq 5 -and -not $editorOn) { Set-ChecklistStep 5 'skipped' }
+      if ($s -eq 5 -and -not $zaloOn) { Set-ChecklistStep 5 'skipped' }
+      elseif ($s -eq 2 -and -not $editorOn) { Set-ChecklistStep 2 'done' 'Đã cài Codex CLI' }
       else { Set-ChecklistStep $s 'done' }
     }
     $installProgressBar.IsIndeterminate = $false
@@ -1565,23 +1565,23 @@ function Update-ProgressFromStatus([string]$Message) {
   if ($isHealing) {
     $activeStep = [Math]::Max(1, [Math]::Min(5, [int]$script:lastActiveStepIndex))
     $pct = [Math]::Max(20, [int]$installProgressBar.Value)
-  } elseif ($Message -match 'Antigravity|Codex Extension|khóa API cho Codex|cài Codex|kiểm tra Codex|Codex CLI|lối tắt|Thử lại bước Codex') {
-    $activeStep = 5
-    $pct = if ($subPct -ge 0) { 78 + [int][Math]::Round($subPct * 0.17) } else { 88 }
-    if ($subPct -ge 0) { $activeBadge = "Đang tải $subPct%" }
   } elseif ($Message -match 'Zalo|/zaloqr|menu Telegram') {
+    $activeStep = 5
+    $pct = 90
+  } elseif ($Message -match 'OpenClaw|kỹ năng|Full Exec|Gateway|lệnh openclaw') {
     $activeStep = 4
     $pct = 74
-  } elseif ($Message -match 'OpenClaw|kỹ năng|Full Exec|Gateway|lệnh openclaw') {
-    $activeStep = 3
-    $pct = 55
   } elseif ($Message -match 'Node\.js|Python|FFmpeg|môi trường|gói môi trường|tải song song') {
+    $activeStep = 3
+    $pct = if ($subPct -ge 0) { 46 + [int][Math]::Round($subPct * 0.16) } else { 54 }
+    if ($subPct -ge 0) { $activeBadge = "Đang tải $subPct%" }
+  } elseif ($Message -match 'Antigravity|Codex Extension|gói Codex CLI|giải nén và kích hoạt Codex|khóa API cho Codex|cài Codex|kiểm tra Codex|Codex CLI|lối tắt|Thử lại bước Codex') {
     $activeStep = 2
-    $pct = if ($subPct -ge 0) { 18 + [int][Math]::Round($subPct * 0.26) } else { 32 }
+    $pct = if ($subPct -ge 0) { 20 + [int][Math]::Round($subPct * 0.22) } else { 30 }
     if ($subPct -ge 0) { $activeBadge = "Đang tải $subPct%" }
   } else {
     $activeStep = 1
-    $pct = 14
+    $pct = 12
   }
   $script:lastActiveStepIndex = $activeStep
 
@@ -1596,10 +1596,11 @@ function Update-ProgressFromStatus([string]$Message) {
   $progressPercentText.Text = "$pct%"
 
   for ($s = 1; $s -le 5; $s++) {
-    if ($s -eq 4 -and -not $zaloOn) { Set-ChecklistStep 4 'skipped'; continue }
-    if ($s -eq 5 -and -not $editorOn) { Set-ChecklistStep 5 'skipped'; continue }
-    if ($s -lt $activeStep) { Set-ChecklistStep $s 'done' }
-    elseif ($s -eq $activeStep) {
+    if ($s -eq 5 -and -not $zaloOn) { Set-ChecklistStep 5 'skipped'; continue }
+    if ($s -lt $activeStep) {
+      if ($s -eq 2 -and -not $editorOn) { Set-ChecklistStep 2 'done' 'Đã cài Codex CLI' }
+      else { Set-ChecklistStep $s 'done' }
+    } elseif ($s -eq $activeStep) {
       if ($isHealing) { Set-ChecklistStep $s 'heal' }
       else { Set-ChecklistStep $s 'active' $activeBadge }
     } else {
@@ -2299,11 +2300,12 @@ function Show-RichFailureDiagnostics([string]$SummaryMessage, [object]$DiagPaylo
     'input' = 'Bước 1 · Kiểm tra thông tin đầu vào'
     'provider' = 'Bước 1 · Kết nối máy chủ AI (codex.anhlaptrinh.vn)'
     'telegram' = 'Bước 1 · Kiểm tra Telegram Bot Token'
-    'install' = 'Bước 3 · Cài đặt OpenClaw & Gateway'
-    'command' = 'Bước 3 · Đăng ký lệnh openclaw vào PATH'
-    'zalo-verify' = 'Bước 4 · Kích hoạt plugin Zalo & /zaloqr'
-    'telegram-menu' = 'Bước 4 · Đồng bộ menu lệnh Telegram'
-    'editor' = 'Bước 5 · Cài Antigravity IDE & Codex CLI'
+    'codex-cli' = 'Bước 2 · Cài đặt ưu tiên Codex CLI'
+    'editor' = 'Bước 2 · Cài Antigravity IDE & Codex Extension'
+    'install' = 'Bước 4 · Cài đặt OpenClaw & Gateway'
+    'command' = 'Bước 4 · Đăng ký lệnh openclaw vào PATH'
+    'zalo-verify' = 'Bước 5 · Kích hoạt plugin Zalo & /zaloqr'
+    'telegram-menu' = 'Bước 5 · Đồng bộ menu lệnh Telegram'
     'auto-heal' = 'Tự động chẩn đoán & sửa lỗi (Codex CLI)'
     'reinstall-codex' = 'Cài / Sửa Antigravity IDE & Codex CLI'
     'install-zalo' = 'Cài / Đồng bộ Zalo cá nhân'
@@ -2673,9 +2675,9 @@ $installTimer.Add_Tick({
       $script:retryEditor = $true
       $coreReadyText.Visibility = [System.Windows.Visibility]::Visible
       $coreReadyText.Text = '✓ OpenClaw & Telegram đã hoạt động tốt.'
-      $statusText.Text = if ($code -eq 3) { $detail } else { 'Bước cài Codex bị gián đoạn. Nhập khóa API bên dưới rồi bấm Thử lại bước Codex.' }
+      $statusText.Text = if ($code -eq 3) { $detail } else { 'Bước cài Antigravity/Codex bị gián đoạn. Nhập khóa API bên dưới rồi bấm Thử lại bước Codex.' }
       $retryEditorPanel.Visibility = [System.Windows.Visibility]::Visible
-      $script:lastActiveStepIndex = 5
+      $script:lastActiveStepIndex = 2
       Show-RichFailureDiagnostics -SummaryMessage $statusText.Text -DiagPayload $diagPayload -IsManageFailure $false
       Set-Buttons
     } else {

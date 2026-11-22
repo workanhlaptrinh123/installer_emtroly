@@ -172,10 +172,12 @@ NGUYÊN TẮC BẮT BUỘC:
 1. Chỉ kiểm tra và sửa trong phạm vi thư mục của người dùng hiện tại ($OpenClawRoot, $env:LOCALAPPDATA\OpenClaw, $env:LOCALAPPDATA\EmTroLy và User PATH). Tuyệt đối KHÔNG xóa dữ liệu cá nhân ngoài phạm vi này.
 2. Tuyệt đối KHÔNG in nội dung tệp telegram.token hoặc member-provider.secret hoặc auth.json ra màn hình.
 3. Bạn có thể đọc và gọi các công cụ chuẩn có sẵn trong $PayloadRoot (như native\windows-cli.ps1, native\user-gateway.ps1, native\finalize_permissions.py, zalo\onboard-zalouser-windows.ps1, windows-installer\repair-antigravity-shortcut.ps1).
-4. Nếu lỗi liên quan Gateway chưa chạy hoặc kẹt cổng: kiểm tra tiến trình cũ, cổng trống trong openclaw.json và khởi động lại bằng openclaw-instance.ps1 gateway restart rồi kiểm tra gateway health --json.
-5. Nếu lỗi liên quan lệnh openclaw trong PATH (cli-probe-*): kiểm tra windows-cli.json và %LOCALAPPDATA%\OpenClaw\bin\openclaw.cmd và biến môi trường User Path.
-6. Nếu lỗi liên quan plugin Zalo: kiểm tra plugins list / plugins enable zalouser và telegram-zalo-owner-login rồi khởi động lại Gateway.
-7. Cuối cùng, viết 1–2 câu tiếng Việt ngắn gọn dễ hiểu tóm tắt bạn đã sửa gì.
+4. Nếu sự cố ở bước `editor` (cài Antigravity IDE / Codex Extension / lối tắt Desktop): kiểm tra tiến trình `Antigravity IDE.exe` bị treo, kiểm tra thư mục `$env:LOCALAPPDATA\EmTroLy` (xử lý khóa tệp hoặc thư mục dở dang nếu bị kẹt), cài lại tiện ích từ tệp `.vsix` sẵn có trong `$env:LOCALAPPDATA\EmTroLy` bằng `antigravity-ide.cmd --user-data-dir ... --extensions-dir ... --install-extension ... --force`, hoặc chạy `windows-installer\repair-antigravity-shortcut.ps1` nếu thiếu shortcut.
+5. Nếu sự cố ở bước tải/chuẩn bị môi trường (`Node.js`, `Python`, `FFmpeg`, `npm`): kiểm tra `$env:LOCALAPPDATA\MemberInstaller\dependencies`, xóa tệp tải dở bị hỏng và chạy lại `Initialize-UserDependencies` từ `$PayloadRoot\native\user-dependencies.ps1`.
+6. Nếu lỗi liên quan Gateway chưa chạy hoặc kẹt cổng: kiểm tra tiến trình cũ, cổng trống trong openclaw.json và khởi động lại bằng openclaw-instance.ps1 gateway restart rồi kiểm tra gateway health --json.
+7. Nếu lỗi liên quan lệnh openclaw trong PATH (cli-probe-*): kiểm tra windows-cli.json và %LOCALAPPDATA%\OpenClaw\bin\openclaw.cmd và biến môi trường User Path.
+8. Nếu lỗi liên quan plugin Zalo: kiểm tra plugins list / plugins enable zalouser và telegram-zalo-owner-login rồi khởi động lại Gateway.
+9. Cuối cùng, viết 1–2 câu tiếng Việt ngắn gọn dễ hiểu tóm tắt bạn đã sửa gì.
 "@
   return $prompt
 }
@@ -273,8 +275,11 @@ requires_openai_auth = true
     [IO.File]::WriteAllText((Join-Path $codexHome 'config.toml'), $cfgToml, $utf8NoBom)
     [IO.File]::WriteAllText((Join-Path $codexHome 'auth.json'), (@{ OPENAI_API_KEY = $apiKey } | ConvertTo-Json -Compress), $utf8NoBom)
 
+    $emTroLyDir = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'EmTroLy' } else { '' }
     $workDir = if ($OpenClawRoot -and (Test-Path -LiteralPath $OpenClawRoot -PathType Container)) {
       $OpenClawRoot
+    } elseif ($Stage -in @('editor', 'codex-cli') -and $emTroLyDir -and (Test-Path -LiteralPath $emTroLyDir -PathType Container)) {
+      $emTroLyDir
     } elseif ($env:USERPROFILE -and (Test-Path -LiteralPath $env:USERPROFILE -PathType Container)) {
       $env:USERPROFILE
     } else {

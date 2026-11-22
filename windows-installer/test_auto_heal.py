@@ -78,6 +78,18 @@ elif behavior == "noop":
 elif behavior == "fix-manage":
     (oc_root / "manage-repaired.marker").write_text("ok", encoding="utf-8")
     summary = "Đã sửa cấu hình Gateway bị kẹt và làm sạch tiến trình cũ."
+elif behavior == "fix-editor-and-core":
+    em_dir = Path(os.environ["LOCALAPPDATA"]) / "EmTroLy"
+    em_dir.mkdir(parents=True, exist_ok=True)
+    if "stage): editor" in prompt or "stage: editor" in prompt or "Bước gặp lỗi (stage): editor" in prompt:
+        (em_dir / "editor-repaired.marker").write_text("ok", encoding="utf-8")
+        summary = "Đã gỡ khóa tiện ích mở rộng và cài lại Codex Extension trên Antigravity."
+    else:
+        skill_md = oc_root / "workspace/skills/imagegen/SKILL.md"
+        skill_md.parent.mkdir(parents=True, exist_ok=True)
+        skill_md.write_text("repaired-by-codex", encoding="utf-8")
+        (oc_root / "gateway-repaired.marker").write_text("ok", encoding="utf-8")
+        summary = "Đã sửa lỗi cài đặt OpenClaw và khởi động lại Gateway thành công."
 else:
     summary = "Không rõ kịch bản."
 
@@ -282,10 +294,23 @@ class AutoHealRuntimeTests(unittest.TestCase):
             (win_dir / "verify-openclaw-command.ps1").write_text("exit 0\n", encoding="utf-8-sig")
             (win_dir / "install-antigravity-codex.ps1").write_text(
                 "param($Settings, $StatusFile)\n"
+                "$timeline = Join-Path $env:USERPROFILE 'install-order.log'\n"
+                "[IO.File]::AppendAllText($timeline, \"editor`n\")\n"
+                "if (Test-Path -LiteralPath (Join-Path $env:USERPROFILE 'openclaw\\openclaw.json')) { throw 'openclaw-ran-before-editor' }\n"
+                "if (-not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'EmTroLy\\Codex\\config.toml'))) { throw 'codex-cli-not-configured-before-editor' }\n"
+                "if ($env:FAKE_CODEX_BEHAVIOR -eq 'fix-editor-and-core' -and -not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'EmTroLy\\editor-repaired.marker'))) {\n"
+                "  throw 'editor-extension-install-failed'\n"
+                "}\n"
                 "[IO.File]::WriteAllText((Join-Path $env:USERPROFILE 'editor-done.txt'), 'ok')\n",
                 encoding="utf-8-sig",
             )
-            (payload / "install-native-windows.ps1").write_text(BROKEN_INSTALLER_PS1, encoding="utf-8-sig")
+            (payload / "install-native-windows.ps1").write_text(
+                BROKEN_INSTALLER_PS1.replace(
+                    "$root = Join-Path $env:USERPROFILE 'openclaw'",
+                    "[IO.File]::AppendAllText((Join-Path $env:USERPROFILE 'install-order.log'), \"openclaw`n\")\n$root = Join-Path $env:USERPROFILE 'openclaw'",
+                ),
+                encoding="utf-8-sig",
+            )
 
             staged_runner = win_dir / "run-native-install.ps1"
             staged_runner.write_text(RUNNER.read_text(encoding="utf-8-sig"), encoding="utf-8-sig")
@@ -360,10 +385,12 @@ class AutoHealRuntimeTests(unittest.TestCase):
             status_text = log_file.read_text(encoding="utf-8") if log_file.exists() else ""
             count = int((record_dir / "count.txt").read_text(encoding="utf-8")) if (record_dir / "count.txt").exists() else 0
             prompts = [p.read_text(encoding="utf-8") for p in sorted(record_dir.glob("prompt_*.txt"))]
+            ui_audit_path = local_app / "EmTroLyUI/logs/codex-autoheal.log"
+            oc_audit_path = home / "openclaw/logs/codex-autoheal.log"
             audit_log = (
-                (home / "openclaw/logs/codex-autoheal.log").read_text(encoding="utf-8")
-                if (home / "openclaw/logs/codex-autoheal.log").exists()
-                else ""
+                ui_audit_path.read_text(encoding="utf-8")
+                if ui_audit_path.exists()
+                else (oc_audit_path.read_text(encoding="utf-8") if oc_audit_path.exists() else "")
             )
             for idx in range(1, count + 1):
                 self.assertEqual((record_dir / f"auth_present_{idx}.txt").read_text(encoding="utf-8"), "yes")
@@ -371,17 +398,32 @@ class AutoHealRuntimeTests(unittest.TestCase):
             combined_inspect = "\n".join(prompts) + "\n" + status_text + "\n" + audit_log + proc.stdout + proc.stderr
             self.assertNotIn(TOKEN, combined_inspect)
             self.assertNotIn(API_KEY, combined_inspect)
-            return proc.returncode, status_text, count, audit_log
+            order_lines = (
+                (home / "install-order.log").read_text(encoding="utf-8").strip().splitlines()
+                if (home / "install-order.log").exists()
+                else []
+            )
+            return proc.returncode, status_text, count, audit_log, order_lines
 
     def test_runner_auto_heals_broken_core_install_via_codex_and_verifies(self):
-        code, status_text, count, audit_log = self._run_install_with_autoheal("fix-core")
+        code, status_text, count, audit_log, order_lines = self._run_install_with_autoheal("fix-core")
         self.assertEqual(code, 0, status_text)
         self.assertEqual(count, 1)
+        self.assertEqual(order_lines, ["editor", "openclaw"])
         self.assertIn("Hoàn tất:", status_text)
         self.assertIn("incomplete-installation", audit_log)
 
+    def test_priority_order_codex_cli_then_antigravity_then_openclaw_with_early_autoheal(self):
+        code, status_text, count, audit_log, order_lines = self._run_install_with_autoheal("fix-editor-and-core")
+        self.assertEqual(code, 0, status_text)
+        self.assertEqual(count, 2, "Codex CLI must auto-heal both Step 2 (editor) AND Step 4 (OpenClaw)")
+        self.assertEqual(order_lines, ["editor", "editor", "openclaw"])
+        self.assertIn("Hoàn tất:", status_text)
+        self.assertIn("stage=editor error=editor-extension-install-failed", audit_log)
+        self.assertIn("incomplete-installation", audit_log)
+
     def test_runner_never_reports_success_when_codex_cannot_fix_issue(self):
-        code, status_text, count, audit_log = self._run_install_with_autoheal("noop")
+        code, status_text, count, audit_log, order_lines = self._run_install_with_autoheal("noop")
         self.assertNotEqual(code, 0)
         self.assertEqual(count, 2)
         self.assertNotIn("Hoàn tất", status_text)

@@ -192,10 +192,73 @@ try {
   if ($env:OS -eq 'Windows_NT' -and ($env:PROCESSOR_ARCHITEW6432 -eq 'ARM64' -or $env:PROCESSOR_ARCHITECTURE -ne 'AMD64')) { throw 'unsupported-architecture' }
   $root = Join-Path $env:USERPROFILE 'openclaw'
   $pending = Join-Path $root 'installer-codex-pending.json'
+  $editorCompletedEarly = $false
+  $deferredEditorError = ''
+  $deferredEditorTechDetail = ''
+  $editorJobId = [guid]::NewGuid().ToString('N')
+
+  function Invoke-EditorStepWithCodexAutoHeal([psobject]$EditorSettingsObj) {
+    $editorInstaller = Join-Path $PayloadRoot 'windows-installer\install-antigravity-codex.ps1'
+    if (-not (Test-Path -LiteralPath $editorInstaller -PathType Leaf)) { throw 'editor-module-missing' }
+    Write-SafeStatus 'Đang cài đặt Antigravity IDE và Codex Extension trên Antigravity...'
+    try {
+      $global:Error.Clear()
+      & $editorInstaller -Settings $EditorSettingsObj -StatusFile $LogFile | Out-Null
+    } catch {
+      $edErr = [string]$_.Exception.Message
+      $script:lastTechnicalDetail = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
+      [IO.File]::WriteAllText($installCaptureFile, $script:lastTechnicalDetail, (New-Object Text.UTF8Encoding($false)))
+      $canHealEd = (Get-Command Invoke-CodexAutoHeal -ErrorAction SilentlyContinue) -and
+        (Get-Command Test-IsAutoHealableError -ErrorAction SilentlyContinue) -and
+        (Test-IsAutoHealableError -ErrorCode $edErr -Stage 'editor')
+      if (-not $canHealEd) { throw }
+
+      $healedEd = $false
+      for ($edTry = 1; $edTry -le 2; $edTry++) {
+        $edDetail = if (Test-Path -LiteralPath $installCaptureFile -PathType Leaf) {
+          try { [IO.File]::ReadAllText($installCaptureFile, [Text.Encoding]::UTF8) } catch { '' }
+        } else { $script:lastTechnicalDetail }
+        $edHealRes = Invoke-CodexAutoHeal -Stage 'editor' -ErrorCode $edErr -ErrorDetail $edDetail -OpenClawRoot $root -PayloadRoot $PayloadRoot -Settings $EditorSettingsObj -StatusFile $LogFile -Attempt $edTry
+        if (-not $edHealRes.Invoked) { break }
+        if ($edHealRes.Summary) { $script:lastAutoHealSummary = $edHealRes.Summary }
+        if ($edHealRes.PSObject.Properties['Transcript'] -and $edHealRes.Transcript) {
+          $script:lastTechnicalDetail = ($script:lastTechnicalDetail + "`r`n`r`n--- Nhật ký Codex tự sửa lỗi (lần $edTry) ---`r`n" + $edHealRes.Transcript).Trim()
+        }
+        Write-SafeStatus "Codex CLI đã xử lý sự cố bước Antigravity/Codex (lần $edTry/2). Đang kiểm tra lại..."
+        try {
+          $global:Error.Clear()
+          & $editorInstaller -Settings $EditorSettingsObj -StatusFile $LogFile | Out-Null
+          $healedEd = $true
+          break
+        } catch {
+          $edErr = [string]$_.Exception.Message
+          $edRetryTrace = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
+          if ($edRetryTrace) { $script:lastTechnicalDetail = ($script:lastTechnicalDetail + "`r`n" + $edRetryTrace).Trim() }
+          if (-not (Test-IsAutoHealableError -ErrorCode $edErr -Stage 'editor')) { throw }
+        }
+      }
+      if (-not $healedEd) { throw $edErr }
+    }
+    if (Get-Command Register-EmTroLyCodexCli -ErrorAction SilentlyContinue) {
+      [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot)
+    }
+  }
+
   if (-not $EditorOnly) {
     Test-MemberInstallerSettings $settings
     if (Test-Path -LiteralPath $root) { throw 'instance-exists' }
-    if ($env:OS -eq 'Windows_NT' -and (Get-Command openclaw -ErrorAction SilentlyContinue)) { throw 'cli-probe-conflict' }
+    if ($env:OS -eq 'Windows_NT') {
+      $existingOpenClawCmd = Get-Command openclaw -ErrorAction SilentlyContinue
+      if ($existingOpenClawCmd) {
+        $ownShimDir = if ($env:LOCALAPPDATA) { (Join-Path $env:LOCALAPPDATA 'OpenClaw\bin').TrimEnd('\') } else { '' }
+        $cmdSrcDir = if ($existingOpenClawCmd.Source) { (Split-Path -Parent $existingOpenClawCmd.Source).TrimEnd('\') } else { '' }
+        if ($ownShimDir -and $cmdSrcDir -ieq $ownShimDir -and -not (Test-Path -LiteralPath $root)) {
+          Remove-Item -LiteralPath $existingOpenClawCmd.Source -Force -ErrorAction SilentlyContinue
+        } else {
+          throw 'cli-probe-conflict'
+        }
+      }
+    }
     $stage = 'provider'
     Write-SafeStatus 'Đang kiểm tra API và model...'
     $baseUrl = ([string]$settings.base_url).TrimEnd('/')
@@ -219,8 +282,42 @@ try {
     } catch { throw 'telegram-unavailable' }
     if (-not $telegram.ok -or -not $telegram.result.is_bot) { throw 'telegram-invalid-bot' }
 
+    # =========================================================================
+    # PRIORITY STEP 2: ALWAYS INSTALL CODEX CLI FIRST, THEN ANTIGRAVITY IDE
+    #                  & CODEX EXTENSION ON ANTIGRAVITY (SO CODEX CLI CAN
+    #                  AUTO-HEAL ANY SUBSEQUENT INSTALLATION ERROR!)
+    # =========================================================================
+    $stage = 'codex-cli'
+    if (Get-Command Install-EmTroLyCodexCliFirst -ErrorAction SilentlyContinue) {
+      [void](Install-EmTroLyCodexCliFirst -Settings $settings -PayloadRoot $PayloadRoot -StatusFile $LogFile -EditorJobId $editorJobId)
+    }
+
+    if (-not $settings.skip_editor) {
+      $stage = 'editor'
+      $earlyMutex = New-Object Threading.Mutex($false, ('EmTroLy-Codex-' + $editorJobId))
+      $earlyLocked = $false
+      try {
+        try { $earlyLocked = $earlyMutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $earlyLocked = $true }
+        if (-not $earlyLocked) { throw 'editor-busy' }
+        $editorSettings = [pscustomobject]@{
+          model      = [string]$settings.model
+          base_url   = 'https://codex.anhlaptrinh.vn/v1'
+          ai_api_key = [string]$settings.ai_api_key
+          job_id     = $editorJobId
+        }
+        Invoke-EditorStepWithCodexAutoHeal -EditorSettingsObj $editorSettings
+        $editorCompletedEarly = $true
+      } catch {
+        $deferredEditorError = [string]$_.Exception.Message
+        $deferredEditorTechDetail = $lastTechnicalDetail
+      } finally {
+        if ($earlyLocked) { try { $earlyMutex.ReleaseMutex() } catch { } }
+        if ($earlyMutex) { try { $earlyMutex.Dispose() } catch { } }
+      }
+    }
+
     $stage = 'install'
-    Write-SafeStatus 'Đang cài môi trường, module và Gateway. Vui lòng đợi...'
+    Write-SafeStatus 'Đang cài môi trường, module OpenClaw và Gateway. Vui lòng đợi...'
     $installer = Join-Path $PayloadRoot 'install-native-windows.ps1'
     if (-not (Test-Path -LiteralPath $installer)) { throw 'missing-payload' }
     $modules = @()
@@ -359,10 +456,16 @@ try {
       }
       if (-not $healedCore) { throw $coreErr }
     }
+
+    # Re-register Codex CLI shim in %LOCALAPPDATA%\OpenClaw\bin alongside openclaw.cmd & create Desktop shortcut
+    if (Get-Command Register-EmTroLyCodexCli -ErrorAction SilentlyContinue) {
+      try { [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot) } catch { }
+    }
+    if (Get-Command Install-EmTroLyAppShortcut -ErrorAction SilentlyContinue) {
+      try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot) } catch { }
+    }
+
     if ($settings.skip_editor) {
-      if (Get-Command Install-EmTroLyAppShortcut -ErrorAction SilentlyContinue) {
-        try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot) } catch { }
-      }
       if ($zaloEnabled) {
         Write-SafeStatus 'Hoàn tất: OpenClaw, /zaloqr, /zalostatus, tạo ảnh và kỹ năng DOCX/Excel/PowerPoint cơ bản đã sẵn sàng.'
       } else {
@@ -370,13 +473,31 @@ try {
       }
       exit 0
     }
+
     $botReady = $true
-    $job = @{ id = [guid]::NewGuid().ToString('N'); model = $settings.model }
-    $tmp = "$pending.$($job.id).tmp"
-    [IO.File]::WriteAllText($tmp, ($job | ConvertTo-Json -Compress))
-    [IO.File]::Move($tmp, $pending)
+    if (-not [string]::IsNullOrWhiteSpace($deferredEditorError)) {
+      $job = @{ id = $editorJobId; model = $settings.model }
+      $tmp = "$pending.$($job.id).tmp"
+      [IO.File]::WriteAllText($tmp, ($job | ConvertTo-Json -Compress))
+      [IO.File]::Move($tmp, $pending)
+      $stage = 'editor'
+      if ($deferredEditorTechDetail) { $lastTechnicalDetail = $deferredEditorTechDetail }
+      throw $deferredEditorError
+    }
+
+    if ($editorCompletedEarly) {
+      if ($zaloEnabled) {
+        Write-SafeStatus 'Hoàn tất: Đã cài trọn gói từ A–Z gồm Codex CLI, Antigravity IDE, Codex Extension, OpenClaw, Zalo (/zaloqr, /zalostatus), tạo ảnh và DOCX/Excel/PowerPoint.'
+      } else {
+        Write-SafeStatus 'Hoàn tất: Đã cài trọn gói từ A–Z gồm Codex CLI, Antigravity IDE, Codex Extension, OpenClaw, Telegram, tạo ảnh và DOCX/Excel/PowerPoint (đã bỏ qua Zalo theo lựa chọn).'
+      }
+      exit 0
+    }
   }
+
+  # -EditorOnly retry mode (resuming a deferred Antigravity/Codex job after OpenClaw is already running)
   $stage = 'editor'
+  if (-not (Test-Path -LiteralPath $pending -PathType Leaf)) { throw 'invalid-editor-job' }
   $job = [IO.File]::ReadAllText($pending) | ConvertFrom-Json
   if ($job.id -cnotmatch '^[a-f0-9]{32}$' -or $job.model -notin @('gpt-6.2-sol','GPT-6.1-terra','gpt-6.2-astra')) { throw 'invalid-editor-job' }
   $botReady = $true
@@ -384,60 +505,20 @@ try {
   try { $locked = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $locked = $true }
   if (-not $locked) { throw 'editor-busy' }
   if (-not (Test-Path -LiteralPath $pending)) { throw 'invalid-editor-job' }
-  $editorInstaller = Join-Path $PayloadRoot 'windows-installer\install-antigravity-codex.ps1'
-  if (-not (Test-Path -LiteralPath $editorInstaller -PathType Leaf)) { throw 'editor-module-missing' }
   $editorSettings = [pscustomobject]@{ model=$job.model; base_url='https://codex.anhlaptrinh.vn/v1'; ai_api_key=$settings.ai_api_key; job_id=$job.id }
-  Write-SafeStatus 'Trợ lý đã sẵn sàng. Đang cài đặt Antigravity IDE và Codex CLI...'
-  try {
-    $global:Error.Clear()
-    & $editorInstaller -Settings $editorSettings -StatusFile $LogFile | Out-Null
-  } catch {
-    $edErr = [string]$_.Exception.Message
-    $lastTechnicalDetail = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
-    [IO.File]::WriteAllText($installCaptureFile, $lastTechnicalDetail, (New-Object Text.UTF8Encoding($false)))
-    $canHealEd = (Get-Command Invoke-CodexAutoHeal -ErrorAction SilentlyContinue) -and
-      (Get-Command Test-IsAutoHealableError -ErrorAction SilentlyContinue) -and
-      (Test-IsAutoHealableError -ErrorCode $edErr -Stage 'editor')
-    if (-not $canHealEd) { throw }
-
-    $healedEd = $false
-    for ($edTry = 1; $edTry -le 2; $edTry++) {
-      $edDetail = if (Test-Path -LiteralPath $installCaptureFile -PathType Leaf) {
-        try { [IO.File]::ReadAllText($installCaptureFile, [Text.Encoding]::UTF8) } catch { '' }
-      } else { $lastTechnicalDetail }
-      $edHealRes = Invoke-CodexAutoHeal -Stage 'editor' -ErrorCode $edErr -ErrorDetail $edDetail -OpenClawRoot $root -PayloadRoot $PayloadRoot -Settings $editorSettings -StatusFile $LogFile -Attempt $edTry
-      if (-not $edHealRes.Invoked) { break }
-      if ($edHealRes.Summary) { $lastAutoHealSummary = $edHealRes.Summary }
-      if ($edHealRes.PSObject.Properties['Transcript'] -and $edHealRes.Transcript) {
-        $lastTechnicalDetail = ($lastTechnicalDetail + "`r`n`r`n--- Nhật ký Codex tự sửa lỗi (lần $edTry) ---`r`n" + $edHealRes.Transcript).Trim()
-      }
-      Write-SafeStatus "Codex CLI đã xử lý sự cố bước Antigravity/Codex (lần $edTry/2). Đang kiểm tra lại..."
-      try {
-        $global:Error.Clear()
-        & $editorInstaller -Settings $editorSettings -StatusFile $LogFile | Out-Null
-        $healedEd = $true
-        break
-      } catch {
-        $edErr = [string]$_.Exception.Message
-        $edRetryTrace = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
-        if ($edRetryTrace) { $lastTechnicalDetail = ($lastTechnicalDetail + "`r`n" + $edRetryTrace).Trim() }
-        if (-not (Test-IsAutoHealableError -ErrorCode $edErr -Stage 'editor')) { throw }
-      }
-    }
-    if (-not $healedEd) { throw $edErr }
+  if (Get-Command Install-EmTroLyCodexCliFirst -ErrorAction SilentlyContinue) {
+    [void](Install-EmTroLyCodexCliFirst -Settings $editorSettings -PayloadRoot $PayloadRoot -StatusFile $LogFile -EditorJobId $job.id)
   }
-  if (Get-Command Register-EmTroLyCodexCli -ErrorAction SilentlyContinue) {
-    Write-SafeStatus 'Đang đăng ký lệnh Codex CLI và lối tắt giao diện Em Trợ Lý...'
-    [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot)
-  }
+  Invoke-EditorStepWithCodexAutoHeal -EditorSettingsObj $editorSettings
   if (Get-Command Install-EmTroLyAppShortcut -ErrorAction SilentlyContinue) {
     try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot) } catch { }
   }
   Remove-Item -LiteralPath $pending -ErrorAction Stop
-  if ($zaloEnabled) {
-    Write-SafeStatus 'Hoàn tất: Đã cài trọn gói từ A–Z gồm OpenClaw, Zalo (/zaloqr, /zalostatus), tạo ảnh, DOCX/Excel/PowerPoint, Antigravity IDE và Codex CLI.'
+  $zaloInstalledAfterRetry = Test-Path -LiteralPath (Join-Path $root 'workspace\skills\telegram-zalo-owner-login\SKILL.md') -PathType Leaf
+  if ($zaloInstalledAfterRetry) {
+    Write-SafeStatus 'Hoàn tất: Đã cài trọn gói từ A–Z gồm Codex CLI, Antigravity IDE, Codex Extension, OpenClaw, Zalo (/zaloqr, /zalostatus), tạo ảnh và DOCX/Excel/PowerPoint.'
   } else {
-    Write-SafeStatus 'Hoàn tất: Đã cài trọn gói từ A–Z gồm OpenClaw, Telegram, tạo ảnh, DOCX/Excel/PowerPoint, Antigravity IDE và Codex CLI (đã bỏ qua Zalo theo lựa chọn).'
+    Write-SafeStatus 'Hoàn tất: Đã cài trọn gói từ A–Z gồm Codex CLI, Antigravity IDE, Codex Extension, OpenClaw, Telegram, tạo ảnh và DOCX/Excel/PowerPoint.'
   }
   exit 0
 } catch {

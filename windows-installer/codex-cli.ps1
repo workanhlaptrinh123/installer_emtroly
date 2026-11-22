@@ -92,6 +92,17 @@ function Find-EmTroLyCodexCli {
         }
       }
     }
+
+    $standaloneExe = Join-Path $emTroLyBase 'Codex\bin\codex.exe'
+    if (Test-Path -LiteralPath $standaloneExe -PathType Leaf) {
+      return [pscustomobject]@{
+        Available = $true
+        Executable = $standaloneExe
+        CodexHome = if ($hasPrivateCodexHome) { $emTroLyCodexHome } else { '' }
+        Source = 'emtroly'
+        Label = 'Sẵn sàng · Codex CLI riêng của Em Trợ Lý'
+      }
+    }
   }
 
   $editorRoots = @()
@@ -140,12 +151,220 @@ function Find-EmTroLyCodexCli {
     }
   }
 
+  if ($emTroLyBase) {
+    $autoHealCmd = Join-Path $emTroLyBase 'AutoHealCli\node_modules\.bin\codex.cmd'
+    if (Test-Path -LiteralPath $autoHealCmd -PathType Leaf) {
+      return [pscustomobject]@{
+        Available = $true
+        Executable = $autoHealCmd
+        CodexHome = if ($hasPrivateCodexHome) { $emTroLyCodexHome } else { '' }
+        Source = 'emtroly'
+        Label = 'Sẵn sàng · Codex CLI tự sửa lỗi của Em Trợ Lý'
+      }
+    }
+  }
+
   return [pscustomobject]@{
     Available = $false
     Executable = ''
     CodexHome = if ($hasPrivateCodexHome) { $emTroLyCodexHome } else { '' }
     Source = 'none'
     Label = 'Chưa tìm thấy Codex CLI (hãy cài ở mục Cài đặt trước)'
+  }
+}
+
+function Install-EmTroLyCodexCliFirst {
+  param(
+    [Parameter(Mandatory=$true)][psobject]$Settings,
+    [string]$PayloadRoot = '',
+    [string]$StatusFile = '',
+    [string]$EditorJobId = ''
+  )
+  if (-not $env:LOCALAPPDATA) {
+    return [pscustomobject]@{ Installed = $false; Executable = ''; CodexHome = '' }
+  }
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  $writeMsg = {
+    param([string]$Msg)
+    if ($StatusFile) {
+      try { [IO.File]::WriteAllText($StatusFile, $Msg, $utf8NoBom) } catch { }
+    }
+  }
+
+  & $writeMsg 'Đang cài đặt và cấu hình Codex CLI trước tiên...'
+
+  $emBase = Join-Path $env:LOCALAPPDATA 'EmTroLy'
+  $codexHome = Join-Path $emBase 'Codex'
+  $codexBinDir = Join-Path $codexHome 'bin'
+  $standaloneExe = Join-Path $codexBinDir 'codex.exe'
+  $receiptPath = Join-Path $emBase 'installer-job.txt'
+
+  $emBaseExistedBefore = Test-Path -LiteralPath $emBase -PathType Container
+  if (-not $emBaseExistedBefore -and -not (Test-Path -LiteralPath $emBase)) {
+    New-CodexPrivateDirectory $emBase
+    if ($EditorJobId -match '^[a-f0-9]{32}$') {
+      [IO.File]::WriteAllText($receiptPath, $EditorJobId, $utf8NoBom)
+    }
+  }
+  if (-not (Test-Path -LiteralPath $codexHome -PathType Container)) {
+    New-CodexPrivateDirectory $codexHome
+  }
+
+  $apiKey = if ($Settings -and $Settings.PSObject.Properties['ai_api_key']) { ([string]$Settings.ai_api_key).Trim() } else { '' }
+  $model = if ($Settings -and $Settings.PSObject.Properties['model'] -and [string]$Settings.model -match '^[A-Za-z0-9._-]+$') { ([string]$Settings.model).Trim() } else { 'gpt-6.2-sol' }
+  $baseUrl = if ($Settings -and $Settings.PSObject.Properties['base_url'] -and [string]$Settings.base_url -match '^https://') { ([string]$Settings.base_url).Trim().TrimEnd('/') } else { 'https://codex.anhlaptrinh.vn/v1' }
+  $skipEditor = ($Settings -and $Settings.PSObject.Properties['skip_editor'] -and [bool]$Settings.skip_editor)
+
+  # Only seed/update Codex config & auth if not colliding with a foreign completed EmTroLy folder
+  $canWriteCodexConfig = (-not $emBaseExistedBefore) -or
+    (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) -or
+    ($EditorJobId -and ([IO.File]::ReadAllText($receiptPath).Trim() -ceq $EditorJobId)) -or
+    $skipEditor
+
+  if ($canWriteCodexConfig -and -not [string]::IsNullOrWhiteSpace($apiKey)) {
+    $cfgToml = @"
+model_provider = "router"
+model = "$model"
+model_context_window = 272000
+model_auto_compact_token_limit = 200000
+cli_auth_credentials_store = "file"
+
+[model_providers.router]
+name = "router"
+base_url = "$baseUrl"
+wire_api = "responses"
+requires_openai_auth = true
+"@
+    [IO.File]::WriteAllText((Join-Path $codexHome 'config.toml'), $cfgToml, $utf8NoBom)
+    [IO.File]::WriteAllText((Join-Path $codexHome 'auth.json'), (@{ OPENAI_API_KEY = $apiKey } | ConvertTo-Json -Compress), $utf8NoBom)
+  }
+
+  $existingInfo = Find-EmTroLyCodexCli
+  if ($existingInfo.Available -and $existingInfo.Executable -and (Test-Path -LiteralPath $existingInfo.Executable -PathType Leaf)) {
+    try { [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot) } catch { }
+    $openclawBin = Join-Path $env:LOCALAPPDATA 'OpenClaw\bin'
+    if ((Test-Path -LiteralPath $openclawBin -PathType Container) -and ($env:Path -notlike "*$openclawBin*")) {
+      $env:Path = "$openclawBin;$env:Path"
+    }
+    return [pscustomobject]@{
+      Installed  = $true
+      Executable = $existingInfo.Executable
+      CodexHome  = if ($existingInfo.CodexHome) { $existingInfo.CodexHome } else { $codexHome }
+    }
+  }
+
+  # Fresh Windows PC: Download pinned Codex VSIX once, extract standalone codex.exe immediately, and cache VSIX for Antigravity step!
+  $extensionVersion = '26.51111.21308'
+  $extensionUrl = 'https://open-vsx.org/api/openai/chatgpt/win32-x64/26.51111.21308/file/openai.chatgpt-26.51111.21308@win32-x64.vsix'
+  $extensionHash = '5abdd18242a77e85e60b8b727231924c4cdf048fdf5c39079e5d811390c3fca8'
+
+  if ($env:OS -eq 'Windows_NT' -and $baseUrl -ceq 'https://codex.anhlaptrinh.vn/v1') {
+    $cachedVsix = Join-Path $emBase ('codex-' + $extensionVersion + '.vsix')
+    $vsixReady = (Test-Path -LiteralPath $cachedVsix -PathType Leaf) -and ((Get-FileHash -LiteralPath $cachedVsix -Algorithm SHA256).Hash -ieq $extensionHash)
+
+    if (-not $vsixReady) {
+      $tmpDlDir = Join-Path $env:TEMP ('emtroly-editor-' + [guid]::NewGuid().ToString('N'))
+      [void][IO.Directory]::CreateDirectory($tmpDlDir)
+      $tmpVsix = Join-Path $tmpDlDir 'codex.vsix'
+      try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue
+        for ($dlTry = 1; $dlTry -le 3; $dlTry++) {
+          try {
+            if (Test-Path -LiteralPath $tmpVsix -PathType Leaf) { Remove-Item -LiteralPath $tmpVsix -Force -ErrorAction SilentlyContinue }
+            & $writeMsg 'Đang tải gói Codex CLI & Extension (khoảng 370 MB)...'
+            $handler = New-Object System.Net.Http.HttpClientHandler
+            $handler.AutomaticDecompression = [System.Net.DecompressionMethods]::GZip -bor [System.Net.DecompressionMethods]::Deflate
+            $client = New-Object System.Net.Http.HttpClient($handler)
+            $client.Timeout = [TimeSpan]::FromMinutes(20)
+            try {
+              $resp = $client.GetAsync($extensionUrl, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+              [void]$resp.EnsureSuccessStatusCode()
+              $totalLen = if ($resp.Content.Headers.ContentLength) { [long]$resp.Content.Headers.ContentLength } else { 389000000L }
+              $inStream = $resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+              $outStream = New-Object System.IO.FileStream($tmpVsix, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read, 262144)
+              try {
+                $buf = New-Object byte[] 262144
+                $readTotal = 0L
+                $sw = [Diagnostics.Stopwatch]::StartNew()
+                $lastTick = -2000L
+                while (($n = $inStream.Read($buf, 0, $buf.Length)) -gt 0) {
+                  $outStream.Write($buf, 0, $n)
+                  $readTotal += $n
+                  if (($sw.ElapsedMilliseconds - $lastTick) -ge 450) {
+                    $lastTick = $sw.ElapsedMilliseconds
+                    $pct = [Math]::Min(99, [int][Math]::Floor(($readTotal * 100.0) / [Math]::Max(1L, $totalLen)))
+                    $mbCur = [Math]::Round($readTotal / 1MB, 1)
+                    $mbMax = [Math]::Round($totalLen / 1MB, 0)
+                    $spd = [Math]::Round(($readTotal / 1MB) / [Math]::Max(0.1, $sw.Elapsed.TotalSeconds), 1)
+                    & $writeMsg "Đang tải gói Codex CLI & Extension... $pct% ($mbCur / $mbMax MB · $spd MB/s)"
+                  }
+                }
+              } finally {
+                $outStream.Dispose()
+                $inStream.Dispose()
+              }
+            } finally {
+              $client.Dispose()
+              $handler.Dispose()
+            }
+            if ((Get-FileHash -LiteralPath $tmpVsix -Algorithm SHA256).Hash -ieq $extensionHash) {
+              Move-Item -LiteralPath $tmpVsix -Destination $cachedVsix -Force
+              $vsixReady = $true
+              break
+            } else {
+              Remove-Item -LiteralPath $tmpVsix -Force -ErrorAction SilentlyContinue
+            }
+          } catch {
+            if ($dlTry -lt 3) { Start-Sleep -Seconds (2 * $dlTry) }
+          }
+        }
+      } finally {
+        if (Test-Path -LiteralPath $tmpDlDir) { Remove-Item -LiteralPath $tmpDlDir -Recurse -Force -ErrorAction SilentlyContinue }
+      }
+    }
+
+    if ($vsixReady -and $canWriteCodexConfig) {
+      & $writeMsg 'Đang giải nén và kích hoạt Codex CLI...'
+      try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+        [void][IO.Directory]::CreateDirectory($codexBinDir)
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($cachedVsix)
+        try {
+          $entry = $zip.Entries | Where-Object { $_.FullName -replace '\\','/' -ieq 'extension/bin/windows-x86_64/codex.exe' } | Select-Object -First 1
+          if ($entry) {
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $standaloneExe, $true)
+          }
+        } finally {
+          $zip.Dispose()
+        }
+      } catch { }
+      if ($skipEditor -and (Test-Path -LiteralPath $standaloneExe -PathType Leaf)) {
+        Remove-Item -LiteralPath $cachedVsix -Force -ErrorAction SilentlyContinue
+      }
+    }
+  }
+
+  # Fallback to npm @openai/codex if standalone VSIX extraction wasn't available
+  if (-not (Test-Path -LiteralPath $standaloneExe -PathType Leaf) -and (Get-Command Ensure-AutoHealCodexBinary -ErrorAction SilentlyContinue)) {
+    if ($env:OS -eq 'Windows_NT' -and $baseUrl -ceq 'https://codex.anhlaptrinh.vn/v1') {
+      try { [void](Ensure-AutoHealCodexBinary -PayloadRoot $PayloadRoot) } catch { }
+    }
+  }
+
+  $finalInfo = Find-EmTroLyCodexCli
+  if ($finalInfo.Available) {
+    try { [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot) } catch { }
+    $openclawBin = Join-Path $env:LOCALAPPDATA 'OpenClaw\bin'
+    if ((Test-Path -LiteralPath $openclawBin -PathType Container) -and ($env:Path -notlike "*$openclawBin*")) {
+      $env:Path = "$openclawBin;$env:Path"
+    }
+  }
+
+  return [pscustomobject]@{
+    Installed  = [bool]$finalInfo.Available
+    Executable = [string]$finalInfo.Executable
+    CodexHome  = if ($finalInfo.CodexHome) { [string]$finalInfo.CodexHome } else { $codexHome }
   }
 }
 

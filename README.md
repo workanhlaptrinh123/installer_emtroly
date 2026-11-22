@@ -100,11 +100,14 @@ The installer runs in user scope and does not require Docker or Administrator
 for a fresh instance. It requires Windows PowerShell 5.1, Windows x64,
 Internet access, and permission to install user dependencies. Before creating
 the instance it checks the provider `/models` endpoint and Telegram `getMe`,
-then installs OpenClaw and Zalo. It checks OpenClaw config, the selected skill catalog, Full Exec
+then prioritizes installing Codex CLI first, followed by Antigravity IDE and
+the Codex Extension on Antigravity (so Codex CLI is ready from the start to
+automatically diagnose and repair any subsequent installation errors), and then
+installs the runtime dependencies, OpenClaw, and Zalo. It checks OpenClaw config, the selected skill catalog, Full Exec
 approval state, Gateway RPC health, and registration of `/zaloqr` and
-`/zalostatus` before showing **Trợ lý đã sẵn sàng**. If selected,
-Antigravity and Codex run afterward. A failure at this stage leaves the bot
-running; choose **Thử lại bước Codex** in the wizard, or reopen the EXE and
+`/zalostatus` before showing completion. If Antigravity/Codex still needs a
+follow-up retry after OpenClaw finishes, the bot remains running; choose
+**Thử lại bước Codex** in the wizard, or reopen the EXE and
 enter the provider API key to retry. No Telegram token or QR scan is needed
 for this retry. Only a completed bot setup can create the pending editor job.
 The pending record contains a job ID and model, no credentials. Existing

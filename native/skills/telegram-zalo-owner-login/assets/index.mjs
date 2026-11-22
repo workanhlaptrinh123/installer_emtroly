@@ -88,7 +88,7 @@ function writeGuiZaloStatusCache(payload) {
     const tmp = `${dst}.tmp-${process.pid}`;
     writeFileSync(tmp, JSON.stringify({ updatedAt: Date.now(), ...payload }), { encoding: "utf8", mode: 0o600 });
     renameSync(tmp, dst);
-  } catch {}
+  } catch { }
 }
 
 function readLocalTelegramToken() {
@@ -97,14 +97,14 @@ function readLocalTelegramToken() {
     try {
       const v = readFileSync(tokPath, "utf8").trim();
       if (v) return v;
-    } catch {}
+    } catch { }
   }
   try {
     const cfg = currentConfig();
     const accTok = cfg?.channels?.telegram?.accounts?.[settings.telegramAccount]?.botToken
       ?? cfg?.channels?.telegram?.botToken;
     if (typeof accTok === "string" && accTok.trim() && !accTok.includes("${")) return accTok.trim();
-  } catch {}
+  } catch { }
   return "";
 }
 
@@ -137,7 +137,7 @@ async function sendDirectTelegramPhoto(ownerId, pngInput, caption, signal) {
     if (resp.ok && data?.ok && data?.result?.message_id) {
       return String(data.result.message_id);
     }
-  } catch {} finally {
+  } catch { } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", onAbort);
   }
@@ -147,9 +147,9 @@ async function sendDirectTelegramPhoto(ownerId, pngInput, caption, signal) {
 function extractLastJson(output) {
   if (!output) return null;
   const trimmed = output.trim();
-  try { return JSON.parse(trimmed); } catch {}
+  try { return JSON.parse(trimmed); } catch { }
   for (let i = trimmed.lastIndexOf("{"); i >= 0; i = trimmed.lastIndexOf("{", i - 1)) {
-    try { return JSON.parse(trimmed.slice(i)); } catch {}
+    try { return JSON.parse(trimmed.slice(i)); } catch { }
   }
   return null;
 }
@@ -185,12 +185,12 @@ function cliProcess(args, { signal, timeoutMs, logPath }) {
     try {
       if (process.platform === "win32") child.kill("SIGTERM");
       else process.kill(-child.pid, "SIGTERM");
-    } catch {}
+    } catch { }
     killTimer ??= setTimeout(() => {
       try {
         if (process.platform === "win32") child.kill("SIGKILL");
         else process.kill(-child.pid, "SIGKILL");
-      } catch {}
+      } catch { }
     }, 1500);
   };
   const collect = (chunk) => {
@@ -236,7 +236,7 @@ function parseReceipt(output, ownerId) {
       const messageId = value.messageId ?? payload.messageId ?? payload.result?.message_id;
       const chat = normalizedTarget(payload.chatId ?? payload.to ?? payload.result?.chat?.id ?? "");
       if (payload.ok !== false && chat === ownerId && messageId) return String(messageId);
-    } catch {}
+    } catch { }
   }
   throw new Error("Telegram chưa trả biên nhận ảnh rõ ràng; không gửi lại tự động để tránh trùng QR.");
 }
@@ -434,7 +434,7 @@ export async function loginAndSendQr(ownerId, assertCurrent, signal) {
       const mediaPath = stageOutboundMedia(image);
       const delivery = cliProcess(["message", "send", "--channel", "telegram", "--account", settings.telegramAccount,
         "--target", ownerId, "--media", mediaPath, "--message", qrCaption, "--json"],
-      { signal, timeoutMs: 60000, logPath: path.join(privateDirectory, "delivery.log") });
+        { signal, timeoutMs: 60000, logPath: path.join(privateDirectory, "delivery.log") });
       const deliveryResult = await delivery.done;
       assertCurrent();
       if (deliveryResult.code !== 0) throw new Error("Gửi ảnh Telegram chưa thành công; không tự gửi lại khi biên nhận chưa rõ.");
@@ -480,7 +480,7 @@ export async function loginAndSendQr(ownerId, assertCurrent, signal) {
       try {
         const lock = JSON.parse(readFileSync(path.join(lockDirectory, "owner.json"), "utf8"));
         if (lock.token === lockToken) rmSync(lockDirectory, { recursive: true, force: true });
-      } catch {}
+      } catch { }
     }
     loginActive = false;
   }
