@@ -178,7 +178,8 @@ function Install-EmTroLyCodexCliFirst {
     [Parameter(Mandatory=$true)][psobject]$Settings,
     [string]$PayloadRoot = '',
     [string]$StatusFile = '',
-    [string]$EditorJobId = ''
+    [string]$EditorJobId = '',
+    [switch]$ForceConfigUpdate
   )
   if (-not $env:LOCALAPPDATA) {
     return [pscustomobject]@{ Installed = $false; Executable = ''; CodexHome = '' }
@@ -216,7 +217,7 @@ function Install-EmTroLyCodexCliFirst {
   $skipEditor = ($Settings -and $Settings.PSObject.Properties['skip_editor'] -and [bool]$Settings.skip_editor)
 
   # Only seed/update Codex config & auth if not colliding with a foreign completed EmTroLy folder
-  $canWriteCodexConfig = (-not $emBaseExistedBefore) -or
+  $canWriteCodexConfig = $ForceConfigUpdate -or (-not $emBaseExistedBefore) -or
     (-not (Test-Path -LiteralPath $receiptPath -PathType Leaf)) -or
     ($EditorJobId -and ([IO.File]::ReadAllText($receiptPath).Trim() -ceq $EditorJobId)) -or
     $skipEditor

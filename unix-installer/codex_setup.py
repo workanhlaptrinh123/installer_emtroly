@@ -364,6 +364,144 @@ def install_antigravity_and_extension(values: dict, home: Path, progress=lambda 
     return {"configured": True, "skipped": False, "cli": str(ide_cli)}
 
 
+def _create_isolated_antigravity_launcher(home: Path, ide_cli: Path, user_data: Path, ext_dir: Path, c_home: Path) -> str:
+    if platform.system() == "Darwin":
+        apps_dir = home / "Applications"
+        apps_dir.mkdir(parents=True, exist_ok=True)
+        launcher = apps_dir / "EmTroLy - Antigravity.command"
+        launcher_body = (
+            "#!/usr/bin/env bash\n"
+            "unset OPENAI_API_KEY ELECTRON_RUN_AS_NODE VSCODE_IPC_HOOK_CLI NODE_OPTIONS VSCODE_DEV\n"
+            f"export CODEX_HOME={shlex.quote(str(c_home))}\n"
+            f"exec {shlex.quote(str(ide_cli))} --user-data-dir {shlex.quote(str(user_data))} "
+            f"--extensions-dir {shlex.quote(str(ext_dir))} --new-window\n"
+        )
+        _write_private_file(launcher, launcher_body, 0o755)
+        net_utils.clear_macos_quarantine(launcher)
+        return str(launcher)
+    if platform.system() == "Linux":
+        apps_dir = home / ".local/share/applications"
+        apps_dir.mkdir(parents=True, exist_ok=True)
+        wrapper = data_root(home) / "launch-antigravity.sh"
+        wrapper_body = (
+            "#!/usr/bin/env bash\n"
+            "unset OPENAI_API_KEY ELECTRON_RUN_AS_NODE VSCODE_IPC_HOOK_CLI NODE_OPTIONS VSCODE_DEV\n"
+            f"export CODEX_HOME={shlex.quote(str(c_home))}\n"
+            f"exec {shlex.quote(str(ide_cli))} --user-data-dir {shlex.quote(str(user_data))} "
+            f"--extensions-dir {shlex.quote(str(ext_dir))} --new-window \"$@\"\n"
+        )
+        _write_private_file(wrapper, wrapper_body, 0o755)
+        desktop_entry = (
+            "[Desktop Entry]\n"
+            "Type=Application\n"
+            "Name=Em Trợ Lý - Antigravity IDE\n"
+            "Comment=Antigravity IDE và Codex riêng của Em Trợ Lý\n"
+            f"Exec={shlex.quote(str(wrapper))}\n"
+            "Terminal=false\n"
+            "Categories=Development;Utility;\n"
+        )
+        dst_desktop = apps_dir / "emtroly-antigravity.desktop"
+        _write_private_file(dst_desktop, desktop_entry, 0o755)
+        return str(dst_desktop)
+    return ""
+
+
+def install_antigravity_ide_only(values: dict, home: Path, progress=lambda _m: None) -> dict:
+    """Modular Step 2: Verify/prepare Antigravity IDE & isolated profile without installing VSIX yet."""
+    progress("Đang kiểm tra và chuẩn bị Antigravity IDE riêng...")
+    app_target, ide_cli = find_antigravity_cli(home)
+    if not ide_cli:
+        raise RuntimeError(
+            "antigravity-ide-missing: Chưa tìm thấy Antigravity IDE trên máy "
+            "(macOS: /Applications/Antigravity.app, Linux: /usr/bin/antigravity). "
+            "Hãy cài đặt Antigravity IDE trước rồi chạy lại phần này."
+        )
+    if app_target:
+        net_utils.clear_macos_quarantine(app_target)
+    ag_root = data_root(home) / "antigravity"
+    user_data = ag_root / "UserData"
+    ext_dir = ag_root / "Extensions"
+    settings_dir = user_data / "User"
+    for folder in (ag_root, user_data, ext_dir, settings_dir):
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+    editor_settings = {
+        "extensions.autoUpdate": False,
+        "extensions.autoCheckUpdates": False,
+        "extensions.ignoreRecommendations": True,
+        "update.mode": "none",
+    }
+    _write_private_file(settings_dir / "settings.json", json.dumps(editor_settings, indent=2) + "\n", 0o600)
+    c_home = write_codex_home(
+        home,
+        values.get("ai_api_key", ""),
+        values.get("model", "gpt-6.2-sol"),
+        values.get("base_url", "https://codex.anhlaptrinh.vn/v1"),
+    )
+    launcher = _create_isolated_antigravity_launcher(home, ide_cli, user_data, ext_dir, c_home)
+    return {"installed": True, "cli": str(ide_cli), "launcher": launcher}
+
+
+def install_codex_extension_only(values: dict, home: Path, progress=lambda _m: None) -> dict:
+    """Modular Step 3: Install Codex Extension (`openai.chatgpt`) into Antigravity IDE."""
+    _, ide_cli = find_antigravity_cli(home)
+    if not ide_cli:
+        raise RuntimeError(
+            "antigravity-ide-missing: Máy chưa có Antigravity IDE. "
+            "Hãy cài Phần 2 (Antigravity IDE) trước khi cài Codex Extension."
+        )
+    write_codex_home(
+        home,
+        values.get("ai_api_key", ""),
+        values.get("model", "gpt-6.2-sol"),
+        values.get("base_url", "https://codex.anhlaptrinh.vn/v1"),
+    )
+    merged = dict(values, skip_editor=False)
+    return install_antigravity_and_extension(merged, home, progress=progress)
+
+
+def get_modular_status(home: Path | None = None, preferred_member: str = "emtroly") -> dict:
+    resolved_home = Path(home) if home is not None else Path.home()
+    c_home = codex_home_dir(resolved_home)
+    codex_bin = find_codex_binary(resolved_home, isolated_only=False)
+    codex_ready = bool(codex_bin and (c_home / "config.toml").is_file())
+
+    app_target, ide_cli = find_antigravity_cli(resolved_home)
+    ide_ready = bool(ide_cli)
+
+    ext_root = data_root(resolved_home) / "antigravity/Extensions"
+    ext_dirs = sorted(ext_root.glob("openai.chatgpt-*")) if ext_root.is_dir() else []
+    ext_ready = len(ext_dirs) > 0
+
+    oc_root = resolved_home / f".openclaw-member-{preferred_member}"
+    if not (oc_root / "openclaw.json").is_file():
+        found_oc = [p for p in sorted(resolved_home.glob(".openclaw-member-*")) if (p / "openclaw.json").is_file()]
+        oc_root = found_oc[0] if found_oc else oc_root
+    oc_ready = (oc_root / "openclaw.json").is_file()
+
+    return {
+        "codex_cli": {
+            "installed": codex_ready,
+            "path": str(codex_bin) if codex_bin else "",
+            "detail": f"Đã cài ({codex_bin.name})" if codex_ready and codex_bin else "Chưa cài đặt",
+        },
+        "antigravity_ide": {
+            "installed": ide_ready,
+            "path": str(app_target or ide_cli or ""),
+            "detail": f"Đã sẵn sàng ({(app_target or ide_cli).name})" if ide_ready else "Chưa tìm thấy trên máy",
+        },
+        "codex_extension": {
+            "installed": ext_ready,
+            "path": str(ext_dirs[-1]) if ext_dirs else "",
+            "detail": f"Đã cài ({ext_dirs[-1].name})" if ext_ready else "Chưa cài vào Antigravity",
+        },
+        "openclaw": {
+            "installed": oc_ready,
+            "path": str(oc_root) if oc_ready else "",
+            "detail": f"Đã cài ({oc_root.name})" if oc_ready else "Chưa cài đặt",
+        },
+    }
+
+
 def is_auto_healable(stage: str, error: Exception) -> bool:
     if stage in {"input", "preflight", "provider", "telegram"}:
         return False

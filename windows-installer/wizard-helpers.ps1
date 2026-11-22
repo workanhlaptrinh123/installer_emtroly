@@ -671,6 +671,16 @@ function Get-EmTroLyActivationFilePath {
   return (Join-Path $env:LOCALAPPDATA 'AnhLapTrinh\EmTroLy\activation.dat')
 }
 
+function Get-EmTroLySignedOutFlagPath {
+  if (-not $env:LOCALAPPDATA) { return '' }
+  return (Join-Path $env:LOCALAPPDATA 'AnhLapTrinh\EmTroLy\signed-out.flag')
+}
+
+function Test-EmTroLyLicenseSignedOut {
+  $flag = Get-EmTroLySignedOutFlagPath
+  return (-not [string]::IsNullOrWhiteSpace($flag) -and (Test-Path -LiteralPath $flag -PathType Leaf))
+}
+
 function Get-EmTroLySetupDraftFilePath {
   if (-not $env:LOCALAPPDATA) { return '' }
   return (Join-Path $env:LOCALAPPDATA 'AnhLapTrinh\EmTroLy\setup-draft.dat')
@@ -795,6 +805,7 @@ function Unprotect-EmTroLyMachineActivationPayload([string]$Base64Cipher) {
 }
 
 function Get-EmTroLySavedLicenseKey {
+  if (Test-EmTroLyLicenseSignedOut) { return '' }
   $actFile = Get-EmTroLyActivationFilePath
   if ($actFile -and (Test-Path -LiteralPath $actFile -PathType Leaf)) {
     try {
@@ -866,6 +877,10 @@ function Save-EmTroLyLicenseKey {
   $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
   if ($env:LOCALAPPDATA) {
+    $signOutFlag = Get-EmTroLySignedOutFlagPath
+    if ($signOutFlag -and (Test-Path -LiteralPath $signOutFlag -PathType Leaf)) {
+      Remove-Item -LiteralPath $signOutFlag -Force -ErrorAction SilentlyContinue
+    }
     $sealedSaved = $false
     $actFile = Get-EmTroLyActivationFilePath
     if ($actFile) {
@@ -909,6 +924,156 @@ function Save-EmTroLyLicenseKey {
         Set-EmTroLyPrivateFileAcl $secFile
       } catch { }
     }
+  }
+}
+
+function Invoke-EmTroLyLicenseSignOut {
+  # UI-only license sign-out: keeps running OpenClaw Gateway & installed Codex CLI intact,
+  # but forces re-entering a valid codex.anhlaptrinh.vn API token on the app UI (even across restarts).
+  if ($env:LOCALAPPDATA) {
+    $actFile = Get-EmTroLyActivationFilePath
+    if ($actFile -and (Test-Path -LiteralPath $actFile -PathType Leaf)) {
+      Remove-Item -LiteralPath $actFile -Force -ErrorAction SilentlyContinue
+    }
+    $licFile = Join-Path $env:LOCALAPPDATA 'EmTroLyUI\license.key'
+    if (Test-Path -LiteralPath $licFile -PathType Leaf) {
+      Remove-Item -LiteralPath $licFile -Force -ErrorAction SilentlyContinue
+    }
+    $flagFile = Get-EmTroLySignedOutFlagPath
+    if ($flagFile) {
+      try {
+        [void][IO.Directory]::CreateDirectory((Split-Path -Parent $flagFile))
+        $flagBody = (@{ signedOutAt = [DateTimeOffset]::UtcNow.ToString('o') } | ConvertTo-Json -Compress) + "`n"
+        [IO.File]::WriteAllText($flagFile, $flagBody, (New-Object System.Text.UTF8Encoding($false)))
+        Set-EmTroLyPrivateFileAcl $flagFile
+      } catch { }
+    }
+    $existingDraft = Get-EmTroLySavedSetupDraft
+    if ($existingDraft -and $existingDraft.ai_api_key) {
+      $existingDraft.ai_api_key = ''
+      [void](Save-EmTroLySetupDraft -Draft $existingDraft)
+    }
+  }
+}
+
+function Get-EmTroLyModularStatus {
+  $codexInstalled = $false
+  $codexDetail = 'Chưa cài đặt — chỉ cần bấm Cài phần này (~20 giây, không cần Telegram)'
+  $emBase = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'EmTroLy' } else { '' }
+  if (Get-Command Find-EmTroLyCodexCli -ErrorAction SilentlyContinue) {
+    $cInfo = Find-EmTroLyCodexCli
+    $hasCfg = $emBase -and (Test-Path -LiteralPath (Join-Path $emBase 'Codex\config.toml') -PathType Leaf)
+    if ($cInfo.Available -and ($cInfo.Source -eq 'emtroly' -or $hasCfg)) {
+      $codexInstalled = $true
+      $codexDetail = "Đã sẵn sàng ($($cInfo.Executable))"
+    } elseif ($cInfo.Available) {
+      $codexInstalled = $true
+      $codexDetail = "Đã có trên máy ($($cInfo.Executable))"
+    }
+  }
+
+  $ideInstalled = $false
+  $idePath = ''
+  $ideVer = ''
+  $ideCandidates = @()
+  if ($emBase) {
+    $recFile = Join-Path $emBase 'editor-app-path.txt'
+    if (Test-Path -LiteralPath $recFile -PathType Leaf) {
+      try {
+        $recVal = ([IO.File]::ReadAllText($recFile, [System.Text.Encoding]::UTF8)).Trim()
+        if ($recVal) { $ideCandidates += $recVal }
+      } catch { }
+    }
+  }
+  if ($env:LOCALAPPDATA) {
+    $progLocal = Join-Path $env:LOCALAPPDATA 'Programs'
+    if (Test-Path -LiteralPath $progLocal -PathType Container) {
+      foreach ($d in @(Get-ChildItem -LiteralPath $progLocal -Directory -Filter 'EmTroLy-Antigravity-IDE-*' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
+        $ideCandidates += $d.FullName
+      }
+      $ideCandidates += (Join-Path $progLocal 'Antigravity IDE')
+      $ideCandidates += (Join-Path $progLocal 'Antigravity')
+    }
+  }
+  foreach ($pf in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+    if ($pf) {
+      $ideCandidates += (Join-Path $pf 'Antigravity IDE')
+      $ideCandidates += (Join-Path $pf 'Antigravity')
+    }
+  }
+  foreach ($candDir in @($ideCandidates | Select-Object -Unique)) {
+    if (-not $candDir -or -not (Test-Path -LiteralPath $candDir -PathType Container)) { continue }
+    $prodJson = Join-Path $candDir 'resources\app\product.json'
+    $exeA = Join-Path $candDir 'Antigravity IDE.exe'
+    $exeB = Join-Path $candDir 'Antigravity.exe'
+    if ((Test-Path -LiteralPath $prodJson -PathType Leaf) -and ((Test-Path -LiteralPath $exeA -PathType Leaf) -or (Test-Path -LiteralPath $exeB -PathType Leaf))) {
+      try {
+        $prod = [IO.File]::ReadAllText($prodJson, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        if ($prod.applicationName -in @('antigravity-ide', 'antigravity')) {
+          $ideInstalled = $true
+          $idePath = $candDir
+          $ideVer = [string]$prod.version
+          break
+        }
+      } catch { }
+    }
+  }
+  $ideDetail = if ($ideInstalled) { "Đã cài đặt (v$ideVer · $idePath)" } else { 'Chưa cài đặt — tự tải và cài đặt Antigravity IDE chuẩn Google (~190 MB)' }
+
+  $extInstalled = $false
+  $extVer = ''
+  if ($emBase) {
+    $extRoot = Join-Path $emBase 'Antigravity\Extensions'
+    if (Test-Path -LiteralPath $extRoot -PathType Container) {
+      foreach ($ed in @(Get-ChildItem -LiteralPath $extRoot -Directory -Filter 'openai.chatgpt-*' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
+        $pkgPath = Join-Path $ed.FullName 'package.json'
+        $binPath = Join-Path $ed.FullName 'bin\windows-x86_64\codex.exe'
+        if ((Test-Path -LiteralPath $pkgPath -PathType Leaf) -and (Test-Path -LiteralPath $binPath -PathType Leaf)) {
+          try {
+            $pkg = [IO.File]::ReadAllText($pkgPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            if ($pkg.publisher -eq 'openai' -and $pkg.name -eq 'chatgpt') {
+              $extInstalled = $true
+              $extVer = [string]$pkg.version
+              break
+            }
+          } catch { }
+        }
+      }
+    }
+  }
+  $desktopDir = [Environment]::GetFolderPath('Desktop')
+  $progMenu = [Environment]::GetFolderPath('Programs')
+  $hasShortcut = ($desktopDir -and (Test-Path -LiteralPath (Join-Path $desktopDir 'EmTroLy - Antigravity.lnk') -PathType Leaf)) -or
+    ($progMenu -and (Test-Path -LiteralPath (Join-Path $progMenu 'EmTroLy - Antigravity.lnk') -PathType Leaf))
+  $extDetail = if ($extInstalled -and $hasShortcut) {
+    "Đã cài đặt (v$extVer · Đã có lối tắt EmTroLy - Antigravity)"
+  } elseif ($extInstalled) {
+    "Đã cài v$extVer (chưa thấy lối tắt Desktop — bấm Cài lại để khôi phục)"
+  } else {
+    'Chưa cài đặt — cài tiện ích Codex vào Antigravity riêng & tạo lối tắt Desktop'
+  }
+
+  $ocState = if (Get-Command Get-EmTroLyInstalledState -ErrorAction SilentlyContinue) { Get-EmTroLyInstalledState } else { $null }
+  $ocInstalled = ($ocState -and [bool]$ocState.OpenClawInstalled)
+  $zaloInstalled = ($ocState -and [bool]$ocState.ZaloInstalled)
+  $ocDetail = if ($ocInstalled) {
+    $zTxt = if ($zaloInstalled) { 'Có Zalo QR' } else { 'Không kèm Zalo' }
+    "Đã cài đặt ($($ocState.AssistantName) · Cổng $($ocState.GatewayPort) · $zTxt)"
+  } else {
+    'Chưa cài đặt — cài Node.js, Python, FFmpeg, OpenClaw 2026.11.4 & Gateway'
+  }
+
+  return [pscustomobject]@{
+    CodexCliInstalled       = $codexInstalled
+    CodexCliDetail          = $codexDetail
+    AntigravityInstalled    = $ideInstalled
+    AntigravityPath         = $idePath
+    AntigravityDetail       = $ideDetail
+    CodexExtensionInstalled = ($extInstalled -and $hasShortcut)
+    CodexExtensionDetail    = $extDetail
+    OpenClawInstalled       = $ocInstalled
+    ZaloInstalled           = $zaloInstalled
+    OpenClawDetail          = $ocDetail
   }
 }
 

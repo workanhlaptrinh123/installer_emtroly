@@ -1,4 +1,4 @@
-function Invoke-ZaloPluginCli {
+﻿function Invoke-ZaloPluginCli {
   param([string]$Node, [string]$CliEntry, [string[]]$Arguments)
   $commandArguments = @($CliEntry) + $Arguments
   foreach ($argument in $commandArguments) {

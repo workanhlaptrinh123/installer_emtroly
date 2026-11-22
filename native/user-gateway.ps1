@@ -122,7 +122,7 @@ function Invoke-InstanceCli {
       Wait-Process -Id ([int]$record.supervisorPid) -Timeout 10 -ErrorAction SilentlyContinue
     }
     if ($target) {
-      Stop-Process -Id $record.pid -ErrorAction Stop
+      Stop-Process -Id $record.pid -Force -ErrorAction SilentlyContinue
       Wait-Process -Id $record.pid -Timeout 30 -ErrorAction SilentlyContinue
     }
     Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue

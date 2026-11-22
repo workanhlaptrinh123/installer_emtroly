@@ -54,6 +54,16 @@ def get_activation_file_path() -> Path:
     return base / "anhlaptrinh" / "emtroly" / "activation.dat"
 
 
+def get_signed_out_flag_path() -> Path:
+    cfg_root = os.environ.get("XDG_CONFIG_HOME", "").strip()
+    base = Path(cfg_root) if cfg_root else (Path.home() / ".config")
+    return base / "anhlaptrinh" / "emtroly" / "signed-out.flag"
+
+
+def is_signed_out() -> bool:
+    return get_signed_out_flag_path().is_file()
+
+
 def _derive_keystream(machine_id: str, nonce: bytes, length: int) -> bytes:
     out = bytearray()
     counter = 0
@@ -127,10 +137,18 @@ def save_license_key(api_key: str) -> Path:
         os.chmod(target, 0o600)
     except OSError:
         pass
+    flag = get_signed_out_flag_path()
+    try:
+        if flag.exists():
+            flag.unlink()
+    except OSError:
+        pass
     return target
 
 
 def get_saved_license_key() -> str:
+    if is_signed_out():
+        return ""
     target = get_activation_file_path()
     if not target.is_file():
         return ""
@@ -147,6 +165,28 @@ def clear_saved_license_key() -> None:
             target.unlink()
     except OSError:
         pass
+
+
+def sign_out_license() -> None:
+    """Sign out of the app UI license without disturbing running background services/CLI."""
+    clear_saved_license_key()
+    flag = get_signed_out_flag_path()
+    flag.parent.mkdir(parents=True, exist_ok=True)
+    flag.write_text(
+        json.dumps({"signedOutAt": datetime.now(timezone.utc).isoformat()}) + "\n",
+        encoding="utf-8",
+    )
+    try:
+        os.chmod(flag, 0o600)
+    except OSError:
+        pass
+    draft = get_saved_setup_draft()
+    if isinstance(draft, dict) and draft.get("ai_api_key"):
+        draft["ai_api_key"] = ""
+        try:
+            save_setup_draft(draft)
+        except OSError:
+            pass
 
 
 def get_setup_draft_file_path() -> Path:

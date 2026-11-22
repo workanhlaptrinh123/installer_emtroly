@@ -550,6 +550,165 @@ class WindowsCustomerScenarioTests(unittest.TestCase):
                     except Exception:
                         pass
 
+    def test_license_sign_out_locks_ui_only_and_preserves_running_openclaw_and_codex(self):
+        helpers = ROOT / "windows-installer/wizard-helpers.ps1"
+        codex_ps1 = ROOT / "windows-installer/codex-cli.ps1"
+        manage_ps1 = ROOT / "windows-installer/manage-instance.ps1"
+        with tempfile.TemporaryDirectory(prefix="emtroly-signout-") as td:
+            temp = Path(td)
+            home = temp / "home"
+            local = temp / "local"
+            (home / "openclaw").mkdir(parents=True)
+            (local / "EmTroLy/Codex").mkdir(parents=True)
+
+            # Pre-existing installed OpenClaw & Codex secrets that must keep running undisturbed
+            (home / "openclaw/member-provider.secret").write_text("sk-keep-running-secret\n", encoding="utf-8")
+            (local / "EmTroLy/Codex/auth.json").write_text('{"OPENAI_API_KEY":"sk-keep-running-secret"}', encoding="utf-8")
+            (local / "EmTroLy/Codex/config.toml").write_text('model = "gpt-6.2-sol"\n', encoding="utf-8")
+
+            env = {**os.environ, "USERPROFILE": str(home), "LOCALAPPDATA": str(local)}
+            res = run_ps(
+                f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{codex_ps1}", [Text.Encoding]::UTF8)))\n'
+                f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{manage_ps1}", [Text.Encoding]::UTF8)))\n'
+                f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{helpers}", [Text.Encoding]::UTF8)))\n'
+                "$ErrorActionPreference = 'Stop'\n"
+                "Save-EmTroLyLicenseKey -ApiKey 'sk-keep-running-secret'\n"
+                "[void](Save-EmTroLySetupDraft -Draft @{ assistant_name = 'Trợ lý A'; owner_ids = '8764883034'; ai_api_key = 'sk-keep-running-secret' })\n"
+                "if ((Get-EmTroLySavedLicenseKey) -cne 'sk-keep-running-secret') { throw 'initial-key-not-saved' }\n"
+                "Invoke-EmTroLyLicenseSignOut\n"
+                "if (-not (Test-EmTroLyLicenseSignedOut)) { throw 'signed-out-flag-missing' }\n"
+                "# Must NOT fallback to openclaw/member-provider.secret or Codex/auth.json while signed out!\n"
+                "if ((Get-EmTroLySavedLicenseKey) -ne '') { throw 'signed-out-bypassed-by-legacy-secret' }\n"
+                "$draftAfter = Get-EmTroLySavedSetupDraft\n"
+                "if ($draftAfter.ai_api_key -ne '' -or $draftAfter.owner_ids -cne '8764883034') { throw 'draft-not-scrubbed-properly' }\n"
+                "# Background secrets MUST remain intact so running bots/CLI are undisturbed\n"
+                "if (([IO.File]::ReadAllText((Join-Path $env:USERPROFILE 'openclaw\\member-provider.secret'))).Trim() -cne 'sk-keep-running-secret') { throw 'openclaw-secret-modified' }\n"
+                "if (([IO.File]::ReadAllText((Join-Path $env:LOCALAPPDATA 'EmTroLy\\Codex\\auth.json'))) -notmatch 'sk-keep-running-secret') { throw 'codex-auth-modified' }\n"
+                "# Re-authenticating with a new codex.anhlaptrinh.vn key clears signed-out state\n"
+                "Save-EmTroLyLicenseKey -ApiKey 'sk-new-verified-codex-token'\n"
+                "if (Test-EmTroLyLicenseSignedOut) { throw 'signed-out-flag-not-cleared' }\n"
+                "if ((Get-EmTroLySavedLicenseKey) -cne 'sk-new-verified-codex-token') { throw 'relogin-key-mismatch' }\n"
+                "Write-Output 'UI_LICENSE_SIGNOUT_OK'\n",
+                env=env,
+            )
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertIn("UI_LICENSE_SIGNOUT_OK", res.stdout)
+
+    def test_modular_installer_runs_codex_cli_and_ide_only_without_telegram_and_smoke_tests_gui(self):
+        # 1. Verify wizard.ps1 -SmokeTest loads ViewModular + SignOut buttons cleanly
+        smoke = subprocess.run(
+            [
+                SHELL, "-STA", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                "-File", str(ROOT / "windows-installer/wizard.ps1"),
+                "-PayloadRoot", str(ROOT),
+                "-SmokeTest",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(smoke.returncode, 0, smoke.stdout + smoke.stderr)
+
+        # 2. Verify run-native-install.ps1 -Components 'codex-cli' succeeds WITHOUT Telegram/Owner/Group!
+        class MockProviderModelsHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = json.dumps({"data": [{"id": "gpt-6.2-sol"}, {"id": "gpt-6.2-astra"}]}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), MockProviderModelsHandler)
+        port = server.server_address[1]
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        try:
+            with tempfile.TemporaryDirectory(prefix="emtroly-mod-win-") as td:
+                temp = Path(td)
+                home = temp / "home"
+                local = temp / "local"
+                (home / "Desktop").mkdir(parents=True)
+                codex_bin_dir = local / "EmTroLy/Codex/bin"
+                codex_bin_dir.mkdir(parents=True)
+                (codex_bin_dir / "codex.exe").write_text("dummy-codex", encoding="utf-8")
+
+                # Stage payload redirecting provider URL to local mock server for isolated test
+                staged_runner = temp / "run-mod.ps1"
+                runner_src = (ROOT / "windows-installer/run-native-install.ps1").read_text(encoding="utf-8-sig")
+                runner_src = runner_src.replace(
+                    'Uri "$baseUrl/models"',
+                    f'Uri "http://127.0.0.1:{port}/v1/models"',
+                )
+                staged_runner.write_text(runner_src, encoding="utf-8-sig")
+
+                settings_file = temp / "mod-settings.json"
+                log_file = temp / "mod-status.txt"
+                settings_file.write_text(
+                    json.dumps({
+                        "base_url": "https://codex.anhlaptrinh.vn/v1",
+                        "model": "gpt-6.2-astra",
+                        "ai_api_key": "sk-modular-only-key",
+                        # Intentionally NO telegram_token, NO owner_ids, NO group_id!
+                    }),
+                    encoding="utf-8",
+                )
+                env = {**os.environ, "USERPROFILE": str(home), "LOCALAPPDATA": str(local), "TEST_MODE": "modular-unit"}
+                mod_proc = subprocess.run(
+                    [
+                        SHELL, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                        "-File", str(staged_runner),
+                        "-SettingsFile", str(settings_file),
+                        "-PayloadRoot", str(ROOT),
+                        "-LogFile", str(log_file),
+                        "-Components", "codex-cli",
+                    ],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=35,
+                )
+                status_out = log_file.read_text(encoding="utf-8") if log_file.exists() else ""
+                self.assertEqual(mod_proc.returncode, 0, status_out + mod_proc.stdout + mod_proc.stderr)
+                self.assertIn("Hoàn tất: Đã cài đặt thành công phần đã chọn (Codex CLI)!", status_out)
+                cfg_toml = (local / "EmTroLy/Codex/config.toml").read_text(encoding="utf-8")
+                self.assertIn('model = "gpt-6.2-astra"', cfg_toml)
+                self.assertTrue((local / "OpenClaw/bin/codex-emtroly.cmd").is_file())
+
+                # 3. Verify Get-EmTroLyModularStatus reports CodexCliInstalled=True & OpenClawInstalled=False
+                st_res = run_ps(
+                    f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{ROOT / "windows-installer/codex-cli.ps1"}", [Text.Encoding]::UTF8)))\n'
+                    f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{ROOT / "windows-installer/manage-instance.ps1"}", [Text.Encoding]::UTF8)))\n'
+                    f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{ROOT / "windows-installer/wizard-helpers.ps1"}", [Text.Encoding]::UTF8)))\n'
+                    "$ms = Get-EmTroLyModularStatus\n"
+                    "if (-not $ms.CodexCliInstalled -or $ms.OpenClawInstalled) { throw 'modular-status-mismatch' }\n"
+                    "Write-Output 'MODULAR_STATUS_OK'\n",
+                    env=env,
+                )
+                self.assertEqual(st_res.returncode, 0, st_res.stdout + st_res.stderr)
+                self.assertIn("MODULAR_STATUS_OK", st_res.stdout)
+
+                # 4. Verify sign-release.ps1 no-op gracefully when no cert env vars are set
+                dummy_exe = temp / "emtroly.exe"
+                dummy_exe.write_bytes(b"MZ-test")
+                sign_res = subprocess.run(
+                    [
+                        SHELL, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                        "-File", str(ROOT / "windows-installer/sign-release.ps1"),
+                        "-FilePath", str(dummy_exe),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                self.assertEqual(sign_res.returncode, 0, sign_res.stdout + sign_res.stderr)
+        finally:
+            server.shutdown()
+            server.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

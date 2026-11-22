@@ -202,20 +202,25 @@ def main():
 
     tab_connect = ttk.Frame(notebook, style="Card.TFrame", padding=20)
     tab_profile = ttk.Frame(notebook, style="Card.TFrame", padding=20)
+    tab_modular = ttk.Frame(notebook, style="Card.TFrame", padding=20)
     tab_zalo_qr = ttk.Frame(notebook, style="Card.TFrame", padding=20)
     tab_codex = ttk.Frame(notebook, style="Card.TFrame", padding=20)
     notebook.add(tab_connect, text="1. Kết nối & Bảo mật")
-    notebook.add(tab_profile, text="2. Tùy chọn & Cài đặt")
+    notebook.add(tab_profile, text="2. Cài trọn gói A–Z")
+    notebook.add(tab_modular, text="Cài từng phần")
     notebook.add(tab_zalo_qr, text="Quét QR Zalo")
     notebook.add(tab_codex, text="Codex CLI")
 
+    header_actions = ttk.Frame(header, style="Header.TFrame")
+    header_actions.grid(row=0, column=2, rowspan=2, sticky="e")
+
     quick_btn = ttk.Button(
-        header,
+        header_actions,
         text="Mở Codex CLI",
         style="Secondary.TButton",
-        command=lambda: notebook.select(tab_connect if notebook.index("current") == 3 else tab_codex),
+        command=lambda: notebook.select(tab_connect if notebook.index("current") == 4 else tab_codex),
     )
-    quick_btn.grid(row=0, column=2, rowspan=2, sticky="e")
+    quick_btn.pack(side="left", padx=(0, 8))
 
     variables = {}
     secret_entries = []
@@ -788,12 +793,154 @@ def main():
     run_codex_btn.pack(side="right")
 
     def on_tab_changed(_event=None):
-        on_codex = notebook.index("current") == 3
+        cur_idx = notebook.index("current")
+        on_codex = cur_idx == 4
         quick_btn.configure(text="← Về phần Cài đặt" if on_codex else "Mở Codex CLI")
         if on_codex:
             refresh_codex_state()
+        if cur_idx == 2:
+            refresh_modular_status()
 
     notebook.bind("<<NotebookTabChanged>>", on_tab_changed)
+
+    # =========================================================================
+    # TAB MODULAR: MANUAL STEP-BY-STEP COMPONENT INSTALLATION
+    # =========================================================================
+    tab_modular.columnconfigure(1, weight=1)
+    ttk.Label(
+        tab_modular,
+        text="Cài đặt từng phần thủ công (Chọn lẻ từng công cụ hoặc tích nhiều phần)",
+        style="Section.TLabel",
+    ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 4))
+    ttk.Label(
+        tab_modular,
+        text="Phần 1, 2, 3 dùng trực tiếp Khóa bản quyền codex.anhlaptrinh.vn (không cần nhập Telegram). Phần 4 sử dụng thông tin Telegram ở Tab 1.",
+        style="HeaderSub.TLabel",
+        wraplength=760,
+    ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(0, 10))
+
+    mod_checks = {
+        "codex-cli": tk.BooleanVar(value=True),
+        "antigravity-ide": tk.BooleanVar(value=False),
+        "codex-extension": tk.BooleanVar(value=False),
+        "openclaw": tk.BooleanVar(value=False),
+    }
+    mod_status_vars = {
+        "codex-cli": tk.StringVar(value="Đang kiểm tra..."),
+        "antigravity-ide": tk.StringVar(value="Đang kiểm tra..."),
+        "codex-extension": tk.StringVar(value="Đang kiểm tra..."),
+        "openclaw": tk.StringVar(value="Đang kiểm tra..."),
+    }
+    mod_specs = [
+        ("codex-cli", "1. Codex CLI riêng (codex)", "Cài đặt và cấu hình lệnh codex chuẩn codex.anhlaptrinh.vn/v1 (~20 giây, không cần Telegram)."),
+        ("antigravity-ide", "2. Antigravity IDE riêng", "Kiểm tra Antigravity IDE trên máy, gỡ quarantine macOS và tạo hồ sơ khởi chạy riêng."),
+        ("codex-extension", "3. Codex Extension trong Antigravity", "Cài tiện ích openai.chatgpt vào Antigravity IDE riêng và tạo lối tắt EmTroLy - Antigravity."),
+        ("openclaw", "4. Trợ lý OpenClaw riêng (+ Zalo tùy chọn)", "Cài Node.js, Python, FFmpeg, OpenClaw 2026.11.4 & Gateway (cần điền Telegram ở Tab 1)."),
+    ]
+    mod_single_btns = []
+
+    def refresh_modular_status():
+        try:
+            st_map = codex_setup.get_modular_status(preferred_member=variables["member"].get().strip() or "emtroly")
+            mapping = {
+                "codex-cli": st_map["codex_cli"],
+                "antigravity-ide": st_map["antigravity_ide"],
+                "codex-extension": st_map["codex_extension"],
+                "openclaw": st_map["openclaw"],
+            }
+            for comp_id, info in mapping.items():
+                prefix = "✓ " if info["installed"] else "○ "
+                mod_status_vars[comp_id].set(prefix + info["detail"])
+        except Exception:
+            pass
+
+    def start_modular_components(selected_list):
+        nonlocal busy
+        if busy:
+            return
+        if not selected_list:
+            messagebox.showwarning("Chưa chọn thành phần", "Hãy tích chọn ít nhất 1 thành phần để cài đặt.")
+            return
+        if "codex-extension" in selected_list and "antigravity-ide" not in selected_list:
+            st_now = codex_setup.get_modular_status()
+            if not st_now["antigravity_ide"]["installed"]:
+                if messagebox.askyesno(
+                    "Cần Antigravity IDE trước",
+                    "Máy chưa cấu hình Antigravity IDE (Phần 2). Bạn có muốn kiểm tra/chuẩn bị Phần 2 trước rồi cài luôn Codex Extension không?",
+                ):
+                    selected_list = ["antigravity-ide", *selected_list]
+                else:
+                    return
+        vals = collect_form_values()
+        if not vals.get("ai_api_key"):
+            vals["ai_api_key"] = license_gate.get_saved_license_key()
+        if "openclaw" in selected_list and not consent.get():
+            if not messagebox.askyesno(
+                "Xác nhận Full Exec cho OpenClaw",
+                "Cài đặt Phần 4 (OpenClaw) sẽ cấp quyền Full Exec cho các Owner & nhóm Telegram đã chọn. Bạn đồng ý tiếp tục?",
+            ):
+                return
+            consent.set(True)
+            vals["accept_full_access"] = True
+
+        busy = True
+        button.state(["disabled"])
+        mod_run_selected_btn.state(["disabled"])
+        for b_ref in mod_single_btns:
+            b_ref.state(["disabled"])
+        exit_btn.configure(text="Dừng & Thoát")
+        mod_progress_var.set("Đang bắt đầu cài đặt thành phần: " + ", ".join(selected_list) + "...")
+
+        def _mod_worker():
+            try:
+                res = runner.install_components(
+                    selected_list,
+                    vals,
+                    source,
+                    progress=lambda msg: events.put(("mod_progress", msg)),
+                )
+                events.put(("mod_success", res))
+            except Exception as exc:
+                err_txt = codex_setup.scrub_secrets(str(exc), (vals.get("telegram_token"), vals.get("ai_api_key")))
+                events.put(("mod_failure", err_txt))
+
+        threading.Thread(target=_mod_worker, daemon=True).start()
+
+    for idx_m, (comp_key, comp_title, comp_desc) in enumerate(mod_specs, start=2):
+        row_frame = tk.Frame(tab_modular, bg="#F8FAFC", bd=1, relief="solid", padx=12, pady=9)
+        row_frame.grid(row=idx_m, column=0, columnspan=3, sticky="ew", pady=4)
+        row_frame.columnconfigure(1, weight=1)
+        ttk.Checkbutton(row_frame, variable=mod_checks[comp_key]).grid(row=0, column=0, rowspan=2, padx=(0, 10), sticky="nw")
+        ttk.Label(row_frame, text=comp_title, font=font_bold, background="#F8FAFC").grid(row=0, column=1, sticky="w")
+        ttk.Label(row_frame, textvariable=mod_status_vars[comp_key], font=font_hint, foreground="#1D4ED8", background="#F8FAFC").grid(
+            row=0, column=2, padx=(8, 10), sticky="e"
+        )
+        ttk.Label(row_frame, text=comp_desc, font=font_hint, foreground="#475569", background="#F8FAFC", wraplength=540).grid(
+            row=1, column=1, columnspan=2, sticky="w", pady=(2, 0)
+        )
+        single_b = ttk.Button(
+            row_frame,
+            text="Cài phần này",
+            style="Secondary.TButton",
+            command=lambda k=comp_key: start_modular_components([k]),
+        )
+        single_b.grid(row=0, column=3, rowspan=2, sticky="e")
+        mod_single_btns.append(single_b)
+
+    mod_progress_var = tk.StringVar(value="Mẹo: Tích chọn các phần bạn cần hoặc bấm 'Cài phần này' ở từng dòng.")
+    ttk.Label(tab_modular, textvariable=mod_progress_var, style="Hint.TLabel", wraplength=760, padding=10).grid(
+        row=6, column=0, columnspan=3, sticky="ew", pady=(8, 10)
+    )
+    mod_footer = ttk.Frame(tab_modular, style="Card.TFrame")
+    mod_footer.grid(row=7, column=0, columnspan=3, sticky="ew")
+    ttk.Button(mod_footer, text="Làm mới trạng thái", style="Secondary.TButton", command=refresh_modular_status).pack(side="left")
+    mod_run_selected_btn = ttk.Button(
+        mod_footer,
+        text="Cài các phần đã tích chọn",
+        style="Primary.TButton",
+        command=lambda: start_modular_components([k for k, v in mod_checks.items() if v.get()]),
+    )
+    mod_run_selected_btn.pack(side="right")
 
     def collect_form_values():
         vals = {key: variable.get() for key, variable in variables.items()}
@@ -890,9 +1037,32 @@ def main():
             if kind == "progress":
                 status.set(value)
                 refresh_codex_state()
+            elif kind == "mod_progress":
+                mod_progress_var.set(value)
+                status.set(value)
+                refresh_codex_state()
+            elif kind in ("mod_success", "mod_failure"):
+                busy = False
+                button.state(["!disabled"])
+                mod_run_selected_btn.state(["!disabled"])
+                for b_ref in mod_single_btns:
+                    b_ref.state(["!disabled"])
+                exit_btn.configure(text="Thoát")
+                refresh_codex_state()
+                refresh_modular_status()
+                if kind == "mod_success":
+                    done_names = ", ".join(value.get("components", []))
+                    mod_progress_var.set(f"✓ Hoàn tất cài đặt thành phần: {done_names}!")
+                    messagebox.showinfo("Hoàn tất cài từng phần", f"Đã cài đặt thành công: {done_names}!")
+                else:
+                    mod_progress_var.set("Chưa hoàn tất: " + value)
+                    messagebox.showerror("Chưa hoàn tất", value)
             else:
                 busy = False
                 button.state(["!disabled"])
+                mod_run_selected_btn.state(["!disabled"])
+                for b_ref in mod_single_btns:
+                    b_ref.state(["!disabled"])
                 exit_btn.configure(text="Thoát")
                 refresh_codex_state()
                 if kind == "success":
@@ -1026,9 +1196,26 @@ def main():
             consent.set(bool(saved_unix_draft["accept_full_access"]))
         status.set("✓ Đã tự động điền lại các thông số bạn đã nhập ở lần trước (lưu mã hóa an toàn trên máy).")
 
-    # One-time per-machine license activation gate (matches Windows codex.anhlaptrinh.vn lock)
+    # One-time per-machine license activation gate + Sign-out lock (matches Windows codex.anhlaptrinh.vn lock)
     saved_unix_key = license_gate.get_saved_license_key()
     license_overlay = tk.Frame(window, bg="#F3F6FB")
+    card = tk.Frame(license_overlay, bg="#FFFFFF", bd=1, relief="solid", padx=28, pady=24)
+    card.place(relx=0.5, rely=0.5, anchor="center", width=460)
+    ttk.Label(card, text="Kích hoạt Em Trợ Lý", style="HeaderTitle.TLabel").pack(pady=(0, 6))
+    ttk.Label(
+        card,
+        text="Nhập Provider API Key trên codex.anhlaptrinh.vn để mở khóa ứng dụng.",
+        style="HeaderSub.TLabel",
+        wraplength=400,
+        justify="center",
+    ).pack(pady=(0, 14))
+    lic_var = tk.StringVar()
+    lic_entry = ttk.Entry(card, textvariable=lic_var, show="*")
+    lic_entry.pack(fill="x", pady=(0, 8))
+    lic_msg = tk.StringVar(value="")
+    ttk.Label(card, textvariable=lic_msg, foreground="#B91C1C", background="#FFFFFF", wraplength=400).pack(pady=(0, 10))
+    lic_btns = ttk.Frame(card, style="Card.TFrame")
+    lic_btns.pack(fill="x")
 
     def unlock_unix_app(verified_key: str, *, persist: bool = True):
         clean_k = (verified_key or "").strip()
@@ -1040,53 +1227,69 @@ def main():
                     pass
             if not variables["ai_api_key"].get().strip():
                 variables["ai_api_key"].set(clean_k)
+        lic_var.set("")
+        lic_msg.set("")
         license_overlay.place_forget()
+        signout_lic_btn.pack(side="left")
+
+    def lock_and_sign_out_unix_license():
+        if busy or codex_busy:
+            messagebox.showwarning("Đang bận", "Hãy đợi tác vụ đang chạy hoàn tất trước khi thoát bản quyền.")
+            return
+        if not messagebox.askyesno(
+            "Xác nhận thoát bản quyền",
+            "Bạn có muốn thoát bản quyền trên giao diện ứng dụng không?\n\n"
+            "(Các trợ lý OpenClaw / CLI đã cài trước đó vẫn chạy bình thường, nhưng bạn sẽ bắt buộc phải nhập lại Token codex.anhlaptrinh.vn để mở lại ứng dụng này.)",
+        ):
+            return
+        license_gate.sign_out_license()
+        variables["ai_api_key"].set("")
+        lic_var.set("")
+        lic_msg.set("Đã thoát bản quyền ứng dụng. Vui lòng nhập lại API Key trên codex.anhlaptrinh.vn để tiếp tục.")
+        signout_lic_btn.pack_forget()
+        license_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
+        license_overlay.lift()
+        lic_entry.focus_set()
+
+    signout_lic_btn = ttk.Button(
+        header_actions,
+        text="Thoát bản quyền",
+        style="Secondary.TButton",
+        command=lock_and_sign_out_unix_license,
+    )
+
+    def do_activate():
+        key_val = lic_var.get().strip()
+        act_btn.state(["disabled"])
+        lic_msg.set("Đang xác thực bản quyền với codex.anhlaptrinh.vn...")
+
+        def _check():
+            res = license_gate.verify_license_key(key_val)
+
+            def _finish():
+                act_btn.state(["!disabled"])
+                if res["valid"]:
+                    unlock_unix_app(key_val, persist=True)
+                else:
+                    lic_msg.set(res["message"])
+
+            window.after(0, _finish)
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    ttk.Button(lic_btns, text="Thoát", style="Secondary.TButton", command=window.destroy).pack(side="left")
+    act_btn = ttk.Button(lic_btns, text="Kích hoạt & Mở khóa", style="Primary.TButton", command=do_activate)
+    act_btn.pack(side="right")
+    lic_entry.bind("<Return>", lambda _e: do_activate())
 
     if saved_unix_key:
         unlock_unix_app(saved_unix_key, persist=False)
     else:
         license_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
-        card = tk.Frame(license_overlay, bg="#FFFFFF", bd=1, relief="solid", padx=28, pady=24)
-        card.place(relx=0.5, rely=0.5, anchor="center", width=460)
-        ttk.Label(card, text="Kích hoạt Em Trợ Lý", style="HeaderTitle.TLabel").pack(pady=(0, 6))
-        ttk.Label(
-            card,
-            text="Nhập Provider API Key trên codex.anhlaptrinh.vn — chỉ cần kích hoạt 1 lần duy nhất trên máy này.",
-            style="HeaderSub.TLabel",
-            wraplength=400,
-            justify="center",
-        ).pack(pady=(0, 14))
-        lic_var = tk.StringVar()
-        lic_entry = ttk.Entry(card, textvariable=lic_var, show="*")
-        lic_entry.pack(fill="x", pady=(0, 8))
-        lic_msg = tk.StringVar(value="")
-        ttk.Label(card, textvariable=lic_msg, foreground="#B91C1C", background="#FFFFFF", wraplength=400).pack(pady=(0, 10))
-        lic_btns = ttk.Frame(card, style="Card.TFrame")
-        lic_btns.pack(fill="x")
-
-        def do_activate():
-            key_val = lic_var.get().strip()
-            act_btn.state(["disabled"])
-            lic_msg.set("Đang xác thực bản quyền...")
-
-            def _check():
-                res = license_gate.verify_license_key(key_val)
-
-                def _finish():
-                    act_btn.state(["!disabled"])
-                    if res["valid"]:
-                        unlock_unix_app(key_val, persist=True)
-                    else:
-                        lic_msg.set(res["message"])
-
-                window.after(0, _finish)
-
-            threading.Thread(target=_check, daemon=True).start()
-
-        ttk.Button(lic_btns, text="Thoát", style="Secondary.TButton", command=window.destroy).pack(side="left")
-        act_btn = ttk.Button(lic_btns, text="Kích hoạt & Mở khóa", style="Primary.TButton", command=do_activate)
-        act_btn.pack(side="right")
+        license_overlay.lift()
         lic_entry.focus_set()
+
+    refresh_modular_status()
 
     refresh_codex_state()
     window.protocol("WM_DELETE_WINDOW", close)

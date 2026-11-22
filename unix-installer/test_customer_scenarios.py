@@ -9,10 +9,13 @@ import os
 from pathlib import Path
 import ssl
 import stat
+import sys
 import tempfile
 import unittest
 import urllib.error
 from unittest.mock import MagicMock, patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import cli
 import net_utils
@@ -244,6 +247,110 @@ class UnixCustomerScenarioTests(unittest.TestCase):
                     patch.object(net_utils.subprocess, "run") as mock_run_linux:
                 self.assertFalse(net_utils.clear_macos_quarantine(binary))
                 mock_run_linux.assert_not_called()
+
+    def test_license_sign_out_locks_ui_only_and_forces_reentry_across_restarts(self):
+        import codex_setup
+        import license_gate
+
+        with tempfile.TemporaryDirectory() as td:
+            cfg_dir = Path(td) / "xdg"
+            home = Path(td) / "home"
+            cfg_dir.mkdir()
+            home.mkdir()
+            # Existing background OpenClaw & Codex secrets must stay untouched on UI sign-out
+            oc_secret = home / ".openclaw-member-emtroly/member-provider.secret"
+            oc_secret.parent.mkdir(parents=True)
+            oc_secret.write_text("sk-running-bot-secret\n", encoding="utf-8")
+            codex_auth = codex_setup.codex_home_dir(home) / "auth.json"
+            codex_auth.parent.mkdir(parents=True)
+            codex_auth.write_text('{"OPENAI_API_KEY":"sk-running-bot-secret"}\n', encoding="utf-8")
+
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(cfg_dir), "EMTROLY_TEST_MACHINE_ID": "mac-signout-1"}):
+                license_gate.save_license_key("sk-codex-anhlaptrinh-key-1")
+                license_gate.save_setup_draft(
+                    {
+                        "member": "emtroly",
+                        "assistant_name": "Trợ Lý Của Anh",
+                        "owner_ids": "8764883034",
+                        "ai_api_key": "sk-codex-anhlaptrinh-key-1",
+                    }
+                )
+                self.assertEqual(license_gate.get_saved_license_key(), "sk-codex-anhlaptrinh-key-1")
+                self.assertFalse(license_gate.is_signed_out())
+
+                # Sign out via CLI --logout-license
+                rc = cli.main(["--logout-license"])
+                self.assertEqual(rc, 0)
+                self.assertTrue(license_gate.is_signed_out())
+                self.assertEqual(license_gate.get_saved_license_key(), "")
+
+                # Draft preserves non-secret fields but clears ai_api_key
+                draft_after = license_gate.get_saved_setup_draft()
+                self.assertIsNotNone(draft_after)
+                self.assertEqual(draft_after["ai_api_key"], "")
+                self.assertEqual(draft_after["owner_ids"], "8764883034")
+
+                # Background OpenClaw & Codex CLI files remain 100% untouched
+                self.assertEqual(oc_secret.read_text(encoding="utf-8").strip(), "sk-running-bot-secret")
+                self.assertIn("sk-running-bot-secret", codex_auth.read_text(encoding="utf-8"))
+
+                # Re-entering a new verified codex.anhlaptrinh.vn key clears signed-out flag
+                license_gate.save_license_key("sk-codex-anhlaptrinh-key-2")
+                self.assertFalse(license_gate.is_signed_out())
+                self.assertEqual(license_gate.get_saved_license_key(), "sk-codex-anhlaptrinh-key-2")
+
+    def test_modular_install_components_without_telegram_for_codex_and_antigravity(self):
+        import codex_setup
+        import license_gate
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td).resolve()
+            cfg_dir = home / ".config"
+            fake_node = home / "node"
+            fake_npm = home / "npm"
+            fake_codex = codex_setup.data_root(home) / "codex-cli/node_modules/.bin/codex"
+            fake_ide = home / "antigravity-cli"
+            for f in (fake_node, fake_npm, fake_ide):
+                f.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                f.chmod(0o755)
+            fake_codex.parent.mkdir(parents=True, exist_ok=True)
+            fake_codex.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            fake_codex.chmod(0o755)
+
+            ai_only_values = {
+                "ai_api_key": "sk-modular-codex-key",
+                "model": "gpt-6.2-sol",
+                "base_url": "https://codex.anhlaptrinh.vn/v1",
+                # Notice: NO telegram_token, NO owner_ids, NO group_id!
+            }
+            source = Path(__file__).resolve().parent.parent
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(cfg_dir), "EMTROLY_ANTIGRAVITY_CLI": str(fake_ide)}), \
+                    patch.object(runner.os, "geteuid", return_value=1000, create=True), \
+                    patch.object(runner.platform, "system", return_value="Linux"), \
+                    patch.object(runner.Path, "home", return_value=home), \
+                    patch.object(runner.provider, "verify", return_value="gpt-6.2-sol"), \
+                    patch.object(runner.dependencies, "install_node", return_value=(fake_node, fake_npm)), \
+                    patch.object(codex_setup.subprocess, "run", return_value=MagicMock(returncode=0, stdout="", stderr="")):
+                res = runner.install_components(
+                    ["codex-cli", "antigravity-ide", "codex-extension"],
+                    ai_only_values,
+                    source,
+                )
+
+            self.assertEqual(res["components"], ["codex-cli", "antigravity-ide", "codex-extension"])
+            self.assertTrue(res["codex"]["installed"])
+            self.assertTrue(res["antigravity_ide"]["installed"])
+            self.assertTrue(res["codex_extension"]["configured"])
+
+            # Verify get_modular_status reflects installed state
+            with patch.dict(os.environ, {"EMTROLY_ANTIGRAVITY_CLI": str(fake_ide)}):
+                ext_marker = codex_setup.data_root(home) / "antigravity/Extensions/openai.chatgpt-26.51111.21308"
+                ext_marker.mkdir(parents=True, exist_ok=True)
+                st = codex_setup.get_modular_status(home)
+                self.assertTrue(st["codex_cli"]["installed"])
+                self.assertTrue(st["antigravity_ide"]["installed"])
+                self.assertTrue(st["codex_extension"]["installed"])
+                self.assertFalse(st["openclaw"]["installed"])
 
 
 if __name__ == "__main__":

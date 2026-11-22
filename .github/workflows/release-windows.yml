@@ -63,6 +63,19 @@ jobs:
           RELEASE_VERSION="${{ steps.version.outputs.version }}" \
           ./build-windows-installer.sh emtroly.exe
 
+      - name: Sign installer with Authenticode (when certificate secrets are configured)
+        shell: powershell
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_CODE_SIGNING_ACCOUNT: ${{ secrets.AZURE_CODE_SIGNING_ACCOUNT }}
+          AZURE_CERT_PROFILE: ${{ secrets.AZURE_CERT_PROFILE }}
+          WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: ./windows-installer/sign-release.ps1 -FilePath ./emtroly.exe
+
       - name: Scan installer with Microsoft Defender
         shell: powershell
         run: |

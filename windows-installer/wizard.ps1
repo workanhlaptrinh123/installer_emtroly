@@ -319,8 +319,8 @@ $xamlText = @'
 
         <!-- Bottom Status & Version -->
         <StackPanel DockPanel.Dock="Bottom" Margin="2,12,2,0">
-          <!-- License Verified Badge (Click to switch activation key) -->
-          <Border x:Name="SidebarLicensePill" Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="8" Padding="10,6" Margin="0,0,0,6" Cursor="Hand" ToolTip="Bấm để đổi khóa kích hoạt bản quyền" Visibility="Collapsed">
+          <!-- License Verified Badge + Sign-out Option -->
+          <Border x:Name="SidebarLicensePill" Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="8" Padding="10,6" Margin="0,0,0,4" Cursor="Hand" ToolTip="Bấm để đổi khóa kích hoạt bản quyền" Visibility="Collapsed">
             <StackPanel Orientation="Horizontal">
               <Border Width="18" Height="18" CornerRadius="9" Background="#2563EB" VerticalAlignment="Center" Margin="0,0,8,0">
                 <Path Data="M 4,9.2 L 7.4,12.5 L 14,5.6" Stroke="#FFFFFF" StrokeThickness="2.1" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
@@ -328,6 +328,7 @@ $xamlText = @'
               <TextBlock Text="Bản quyền: Đã kích hoạt" FontSize="11.5" FontWeight="Bold" Foreground="#1E40AF" VerticalAlignment="Center"/>
             </StackPanel>
           </Border>
+          <Button x:Name="SidebarSignOutLicenseBtn" Style="{StaticResource SoftDangerBtn}" Content="Thoát bản quyền" Height="28" FontSize="11.5" Padding="10,2" Margin="0,0,0,6" Visibility="Collapsed" ToolTip="Thoát bản quyền giao diện (bắt buộc nhập lại Token codex.anhlaptrinh.vn, không dừng bot đang chạy)"/>
           <!-- Zalo Connected Icon Pill (Visible when installed & Zalo enabled) -->
           <Border x:Name="SidebarZaloPill" Background="#ECFDF5" BorderBrush="#6EE7B7" BorderThickness="1" CornerRadius="8" Padding="10,7" Margin="0,0,0,6" Cursor="Hand" Visibility="Collapsed">
             <StackPanel Orientation="Horizontal">
@@ -352,6 +353,7 @@ $xamlText = @'
         <!-- Navigation Buttons -->
         <StackPanel>
           <Button x:Name="NavHomeBtn" Style="{StaticResource NavBtn}" Content="  Cài đặt nhanh" Margin="0,0,0,4"/>
+          <Button x:Name="NavModularBtn" Style="{StaticResource NavBtn}" Content="  Cài từng phần" Margin="0,0,0,4"/>
           <Button x:Name="NavConfigBtn" Style="{StaticResource NavBtn}" Content="  Tiến trình cài đặt" Margin="0,0,0,4"/>
           <Button x:Name="NavCodexBtn" Style="{StaticResource NavBtn}" Content="  Công cụ Codex CLI" Margin="0,0,0,4"/>
           <Button x:Name="NavDiagBtn" Style="{StaticResource NavBtn}" Content="  Chẩn đoán &amp; Hỗ trợ" Margin="0,0,0,4"/>
@@ -897,8 +899,134 @@ $xamlText = @'
                 <WrapPanel>
                   <Button x:Name="DiagExportBtn" Style="{StaticResource SoftAccentBtn}" Content="Xuất báo cáo hỗ trợ (.txt)" Margin="0,0,10,6"/>
                   <Button x:Name="DiagShortcutBtn" Style="{StaticResource SecondaryBtn}" Content="Tạo lối tắt trên Desktop" Margin="0,0,10,6"/>
-                  <Button x:Name="DiagChangeLicenseBtn" Style="{StaticResource SecondaryBtn}" Content="Đổi khóa bản quyền" Margin="0,0,0,6"/>
+                  <Button x:Name="DiagChangeLicenseBtn" Style="{StaticResource SecondaryBtn}" Content="Đổi khóa bản quyền" Margin="0,0,10,6"/>
+                  <Button x:Name="DiagSignOutLicenseBtn" Style="{StaticResource SoftDangerBtn}" Content="Thoát bản quyền" Margin="0,0,0,6"/>
                 </WrapPanel>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </ScrollViewer>
+
+        <!-- VIEW G: MODULAR STEP-BY-STEP COMPONENT INSTALLER -->
+        <ScrollViewer x:Name="ViewModular" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+          <StackPanel>
+            <!-- Top Info & Shared Model Selector -->
+            <Border Style="{StaticResource CardBorder}" Padding="16,14" Margin="0,0,0,12">
+              <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                  <TextBlock Text="Model:" FontSize="12.5" FontWeight="SemiBold" Foreground="#334155" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                  <ComboBox x:Name="ModModelBox" Width="148" Height="32" FontFamily="Segoe UI" FontSize="12.5" Padding="8,4" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                  <Button x:Name="ModSelectAllBtn" Style="{StaticResource SecondaryBtn}" Content="Chọn phần 1–3" Height="32" Padding="10,4" FontSize="12" Margin="0,0,8,0"/>
+                  <Button x:Name="ModRefreshBtn" Style="{StaticResource SoftAccentBtn}" Content="Làm mới" Height="32" Padding="10,4" FontSize="12"/>
+                </StackPanel>
+                <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
+                  <TextBlock Text="Cài đặt thủ công từng thành phần độc lập" FontSize="14.5" FontWeight="Bold" Foreground="#0F172A"/>
+                  <TextBlock Text="Phần 1, 2, 3 dùng thẳng Token codex.anhlaptrinh.vn đã kích hoạt (không cần Telegram)." FontSize="12" Foreground="#475569" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                </StackPanel>
+              </DockPanel>
+            </Border>
+
+            <!-- Component 1: Codex CLI -->
+            <Border Style="{StaticResource CardBorder}" Padding="16,13" Margin="0,0,0,10">
+              <DockPanel>
+                <Button x:Name="ModInstall1Btn" DockPanel.Dock="Right" Style="{StaticResource SoftAccentBtn}" Content="Cài phần này" MinWidth="126" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                <CheckBox x:Name="ModCheck1" DockPanel.Dock="Left" IsChecked="True" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <StackPanel>
+                  <DockPanel>
+                    <Border x:Name="ModBadge1" DockPanel.Dock="Right" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="9,2" VerticalAlignment="Center">
+                      <TextBlock x:Name="ModBadgeText1" Text="Chưa cài" FontSize="11.5" FontWeight="Bold" Foreground="#475569"/>
+                    </Border>
+                    <TextBlock Text="1. Codex CLI riêng (codex)" FontSize="14" FontWeight="Bold" Foreground="#0F172A"/>
+                  </DockPanel>
+                  <TextBlock x:Name="ModDetail1" Text="Giải nén &amp; cấu hình lệnh codex chuẩn codex.anhlaptrinh.vn/v1 (~20 giây, không cần Telegram)." FontSize="12" Foreground="#64748B" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                </StackPanel>
+              </DockPanel>
+            </Border>
+
+            <!-- Component 2: Antigravity IDE -->
+            <Border Style="{StaticResource CardBorder}" Padding="16,13" Margin="0,0,0,10">
+              <DockPanel>
+                <Button x:Name="ModInstall2Btn" DockPanel.Dock="Right" Style="{StaticResource SoftAccentBtn}" Content="Cài phần này" MinWidth="126" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                <CheckBox x:Name="ModCheck2" DockPanel.Dock="Left" IsChecked="False" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <StackPanel>
+                  <DockPanel>
+                    <Border x:Name="ModBadge2" DockPanel.Dock="Right" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="9,2" VerticalAlignment="Center">
+                      <TextBlock x:Name="ModBadgeText2" Text="Chưa cài" FontSize="11.5" FontWeight="Bold" Foreground="#475569"/>
+                    </Border>
+                    <TextBlock Text="2. Antigravity IDE riêng" FontSize="14" FontWeight="Bold" Foreground="#0F172A"/>
+                  </DockPanel>
+                  <TextBlock x:Name="ModDetail2" Text="Kiểm tra hoặc tải bộ cài chính thức Google Antigravity IDE (~190 MB, xác thực chữ ký số Google LLC)." FontSize="12" Foreground="#64748B" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                </StackPanel>
+              </DockPanel>
+            </Border>
+
+            <!-- Component 3: Codex Extension in Antigravity -->
+            <Border Style="{StaticResource CardBorder}" Padding="16,13" Margin="0,0,0,10">
+              <DockPanel>
+                <Button x:Name="ModInstall3Btn" DockPanel.Dock="Right" Style="{StaticResource SoftAccentBtn}" Content="Cài phần này" MinWidth="126" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                <CheckBox x:Name="ModCheck3" DockPanel.Dock="Left" IsChecked="False" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                <StackPanel>
+                  <DockPanel>
+                    <Border x:Name="ModBadge3" DockPanel.Dock="Right" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="9,2" VerticalAlignment="Center">
+                      <TextBlock x:Name="ModBadgeText3" Text="Chưa cài" FontSize="11.5" FontWeight="Bold" Foreground="#475569"/>
+                    </Border>
+                    <TextBlock Text="3. Codex Extension trong Antigravity" FontSize="14" FontWeight="Bold" Foreground="#0F172A"/>
+                  </DockPanel>
+                  <TextBlock x:Name="ModDetail3" Text="Cài tiện ích openai.chatgpt vào Antigravity riêng, khóa auto-update và tạo lối tắt EmTroLy - Antigravity trên Desktop." FontSize="12" Foreground="#64748B" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                </StackPanel>
+              </DockPanel>
+            </Border>
+
+            <!-- Component 4: OpenClaw + Optional Zalo -->
+            <Border Style="{StaticResource CardBorder}" Padding="16,13">
+              <StackPanel>
+                <DockPanel>
+                  <Button x:Name="ModInstall4Btn" DockPanel.Dock="Right" Style="{StaticResource SoftAccentBtn}" Content="Cài phần này" MinWidth="126" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                  <CheckBox x:Name="ModCheck4" DockPanel.Dock="Left" IsChecked="False" VerticalAlignment="Center" Margin="0,0,12,0"/>
+                  <StackPanel>
+                    <DockPanel>
+                      <Border x:Name="ModBadge4" DockPanel.Dock="Right" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="9,2" VerticalAlignment="Center">
+                        <TextBlock x:Name="ModBadgeText4" Text="Chưa cài" FontSize="11.5" FontWeight="Bold" Foreground="#475569"/>
+                      </Border>
+                      <TextBlock Text="4. Trợ lý OpenClaw riêng (Telegram &amp; Zalo)" FontSize="14" FontWeight="Bold" Foreground="#0F172A"/>
+                    </DockPanel>
+                    <TextBlock x:Name="ModDetail4" Text="Cài đặt Node.js, Python, FFmpeg, OpenClaw 2026.11.4 &amp; Gateway Watchdog độc lập." FontSize="12" Foreground="#64748B" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                  </StackPanel>
+                </DockPanel>
+
+                <!-- Inline Telegram Fields for OpenClaw Modular Setup -->
+                <Border x:Name="ModOpenClawInputsBox" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="12,10" Margin="28,10,0,0">
+                  <StackPanel>
+                    <DockPanel Margin="0,0,0,8">
+                      <CheckBox x:Name="ModZaloCheck" DockPanel.Dock="Right" Content="Kèm plugin Zalo QR (/zaloqr)" IsChecked="True" FontSize="12" FontWeight="SemiBold" Foreground="#0F172A" VerticalAlignment="Center"/>
+                      <TextBlock Text="Thông số Telegram (chỉ bắt buộc khi cài Phần 4 · OpenClaw):" FontSize="12" FontWeight="Bold" Foreground="#334155" VerticalAlignment="Center"/>
+                    </DockPanel>
+                    <Grid Margin="0,0,0,8">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                      </Grid.ColumnDefinitions>
+                      <PasswordBox x:Name="ModTokenPwdBox" Grid.Column="0" Style="{StaticResource ModernPassword}" Height="32"/>
+                      <Button x:Name="ModAutoFetchBtn" Grid.Column="1" Style="{StaticResource SecondaryBtn}" Content="Lấy ID tự động" Height="32" Padding="10,2" FontSize="12" Margin="8,0,0,0"/>
+                    </Grid>
+                    <Grid Margin="0,0,0,6">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="10"/>
+                        <ColumnDefinition Width="*"/>
+                      </Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0">
+                        <TextBlock Text="Telegram Owner IDs (số dương)" FontSize="11.5" Foreground="#475569" Margin="0,0,0,3"/>
+                        <TextBox x:Name="ModOwnersBox" Style="{StaticResource ModernInput}" Height="32"/>
+                      </StackPanel>
+                      <StackPanel Grid.Column="2">
+                        <TextBlock Text="Telegram Group ID (số âm)" FontSize="11.5" Foreground="#475569" Margin="0,0,0,3"/>
+                        <TextBox x:Name="ModGroupBox" Style="{StaticResource ModernInput}" Height="32"/>
+                      </StackPanel>
+                    </Grid>
+                    <TextBlock x:Name="ModTgStatusNote" Text="" FontSize="11.5" Foreground="#065F46" TextWrapping="Wrap" Visibility="Collapsed"/>
+                  </StackPanel>
+                </Border>
               </StackPanel>
             </Border>
           </StackPanel>
@@ -1031,6 +1159,7 @@ $xamlText = @'
                 <Button x:Name="LicenseExitBtn" Grid.Column="0" Style="{StaticResource SecondaryBtn}" Content="Thoát" Height="40" MinWidth="96"/>
                 <Button x:Name="LicenseActivateBtn" Grid.Column="2" Style="{StaticResource PrimaryBtn}" Content="Kích hoạt &amp; Mở khóa phần mềm" Height="40"/>
               </Grid>
+              <Button x:Name="LicenseSignOutBtn" Style="{StaticResource SoftDangerBtn}" Content="Thoát bản quyền hiện tại (bắt buộc nhập lại Token)" Height="34" Margin="0,10,0,0" Visibility="Collapsed"/>
             </StackPanel>
 
             <TextBlock Text="Chỉ khóa API hợp lệ do Anh Lập Trình cấp trên codex.anhlaptrinh.vn mới sử dụng được ứng dụng." FontSize="11.5" Foreground="#94A3B8" TextAlignment="Center" TextWrapping="Wrap" Margin="0,16,0,0"/>
@@ -1109,7 +1238,9 @@ $licenseMsgBanner   = Get-Ui 'LicenseMsgBanner'
 $licenseMsgText     = Get-Ui 'LicenseMsgText'
 $licenseActivateBtn = Get-Ui 'LicenseActivateBtn'
 $licenseExitBtn     = Get-Ui 'LicenseExitBtn'
+$licenseSignOutBtn  = Get-Ui 'LicenseSignOutBtn'
 $sidebarLicensePill = Get-Ui 'SidebarLicensePill'
+$sidebarSignOutLicenseBtn = Get-Ui 'SidebarSignOutLicenseBtn'
 $sidebarZaloPill    = Get-Ui 'SidebarZaloPill'
 $sidebarZaloIconCircle = Get-Ui 'SidebarZaloIconCircle'
 $sidebarZaloCheckIcon = Get-Ui 'SidebarZaloCheckIcon'
@@ -1120,6 +1251,7 @@ $sidebarStatusDot   = Get-Ui 'SidebarStatusDot'
 $sidebarStatusText  = Get-Ui 'SidebarStatusText'
 $versionText        = Get-Ui 'VersionText'
 $navHomeBtn         = Get-Ui 'NavHomeBtn'
+$navModularBtn      = Get-Ui 'NavModularBtn'
 $navConfigBtn       = Get-Ui 'NavConfigBtn'
 $navCodexBtn        = Get-Ui 'NavCodexBtn'
 $navDiagBtn         = Get-Ui 'NavDiagBtn'
@@ -1134,6 +1266,7 @@ $footerHintText     = Get-Ui 'FooterHintText'
 
 $viewDashboard      = Get-Ui 'ViewDashboard'
 $viewSetupForm      = Get-Ui 'ViewSetupForm'
+$viewModular        = Get-Ui 'ViewModular'
 $viewProgress       = Get-Ui 'ViewProgress'
 $viewCodex          = Get-Ui 'ViewCodex'
 $viewDiagnostics    = Get-Ui 'ViewDiagnostics'
@@ -1251,6 +1384,38 @@ $diagUninstallBtn   = Get-Ui 'DiagUninstallBtn'
 $diagExportBtn      = Get-Ui 'DiagExportBtn'
 $diagShortcutBtn    = Get-Ui 'DiagShortcutBtn'
 $diagChangeLicenseBtn = Get-Ui 'DiagChangeLicenseBtn'
+$diagSignOutLicenseBtn = Get-Ui 'DiagSignOutLicenseBtn'
+
+$modModelBox        = Get-Ui 'ModModelBox'
+$modSelectAllBtn    = Get-Ui 'ModSelectAllBtn'
+$modRefreshBtn      = Get-Ui 'ModRefreshBtn'
+$modCheck1          = Get-Ui 'ModCheck1'
+$modBadge1          = Get-Ui 'ModBadge1'
+$modBadgeText1      = Get-Ui 'ModBadgeText1'
+$modDetail1         = Get-Ui 'ModDetail1'
+$modInstall1Btn     = Get-Ui 'ModInstall1Btn'
+$modCheck2          = Get-Ui 'ModCheck2'
+$modBadge2          = Get-Ui 'ModBadge2'
+$modBadgeText2      = Get-Ui 'ModBadgeText2'
+$modDetail2         = Get-Ui 'ModDetail2'
+$modInstall2Btn     = Get-Ui 'ModInstall2Btn'
+$modCheck3          = Get-Ui 'ModCheck3'
+$modBadge3          = Get-Ui 'ModBadge3'
+$modBadgeText3      = Get-Ui 'ModBadgeText3'
+$modDetail3         = Get-Ui 'ModDetail3'
+$modInstall3Btn     = Get-Ui 'ModInstall3Btn'
+$modCheck4          = Get-Ui 'ModCheck4'
+$modBadge4          = Get-Ui 'ModBadge4'
+$modBadgeText4      = Get-Ui 'ModBadgeText4'
+$modDetail4         = Get-Ui 'ModDetail4'
+$modInstall4Btn     = Get-Ui 'ModInstall4Btn'
+$modOpenClawInputsBox = Get-Ui 'ModOpenClawInputsBox'
+$modZaloCheck       = Get-Ui 'ModZaloCheck'
+$modTokenPwdBox     = Get-Ui 'ModTokenPwdBox'
+$modAutoFetchBtn    = Get-Ui 'ModAutoFetchBtn'
+$modOwnersBox       = Get-Ui 'ModOwnersBox'
+$modGroupBox        = Get-Ui 'ModGroupBox'
+$modTgStatusNote    = Get-Ui 'ModTgStatusNote'
 
 $zaloQrFrame        = Get-Ui 'ZaloQrFrame'
 $zaloQrImage        = Get-Ui 'ZaloQrImage'
@@ -1279,8 +1444,10 @@ $versionText.Text = "v$($appVersionObj.InstallerVersion) · Anh Lập Trình"
 
 foreach ($m in @('gpt-6.2-sol', 'GPT-6.1-terra', 'gpt-6.2-astra')) {
   [void]$modelBox.Items.Add($m)
+  if ($modModelBox) { [void]$modModelBox.Items.Add($m) }
 }
 $modelBox.SelectedIndex = 0
+if ($modModelBox) { $modModelBox.SelectedIndex = 0 }
 
 # Load Brand Logo (alt.png) & Window Icon (alt.ico) without locking files on disk
 $logoPath = Join-Path $PayloadRoot 'alt.png'
@@ -1813,12 +1980,13 @@ function Set-NavActive([string]$Key) {
   $script:currentView = $Key
   $viewDashboard.Visibility   = [System.Windows.Visibility]::Collapsed
   $viewSetupForm.Visibility   = [System.Windows.Visibility]::Collapsed
+  $viewModular.Visibility     = [System.Windows.Visibility]::Collapsed
   $viewProgress.Visibility    = [System.Windows.Visibility]::Collapsed
   $viewCodex.Visibility       = [System.Windows.Visibility]::Collapsed
   $viewDiagnostics.Visibility = [System.Windows.Visibility]::Collapsed
   $viewZaloQr.Visibility      = [System.Windows.Visibility]::Collapsed
 
-  foreach ($b in @($navHomeBtn, $navConfigBtn, $navCodexBtn, $navDiagBtn)) {
+  foreach ($b in @($navHomeBtn, $navModularBtn, $navConfigBtn, $navCodexBtn, $navDiagBtn)) {
     $b.Background = [System.Windows.Media.Brushes]::Transparent
     $b.Foreground = New-Brush '#334155'
     $b.FontWeight = [System.Windows.FontWeights]::Medium
@@ -1843,6 +2011,12 @@ function Set-NavActive([string]$Key) {
       $headerTitle.Text = 'Cài đặt nhanh trọn gói A–Z'
       $headerSubtitle.Text = 'Chỉ cần điền 4 thông tin cơ bản — OpenClaw, Telegram, Zalo, Antigravity & Codex sẽ tự cài đầy đủ'
     }
+  } elseif ($Key -eq 'modular') {
+    $activeBtn = $navModularBtn
+    $viewModular.Visibility = [System.Windows.Visibility]::Visible
+    $headerTitle.Text = 'Cài đặt từng phần thủ công'
+    $headerSubtitle.Text = 'Chọn cài riêng lẻ từng công cụ (Codex CLI · Antigravity IDE · Codex Extension · OpenClaw) hoặc tích nhiều phần'
+    Update-ModularCards
   } elseif ($Key -eq 'config') {
     $activeBtn = $navConfigBtn
     if ($script:isManageMode) {
@@ -1883,7 +2057,7 @@ function Set-Buttons {
   $navHomeBtn.Content   = if ($script:isManageMode) { '  Tổng quan' } else { '  Cài đặt nhanh' }
   $navConfigBtn.Content = if ($script:isManageMode) { '  Cấu hình nhanh' } else { '  Tiến trình cài đặt' }
 
-  foreach ($nb in @($navHomeBtn, $navConfigBtn, $navCodexBtn, $navDiagBtn)) {
+  foreach ($nb in @($navHomeBtn, $navModularBtn, $navConfigBtn, $navCodexBtn, $navDiagBtn)) {
     $nb.IsEnabled = (-not $script:installRunning -and -not $script:retryEditor)
   }
 
@@ -1940,6 +2114,11 @@ function Set-Buttons {
   } elseif ($onCodex -or $script:currentView -eq 'diag' -or $script:currentView -eq 'zaloqr') {
     $footerHintText.Text = if ($script:currentView -eq 'zaloqr') { 'Quét mã QR trên màn hình hoặc trong Telegram — tự báo hoàn tất ngay khi đăng nhập.' } else { 'Mẹo: Mọi mã bí mật đều được lưu cục bộ an toàn trên máy bạn.' }
     $primaryActionBtn.Visibility = [System.Windows.Visibility]::Collapsed
+  } elseif ($script:currentView -eq 'modular') {
+    $footerHintText.Text = 'Tích chọn các phần muốn cài (hoặc bấm "Cài phần này" trên từng dòng) rồi bấm nút bên phải.'
+    $primaryActionBtn.Visibility = [System.Windows.Visibility]::Visible
+    $primaryActionBtn.Content = 'Cài các phần đã chọn'
+    $primaryActionBtn.IsEnabled = $true
   } elseif ($script:isManageMode) {
     $footerHintText.Text = 'Sửa ô nào lưu ô đó (~3 giây) · Giữ nguyên lịch sử & dữ liệu cũ.'
     $primaryActionBtn.Visibility = [System.Windows.Visibility]::Visible
@@ -2214,6 +2393,7 @@ function Show-LicenseGate([string]$ErrorMessage = '', [switch]$AllowCancel) {
   if (-not $script:licenseCanDismiss) {
     $script:licenseVerified = $false
     $sidebarLicensePill.Visibility = [System.Windows.Visibility]::Collapsed
+    if ($sidebarSignOutLicenseBtn) { $sidebarSignOutLicenseBtn.Visibility = [System.Windows.Visibility]::Collapsed }
   }
   $licenseGateOverlay.Visibility = [System.Windows.Visibility]::Visible
   $licenseCheckingBox.Visibility = [System.Windows.Visibility]::Collapsed
@@ -2221,6 +2401,9 @@ function Show-LicenseGate([string]$ErrorMessage = '', [switch]$AllowCancel) {
   $licenseActivateBtn.IsEnabled = $true
   $licenseActivateBtn.Content = 'Kích hoạt & Mở khóa phần mềm'
   $licenseExitBtn.Content = if ($script:licenseCanDismiss) { 'Quay lại' } else { 'Thoát' }
+  if ($licenseSignOutBtn) {
+    $licenseSignOutBtn.Visibility = if ($script:licenseCanDismiss) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
+  }
   if (-not [string]::IsNullOrWhiteSpace($ErrorMessage)) {
     $licenseMsgBanner.Visibility = [System.Windows.Visibility]::Visible
     $licenseMsgText.Text = $ErrorMessage
@@ -2258,10 +2441,234 @@ function Unlock-LicenseGate([string]$VerifiedKey, [switch]$SkipSave) {
     }
   }
   $licenseKeyBox.Clear()
+  if ($licenseSignOutBtn) { $licenseSignOutBtn.Visibility = [System.Windows.Visibility]::Collapsed }
   $licenseGateOverlay.Visibility = [System.Windows.Visibility]::Collapsed
   $sidebarLicensePill.Visibility = [System.Windows.Visibility]::Visible
+  if ($sidebarSignOutLicenseBtn) { $sidebarSignOutLicenseBtn.Visibility = [System.Windows.Visibility]::Visible }
   if ($script:isManageMode) {
     Update-DashboardCards
+  }
+}
+
+function Invoke-UiLicenseSignOut {
+  if ($script:installRunning -or $script:codexRunning -or $script:licenseCheckRunning) {
+    Show-Error 'Hãy đợi tiến trình đang chạy hoàn tất trước khi thoát bản quyền.'
+    return
+  }
+  $ansOut = [System.Windows.MessageBox]::Show(
+    $window,
+    "Bạn có muốn thoát bản quyền trên giao diện ứng dụng không?`n`n• Các trợ lý OpenClaw và công cụ CLI đã cài trước đó vẫn tiếp tục hoạt động bình thường.`n• Giao diện ứng dụng sẽ khóa lại ngay lập tức và bắt buộc phải nhập lại Token API trên codex.anhlaptrinh.vn (kể cả khi tắt đi mở lại).",
+    'Xác nhận thoát bản quyền ứng dụng',
+    [System.Windows.MessageBoxButton]::YesNo,
+    [System.Windows.MessageBoxImage]::Question
+  )
+  if ($ansOut -ne [System.Windows.MessageBoxResult]::Yes) { return }
+
+  Stop-ZaloQrSession
+  if (Get-Command Invoke-EmTroLyLicenseSignOut -ErrorAction SilentlyContinue) {
+    Invoke-EmTroLyLicenseSignOut
+  }
+  $script:licenseVerified = $false
+  $script:licenseCanDismiss = $false
+  $script:sessionApiKeyFallback = ''
+  $prevHyd = $script:draftHydrating
+  $script:draftHydrating = $true
+  try {
+    $apiKeyBox.Clear()
+    $retryKeyPwdBox.Clear()
+    $licenseKeyBox.Clear()
+    if (-not $script:isManageMode) {
+      $apiKeyFieldLabel.Text = 'Provider API Key (dùng chung cho OpenClaw & Codex CLI)'
+    }
+  } finally {
+    $script:draftHydrating = $prevHyd
+    $script:draftDirty = $false
+  }
+  Show-LicenseGate 'Đã thoát bản quyền ứng dụng. Vui lòng nhập lại Khóa kích hoạt (Provider API Key trên codex.anhlaptrinh.vn) để mở khóa.'
+  [void]$licensePwdBox.Focus()
+}
+
+function Set-ModularBadgeVisual($BadgeBorder, $BadgeTextCtrl, [bool]$Installed) {
+  if ($Installed) {
+    $BadgeBorder.Background = New-Brush '#ECFDF5'
+    $BadgeBorder.BorderBrush = New-Brush '#A7F3D0'
+    $BadgeTextCtrl.Foreground = New-Brush '#065F46'
+    $BadgeTextCtrl.Text = '✓ Đã cài đặt'
+  } else {
+    $BadgeBorder.Background = New-Brush '#F1F5F9'
+    $BadgeBorder.BorderBrush = New-Brush '#E2E8F0'
+    $BadgeTextCtrl.Foreground = New-Brush '#475569'
+    $BadgeTextCtrl.Text = '○ Chưa cài'
+  }
+}
+
+function Update-ModularCards {
+  if (-not (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue)) { return $null }
+  $ms = Get-EmTroLyModularStatus
+  if (-not $ms) { return $null }
+
+  Set-ModularBadgeVisual $modBadge1 $modBadgeText1 ([bool]$ms.CodexCliInstalled)
+  $modDetail1.Text = $ms.CodexCliDetail
+  $modInstall1Btn.Content = if ($ms.CodexCliInstalled) { 'Cập nhật / Cài lại' } else { 'Cài phần này' }
+
+  Set-ModularBadgeVisual $modBadge2 $modBadgeText2 ([bool]$ms.AntigravityInstalled)
+  $modDetail2.Text = $ms.AntigravityDetail
+  $modInstall2Btn.Content = if ($ms.AntigravityInstalled) { 'Kiểm tra / Sửa lại' } else { 'Cài phần này' }
+
+  Set-ModularBadgeVisual $modBadge3 $modBadgeText3 ([bool]$ms.CodexExtensionInstalled)
+  $modDetail3.Text = $ms.CodexExtensionDetail
+  $modInstall3Btn.Content = if ($ms.CodexExtensionInstalled) { 'Đồng bộ / Cài lại' } else { 'Cài phần này' }
+
+  Set-ModularBadgeVisual $modBadge4 $modBadgeText4 ([bool]$ms.OpenClawInstalled)
+  $modDetail4.Text = $ms.OpenClawDetail
+  if ($ms.OpenClawInstalled) {
+    $modInstall4Btn.Content = 'Mở Cấu hình nhanh'
+    $modCheck4.IsChecked = $false
+    $modCheck4.IsEnabled = $false
+    $modOpenClawInputsBox.Visibility = [System.Windows.Visibility]::Collapsed
+  } else {
+    $modInstall4Btn.Content = 'Cài phần này'
+    $modCheck4.IsEnabled = $true
+    $modOpenClawInputsBox.Visibility = [System.Windows.Visibility]::Visible
+    if ([string]::IsNullOrWhiteSpace($modOwnersBox.Text) -and -not [string]::IsNullOrWhiteSpace($ownersBox.Text)) {
+      $modOwnersBox.Text = $ownersBox.Text
+    }
+    if ([string]::IsNullOrWhiteSpace($modGroupBox.Text) -and -not [string]::IsNullOrWhiteSpace($groupBox.Text)) {
+      $modGroupBox.Text = $groupBox.Text
+    }
+    if ([string]::IsNullOrWhiteSpace($modTokenPwdBox.Password) -and -not [string]::IsNullOrWhiteSpace($tokenBox.Text)) {
+      $modTokenPwdBox.Password = $tokenBox.Text
+    }
+  }
+  return $ms
+}
+
+function Start-ModularInstall([string[]]$SelectedList) {
+  if (-not $script:licenseVerified -and -not $SmokeTest) {
+    Show-LicenseGate 'Vui lòng kích hoạt bản quyền trước khi cài đặt thành phần.'
+    return
+  }
+  if ($script:installRunning) { return }
+  $cleanSelected = @($SelectedList | Where-Object { $_ })
+  if ($cleanSelected.Count -eq 0) {
+    Show-Error 'Hãy tích chọn ít nhất 1 thành phần (hoặc bấm "Cài phần này" trên dòng tương ứng).'
+    return
+  }
+
+  $msNow = Update-ModularCards
+  if ($cleanSelected.Count -eq 1 -and $cleanSelected[0] -eq 'openclaw' -and $msNow -and $msNow.OpenClawInstalled) {
+    Set-NavActive 'config'
+    return
+  }
+
+  if ('codex-extension' -in $cleanSelected -and 'antigravity-ide' -notin $cleanSelected -and $msNow -and (-not $msNow.AntigravityInstalled)) {
+    $askIde = [System.Windows.MessageBox]::Show(
+      $window,
+      'Máy chưa có Antigravity IDE (Phần 2). Bạn có muốn tự động tải & cài Antigravity IDE trước rồi cài luôn Codex Extension không?',
+      'Tự động cài kèm Antigravity IDE',
+      [System.Windows.MessageBoxButton]::YesNo,
+      [System.Windows.MessageBoxImage]::Question
+    )
+    if ($askIde -ne [System.Windows.MessageBoxResult]::Yes) { return }
+    $cleanSelected = @('antigravity-ide') + $cleanSelected
+  }
+
+  $effectiveKey = if (-not [string]::IsNullOrWhiteSpace($apiKeyBox.Text)) {
+    $apiKeyBox.Text.Trim()
+  } elseif (-not [string]::IsNullOrWhiteSpace($script:sessionApiKeyFallback)) {
+    $script:sessionApiKeyFallback.Trim()
+  } elseif (Get-Command Get-EmTroLySavedLicenseKey -ErrorAction SilentlyContinue) {
+    (Get-EmTroLySavedLicenseKey).Trim()
+  } else { '' }
+
+  if ([string]::IsNullOrWhiteSpace($effectiveKey)) {
+    Show-LicenseGate 'Vui lòng nhập lại Khóa kích hoạt (Provider API Key) trên codex.anhlaptrinh.vn.'
+    return
+  }
+
+  $chosenModel = if ($modModelBox -and $modModelBox.SelectedItem) { ([string]$modModelBox.SelectedItem).Trim() } else { ([string]$modelBox.SelectedItem).Trim() }
+  if ([string]::IsNullOrWhiteSpace($chosenModel)) { $chosenModel = 'gpt-6.2-sol' }
+
+  $wantOc = ('openclaw' -in $cleanSelected)
+  if ($wantOc) {
+    if ($msNow -and $msNow.OpenClawInstalled) {
+      Show-Error 'Trợ lý OpenClaw đã được cài trên máy. Nếu muốn cài lại từ đầu, hãy vào Chẩn đoán & Hỗ trợ → Gỡ trợ lý để cài lại.'
+      return
+    }
+    if (-not [string]::IsNullOrWhiteSpace($modTokenPwdBox.Password)) { $tokenBox.Text = $modTokenPwdBox.Password.Trim() }
+    if (-not [string]::IsNullOrWhiteSpace($modOwnersBox.Text)) { $ownersBox.Text = $modOwnersBox.Text.Trim() }
+    if (-not [string]::IsNullOrWhiteSpace($modGroupBox.Text)) { $groupBox.Text = $modGroupBox.Text.Trim() }
+    if ([string]::IsNullOrWhiteSpace($apiKeyBox.Text)) { $apiKeyBox.Text = $effectiveKey }
+    $zaloCheck.Checked = [bool]$modZaloCheck.IsChecked
+    $fullAccessCheck.Checked = $true
+    if (-not (Test-FormInputs -ForManageConfig $false)) { return }
+    $ansExecMod = [System.Windows.MessageBox]::Show(
+      $window,
+      'Cài đặt Phần 4 (OpenClaw) sẽ cấp quyền Full Exec cho các Owner IDs và nhóm Telegram đã chọn. Bạn xác nhận tin tưởng và tiếp tục?',
+      'Xác nhận Full Exec cho OpenClaw',
+      [System.Windows.MessageBoxButton]::YesNo,
+      [System.Windows.MessageBoxImage]::Warning
+    )
+    if ($ansExecMod -ne [System.Windows.MessageBoxResult]::Yes) { return }
+  }
+
+  $script:installRunning = $true
+  $script:currentManageAction = ''
+  Reset-ProgressVisualState
+  $retryEditorPanel.Visibility = [System.Windows.Visibility]::Collapsed
+  $statusText.Text = 'Đang khởi động cài đặt thành phần đã chọn (' + ($cleanSelected -join ', ') + ')...'
+  $installProgressBar.IsIndeterminate = $true
+  $progressPercentText.Text = 'Đang xử lý...'
+  Set-NavActive 'progress'
+
+  try {
+    $modSettings = [ordered]@{
+      member             = 'emtroly'
+      components         = $cleanSelected
+      assistant_name     = if ([string]::IsNullOrWhiteSpace($assistantBox.Text)) { 'Trợ lý OpenClaw' } else { $assistantBox.Text.Trim() }
+      base_url           = 'https://codex.anhlaptrinh.vn/v1'
+      model              = $chosenModel
+      owner_ids          = $ownersBox.Text.Trim()
+      group_id           = $groupBox.Text.Trim()
+      gateway_port       = if ([string]::IsNullOrWhiteSpace($portBox.Text)) { '0' } else { $portBox.Text.Trim() }
+      audience           = $audienceBox.Text.Trim()
+      addressing         = $addressingBox.Text.Trim()
+      style              = $styleBox.Text.Trim()
+      accept_full_access = $wantOc
+      configure_zalo     = [bool]$modZaloCheck.IsChecked
+      skip_editor        = ('antigravity-ide' -notin $cleanSelected -and 'codex-extension' -notin $cleanSelected)
+      qr_owner_id        = $qrOwnerBox.Text.Trim()
+      telegram_token     = if ($wantOc) { $tokenBox.Text.Trim() } else { '' }
+      ai_api_key         = $effectiveKey
+    }
+
+    $script:privateDir = Join-Path $env:TEMP ('openclaw-modular-' + [guid]::NewGuid().ToString('N'))
+    New-CodexPrivateDirectory $script:privateDir
+    $script:secretFile = Join-Path $script:privateDir 'settings.json'
+    $script:safeLog = Join-Path $script:privateDir 'status.txt'
+    [IO.File]::WriteAllText($script:secretFile, ($modSettings | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
+
+    $runner = Join-Path $PayloadRoot 'windows-installer\run-native-install.ps1'
+    $shellPath = Join-Path $PSHOME 'powershell.exe'
+    $compCsv = ($cleanSelected -join ',')
+    $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $startInfo.FileName = $shellPath
+    $startInfo.Arguments = '-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' +
+      $runner + '" -SettingsFile "' + $script:secretFile +
+      '" -PayloadRoot "' + $PayloadRoot + '" -LogFile "' + $script:safeLog + '" -Components "' + $compCsv + '"'
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardInput = $true
+    $script:runnerProcess = [Diagnostics.Process]::Start($startInfo)
+    try { $script:runnerProcess.StandardInput.Close() } catch { }
+    $script:runnerDeadline = (Get-Date).AddMinutes(90)
+    $modTokenPwdBox.Clear()
+    $installTimer.Start()
+  } catch {
+    Cleanup-Secret
+    $script:installRunning = $false
+    Set-Buttons
+    Show-Error 'Không thể khởi động trình cài đặt từng phần. Hãy kiểm tra quyền thư mục tạm.'
   }
 }
 
@@ -2500,6 +2907,15 @@ function Start-Install {
     Show-LicenseGate 'Vui lòng kích hoạt bản quyền trước khi bắt đầu cài đặt.'
     return
   }
+  if ($script:currentView -eq 'modular' -and -not $script:retryEditor) {
+    $picked = @()
+    if ($modCheck1.IsChecked) { $picked += 'codex-cli' }
+    if ($modCheck2.IsChecked) { $picked += 'antigravity-ide' }
+    if ($modCheck3.IsChecked) { $picked += 'codex-extension' }
+    if ($modCheck4.IsChecked -and $modCheck4.IsEnabled) { $picked += 'openclaw' }
+    Start-ModularInstall $picked
+    return
+  }
   if ($script:isManageMode -and -not $script:retryEditor) {
     if ($script:currentView -eq 'home') {
       Set-NavActive 'config'
@@ -2692,6 +3108,7 @@ $installTimer.Add_Tick({
         Show-RichFailureDiagnostics -SummaryMessage $detail -DiagPayload $diagPayload -IsManageFailure $true
         $viewDashboard.Visibility   = [System.Windows.Visibility]::Collapsed
         $viewSetupForm.Visibility   = [System.Windows.Visibility]::Collapsed
+        $viewModular.Visibility     = [System.Windows.Visibility]::Collapsed
         $viewCodex.Visibility       = [System.Windows.Visibility]::Collapsed
         $viewDiagnostics.Visibility = [System.Windows.Visibility]::Collapsed
         $viewZaloQr.Visibility      = [System.Windows.Visibility]::Collapsed
@@ -2713,7 +3130,11 @@ $installTimer.Add_Tick({
       $codexDirBox.Text = Get-CodexDefaultWorkspace
       Apply-ManageModeUI
       [void](Update-CodexAvailability)
-      if ($detail -match '/zaloqr') {
+      [void](Update-ModularCards)
+      if ($detail -match '^Hoàn tất: Đã cài đặt thành công phần đã chọn') {
+        Show-Info "$detail`n`nBạn có thể cài tiếp các thành phần khác hoặc mở tab Công cụ Codex CLI ngay!" 'Cài đặt thành phần hoàn tất'
+        Set-NavActive 'modular'
+      } elseif ($detail -match '/zaloqr') {
         Show-Info "$detail`n`nTiếp theo: Màn hình sẽ hiển thị ngay mã QR Zalo (và gửi đồng thời vào Telegram Chủ sở hữu) để bạn quét kết nối luôn!" 'Cài đặt hoàn tất'
         Start-ZaloQrLoginSession
       } else {
@@ -3293,6 +3714,7 @@ $runPreflightBtn.Add_Click({
 
 # Navigation & Action Wiring
 $navHomeBtn.Add_Click({ Set-NavActive 'home' })
+$navModularBtn.Add_Click({ Set-NavActive 'modular' })
 $navConfigBtn.Add_Click({ Set-NavActive 'config' })
 $navCodexBtn.Add_Click({ Set-NavActive 'codex' })
 $navDiagBtn.Add_Click({ Set-NavActive 'diag' })
@@ -3371,6 +3793,50 @@ $openChangeLicensePrompt = {
 }
 $sidebarLicensePill.Add_MouseLeftButtonUp($openChangeLicensePrompt)
 $diagChangeLicenseBtn.Add_Click($openChangeLicensePrompt)
+$sidebarSignOutLicenseBtn.Add_Click({ Invoke-UiLicenseSignOut })
+$diagSignOutLicenseBtn.Add_Click({ Invoke-UiLicenseSignOut })
+$licenseSignOutBtn.Add_Click({ Invoke-UiLicenseSignOut })
+
+$modRefreshBtn.Add_Click({ [void](Update-ModularCards) })
+$modSelectAllBtn.Add_Click({
+  $modCheck1.IsChecked = $true
+  $modCheck2.IsChecked = $true
+  $modCheck3.IsChecked = $true
+})
+$modInstall1Btn.Add_Click({ Start-ModularInstall @('codex-cli') })
+$modInstall2Btn.Add_Click({ Start-ModularInstall @('antigravity-ide') })
+$modInstall3Btn.Add_Click({ Start-ModularInstall @('codex-extension') })
+$modInstall4Btn.Add_Click({ Start-ModularInstall @('openclaw') })
+$modAutoFetchBtn.Add_Click({
+  $tokMod = $modTokenPwdBox.Password.Trim()
+  if ([string]::IsNullOrWhiteSpace($tokMod)) {
+    Show-Error 'Hãy dán Telegram Bot Token vào ô phía trên trước rồi bấm Lấy ID tự động.'
+    return
+  }
+  $modAutoFetchBtn.IsEnabled = $false
+  $modAutoFetchBtn.Content = 'Đang lấy...'
+  $modTgStatusNote.Visibility = [System.Windows.Visibility]::Visible
+  $modTgStatusNote.Foreground = New-Brush '#1D4ED8'
+  $modTgStatusNote.Text = 'Đang đọc tin nhắn gần nhất từ Telegram Bot...'
+  Start-AsyncUiTask -Params @{ HelperPath = $wizardHelperPath; Token = $tokMod } -Work {
+    param($HelperPath, $Token)
+    . ([ScriptBlock]::Create([IO.File]::ReadAllText($HelperPath, [System.Text.Encoding]::UTF8)))
+    return (Get-TelegramIdsFromBotUpdates -TelegramToken $Token)
+  } -OnComplete {
+    param($res, $err)
+    $modAutoFetchBtn.IsEnabled = $true
+    $modAutoFetchBtn.Content = 'Lấy ID tự động'
+    if ($err -or -not $res) {
+      $modTgStatusNote.Foreground = New-Brush '#B91C1C'
+      $modTgStatusNote.Text = 'Không lấy được ID từ Telegram. Kiểm tra kết nối mạng và Token.'
+      return
+    }
+    if ($res.SuggestedOwnerId) { $modOwnersBox.Text = $res.SuggestedOwnerId; $ownersBox.Text = $res.SuggestedOwnerId }
+    if ($res.SuggestedGroupId) { $modGroupBox.Text = $res.SuggestedGroupId; $groupBox.Text = $res.SuggestedGroupId }
+    $modTgStatusNote.Foreground = if ($res.Ok) { New-Brush '#065F46' } else { New-Brush '#B91C1C' }
+    $modTgStatusNote.Text = $res.Message
+  }
+})
 
 $btnCopyErrorDetail.Add_Click({
   if (-not [string]::IsNullOrWhiteSpace($script:lastFullErrorReport)) {

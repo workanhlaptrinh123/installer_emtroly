@@ -3,7 +3,8 @@ param(
   [Parameter(Mandatory=$true)][string]$SettingsFile,
   [Parameter(Mandatory=$true)][string]$PayloadRoot,
   [Parameter(Mandatory=$true)][string]$LogFile,
-  [switch]$EditorOnly
+  [switch]$EditorOnly,
+  [string[]]$Components = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -254,14 +255,14 @@ try {
   $deferredEditorTechDetail = ''
   $editorJobId = [guid]::NewGuid().ToString('N')
 
-  function Invoke-EditorStepWithCodexAutoHeal([psobject]$EditorSettingsObj) {
+  function Invoke-EditorStepWithCodexAutoHeal([psobject]$EditorSettingsObj, [string]$ComponentMode = 'all', [switch]$AllowUpdateExisting) {
     $editorInstaller = Join-Path $PayloadRoot 'windows-installer\install-antigravity-codex.ps1'
     if (-not (Test-Path -LiteralPath $editorInstaller -PathType Leaf)) { throw 'editor-module-missing' }
 
     # Seamless reuse when Antigravity IDE + Codex Extension in %LOCALAPPDATA%\EmTroLy are already complete (e.g. reinstalling OpenClaw)
     $emBaseExisting = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'EmTroLy' } else { '' }
     $repairScript = Join-Path $PayloadRoot 'windows-installer\repair-antigravity-shortcut.ps1'
-    if (-not $EditorOnly -and $env:TEST_MODE -ne 'editor-existing' -and $emBaseExisting -and
+    if (-not $EditorOnly -and -not $AllowUpdateExisting -and $ComponentMode -eq 'all' -and $env:TEST_MODE -ne 'editor-existing' -and $emBaseExisting -and
         (Test-Path -LiteralPath (Join-Path $emBaseExisting 'installer-job.txt') -PathType Leaf) -and
         (Test-Path -LiteralPath (Join-Path $emBaseExisting 'Antigravity\UserData\User\settings.json') -PathType Leaf) -and
         (Test-Path -LiteralPath $repairScript -PathType Leaf)) {
@@ -300,15 +301,24 @@ requires_openai_auth = true
       } catch { }
     }
 
-    Write-SafeStatus 'Đang cài đặt Antigravity IDE và Codex Extension trên Antigravity...'
+    $statusLabelEd = switch ($ComponentMode) {
+      'ide-only'       { 'Đang cài đặt Antigravity IDE riêng...' }
+      'extension-only' { 'Đang cài đặt Codex Extension trong Antigravity IDE...' }
+      default          { 'Đang cài đặt Antigravity IDE và Codex Extension trên Antigravity...' }
+    }
+    Write-SafeStatus $statusLabelEd
+    $edCallParams = @{ Settings = $EditorSettingsObj; StatusFile = $LogFile }
+    if ($ComponentMode -ne 'all') { $edCallParams['ComponentMode'] = $ComponentMode }
+    if ($AllowUpdateExisting) { $edCallParams['AllowUpdateExisting'] = $true }
     try {
       $global:Error.Clear()
-      & $editorInstaller -Settings $EditorSettingsObj -StatusFile $LogFile | Out-Null
+      & $editorInstaller @edCallParams | Out-Null
     } catch {
       $edErr = [string]$_.Exception.Message
       $script:lastTechnicalDetail = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
       [IO.File]::WriteAllText($installCaptureFile, $script:lastTechnicalDetail, (New-Object Text.UTF8Encoding($false)))
-      $canHealEd = (Get-Command Invoke-CodexAutoHeal -ErrorAction SilentlyContinue) -and
+      $canHealEd = ($edErr -ne 'editor-ide-missing') -and
+        (Get-Command Invoke-CodexAutoHeal -ErrorAction SilentlyContinue) -and
         (Get-Command Test-IsAutoHealableError -ErrorAction SilentlyContinue) -and
         (Test-IsAutoHealableError -ErrorCode $edErr -Stage 'editor')
       if (-not $canHealEd) { throw }
@@ -327,7 +337,7 @@ requires_openai_auth = true
         Write-SafeStatus "Codex CLI đã xử lý sự cố bước Antigravity/Codex (lần $edTry/2). Đang kiểm tra lại..."
         try {
           $global:Error.Clear()
-          & $editorInstaller -Settings $EditorSettingsObj -StatusFile $LogFile | Out-Null
+          & $editorInstaller @edCallParams | Out-Null
           $healedEd = $true
           break
         } catch {
@@ -344,28 +354,71 @@ requires_openai_auth = true
     }
   }
 
-  if (-not $EditorOnly) {
-    Test-MemberInstallerSettings $settings
-    if (Test-Path -LiteralPath $root) {
-      if (Test-IsRecoverableIncompleteOpenClawDir -DirPath $root) {
-        Write-SafeStatus 'Phát hiện thư mục OpenClaw cài dở từ lần trước — đang tự động dọn sạch để cài mới...'
-        Remove-IncompleteOpenClawDirectory -DirPath $root
+  $requestedComponents = @()
+  foreach ($rawComp in @($Components)) {
+    foreach ($piece in @(([string]$rawComp) -split ',')) {
+      $trimmedComp = $piece.Trim().ToLowerInvariant()
+      if ($trimmedComp -and $trimmedComp -notin $requestedComponents) {
+        $requestedComponents += $trimmedComp
       }
-      if (Test-Path -LiteralPath $root) { throw 'instance-exists' }
     }
-    Test-InstallDiskFreeSpace -TargetPath $env:USERPROFILE -SkipEditor ([bool]$settings.skip_editor)
-    if ($env:OS -eq 'Windows_NT') {
-      $existingOpenClawCmd = Get-Command openclaw -ErrorAction SilentlyContinue
-      if ($existingOpenClawCmd) {
-        $ownShimDir = if ($env:LOCALAPPDATA) { (Join-Path $env:LOCALAPPDATA 'OpenClaw\bin').TrimEnd('\') } else { '' }
-        $cmdSrcDir = if ($existingOpenClawCmd.Source) { (Split-Path -Parent $existingOpenClawCmd.Source).TrimEnd('\') } else { '' }
-        if ($ownShimDir -and $cmdSrcDir -ieq $ownShimDir -and -not (Test-Path -LiteralPath $root)) {
-          Remove-Item -LiteralPath $existingOpenClawCmd.Source -Force -ErrorAction SilentlyContinue
-        } else {
-          throw 'cli-probe-conflict'
+  }
+  if ($requestedComponents.Count -eq 0 -and $settings -and $settings.PSObject.Properties['components'] -and $settings.components) {
+    foreach ($rawComp2 in @($settings.components)) {
+      foreach ($piece2 in @(([string]$rawComp2) -split ',')) {
+        $trimmedComp2 = $piece2.Trim().ToLowerInvariant()
+        if ($trimmedComp2 -and $trimmedComp2 -notin $requestedComponents) {
+          $requestedComponents += $trimmedComp2
         }
       }
     }
+  }
+  $isModularRun = ($requestedComponents.Count -gt 0 -and -not $EditorOnly)
+  if ($isModularRun) {
+    $validCompIds = @('codex-cli', 'antigravity-ide', 'codex-extension', 'openclaw')
+    foreach ($cItem in $requestedComponents) {
+      if ($cItem -notin $validCompIds) { throw 'invalid-component-selection' }
+    }
+  }
+
+  if (-not $EditorOnly) {
+    $wantOpenClaw = (-not $isModularRun) -or ('openclaw' -in $requestedComponents)
+    if ($wantOpenClaw) {
+      Test-MemberInstallerSettings $settings
+      if (Test-Path -LiteralPath $root) {
+        if (Test-IsRecoverableIncompleteOpenClawDir -DirPath $root) {
+          Write-SafeStatus 'Phát hiện thư mục OpenClaw cài dở từ lần trước — đang tự động dọn sạch để cài mới...'
+          Remove-IncompleteOpenClawDirectory -DirPath $root
+        }
+        if (Test-Path -LiteralPath $root) { throw 'instance-exists' }
+      }
+      Test-InstallDiskFreeSpace -TargetPath $env:USERPROFILE -SkipEditor ([bool]$settings.skip_editor -or ($isModularRun -and 'antigravity-ide' -notin $requestedComponents -and 'codex-extension' -notin $requestedComponents))
+      if ($env:OS -eq 'Windows_NT') {
+        $existingOpenClawCmd = Get-Command openclaw -ErrorAction SilentlyContinue
+        if ($existingOpenClawCmd) {
+          $ownShimDir = if ($env:LOCALAPPDATA) { (Join-Path $env:LOCALAPPDATA 'OpenClaw\bin').TrimEnd('\') } else { '' }
+          $cmdSrcDir = if ($existingOpenClawCmd.Source) { (Split-Path -Parent $existingOpenClawCmd.Source).TrimEnd('\') } else { '' }
+          if ($ownShimDir -and $cmdSrcDir -ieq $ownShimDir -and -not (Test-Path -LiteralPath $root)) {
+            Remove-Item -LiteralPath $existingOpenClawCmd.Source -Force -ErrorAction SilentlyContinue
+          } else {
+            throw 'cli-probe-conflict'
+          }
+        }
+      }
+    } else {
+      # Modular run without OpenClaw: validate AI provider fields only (no Telegram / Owner / Group required!)
+      $aiUrlCheck = if ($settings.PSObject.Properties['base_url'] -and $settings.base_url) { ([string]$settings.base_url).Trim().TrimEnd('/') } else { 'https://codex.anhlaptrinh.vn/v1' }
+      $uriAi = $null
+      if (-not [uri]::TryCreate($aiUrlCheck, [UriKind]::Absolute, [ref]$uriAi) -or
+          $uriAi.Scheme -ne 'https' -or -not $uriAi.Host -or $uriAi.UserInfo -or $uriAi.Query -or $uriAi.Fragment) {
+        throw 'invalid-base-url'
+      }
+      $settings | Add-Member -NotePropertyName base_url -NotePropertyValue $aiUrlCheck -Force
+      if ([string]$settings.model -notin @('gpt-6.2-sol', 'GPT-6.1-terra', 'gpt-6.2-astra')) { throw 'invalid-model' }
+      if ([string]::IsNullOrWhiteSpace([string]$settings.ai_api_key)) { throw 'missing-api-key' }
+      Test-InstallDiskFreeSpace -TargetPath $env:USERPROFILE -SkipEditor ('antigravity-ide' -notin $requestedComponents -and 'codex-extension' -notin $requestedComponents)
+    }
+
     $stage = 'provider'
     Write-SafeStatus 'Đang kiểm tra API và model...'
     $baseUrl = ([string]$settings.base_url).TrimEnd('/')
@@ -382,21 +435,77 @@ requires_openai_auth = true
       try { Save-EmTroLyLicenseKey -ApiKey ([string]$settings.ai_api_key) } catch { }
     }
 
-    $stage = 'telegram'
-    Write-SafeStatus 'Đang kiểm tra bot Telegram...'
-    try {
-      $telegram = Invoke-RestMethod -UseBasicParsing -Method Get -Uri ('https://api.telegram.org/bot' + [string]$settings.telegram_token + '/getMe') -TimeoutSec 45 -MaximumRedirection 0
-    } catch { throw 'telegram-unavailable' }
-    if (-not $telegram.ok -or -not $telegram.result.is_bot) { throw 'telegram-invalid-bot' }
+    if ($wantOpenClaw) {
+      $stage = 'telegram'
+      Write-SafeStatus 'Đang kiểm tra bot Telegram...'
+      try {
+        $telegram = Invoke-RestMethod -UseBasicParsing -Method Get -Uri ('https://api.telegram.org/bot' + [string]$settings.telegram_token + '/getMe') -TimeoutSec 45 -MaximumRedirection 0
+      } catch { throw 'telegram-unavailable' }
+      if (-not $telegram.ok -or -not $telegram.result.is_bot) { throw 'telegram-invalid-bot' }
+    }
+
+    # =========================================================================
+    # MODULAR COMPONENT EXECUTION MODE (when user selects individual components)
+    # =========================================================================
+    if ($isModularRun) {
+      $completedLabels = @()
+      if ('codex-cli' -in $requestedComponents) {
+        $stage = 'codex-cli'
+        if (-not (Get-Command Install-EmTroLyCodexCliFirst -ErrorAction SilentlyContinue)) { throw 'editor-module-missing' }
+        $codexOnlyRes = Install-EmTroLyCodexCliFirst -Settings $settings -PayloadRoot $PayloadRoot -StatusFile $LogFile -EditorJobId $editorJobId -ForceConfigUpdate
+        if (-not $codexOnlyRes.Installed) { throw 'codex-cli-install-failed' }
+        $completedLabels += 'Codex CLI'
+      }
+
+      $wantIde = ('antigravity-ide' -in $requestedComponents)
+      $wantExt = ('codex-extension' -in $requestedComponents)
+      if ($wantIde -or $wantExt) {
+        $stage = 'editor'
+        $modMutex = New-Object Threading.Mutex($false, ('EmTroLy-Codex-' + $editorJobId))
+        $modLocked = $false
+        try {
+          try { $modLocked = $modMutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $modLocked = $true }
+          if (-not $modLocked) { throw 'editor-busy' }
+          $modEditorSettings = [pscustomobject]@{
+            model      = [string]$settings.model
+            base_url   = 'https://codex.anhlaptrinh.vn/v1'
+            ai_api_key = [string]$settings.ai_api_key
+            job_id     = $editorJobId
+          }
+          $compMode = if ($wantIde -and $wantExt) { 'all' } elseif ($wantIde) { 'ide-only' } else { 'extension-only' }
+          Invoke-EditorStepWithCodexAutoHeal -EditorSettingsObj $modEditorSettings -ComponentMode $compMode -AllowUpdateExisting
+          if ($wantIde) { $completedLabels += 'Antigravity IDE' }
+          if ($wantExt) { $completedLabels += 'Codex Extension' }
+        } finally {
+          if ($modLocked) { try { $modMutex.ReleaseMutex() } catch { } }
+          if ($modMutex) { try { $modMutex.Dispose() } catch { } }
+        }
+      }
+
+      if (-not $wantOpenClaw) {
+        if (Get-Command Install-EmTroLyAppShortcut -ErrorAction SilentlyContinue) {
+          try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot) } catch { }
+        }
+        $joinedDone = ($completedLabels -join ', ')
+        Write-SafeStatus "Hoàn tất: Đã cài đặt thành công phần đã chọn ($joinedDone)!"
+        exit 0
+      }
+
+      # If 'openclaw' IS also in $requestedComponents, skip re-running editor in the standard block below
+      $settings | Add-Member -NotePropertyName skip_editor -NotePropertyValue $true -Force
+      $editorCompletedEarly = ($wantIde -or $wantExt)
+    }
 
     # =========================================================================
     # PRIORITY STEP 2: ALWAYS INSTALL CODEX CLI FIRST, THEN ANTIGRAVITY IDE
     #                  & CODEX EXTENSION ON ANTIGRAVITY (SO CODEX CLI CAN
     #                  AUTO-HEAL ANY SUBSEQUENT INSTALLATION ERROR!)
     # =========================================================================
-    $stage = 'codex-cli'
-    if (Get-Command Install-EmTroLyCodexCliFirst -ErrorAction SilentlyContinue) {
-      [void](Install-EmTroLyCodexCliFirst -Settings $settings -PayloadRoot $PayloadRoot -StatusFile $LogFile -EditorJobId $editorJobId)
+    if (-not $isModularRun) {
+      $stage = 'codex-cli'
+      if (Get-Command Install-EmTroLyCodexCliFirst -ErrorAction SilentlyContinue) {
+        [void](Install-EmTroLyCodexCliFirst -Settings $settings -PayloadRoot $PayloadRoot -StatusFile $LogFile -EditorJobId $editorJobId)
+      }
     }
 
     if (-not $settings.skip_editor) {
@@ -678,6 +787,9 @@ requires_openai_auth = true
     'full-access-consent-required' = 'Cần xác nhận đã hiểu cảnh báo Full Exec.'
     'invalid-qr-owner' = 'QR owner phải thuộc danh sách Telegram Owner IDs.'
     'zalo-required' = 'Bộ cài yêu cầu bật plugin Zalo.'
+    'editor-ide-missing' = 'Máy chưa có Antigravity IDE. Hãy cài đặt Phần 2 (Antigravity IDE) trước khi cài đặt Codex Extension.'
+    'codex-cli-install-failed' = 'Chưa tải hoặc giải nén được công cụ Codex CLI. Hãy kiểm tra kết nối Internet và thử lại.'
+    'invalid-component-selection' = 'Danh sách thành phần chọn cài đặt không hợp lệ.'
     'instance-exists' = 'Thư mục OpenClaw đã tồn tại; dữ liệu cũ được giữ nguyên.'
     'insufficient-disk-space' = 'Ổ đĩa không đủ dung lượng trống để cài đặt an toàn (cần tối thiểu 2.5 GB cho trọn gói hoặc 1.2 GB nếu bỏ qua Antigravity). Hãy dọn bớt ổ cứng rồi thử lại.'
     'provider-unavailable' = 'Không kết nối được API. Hãy kiểm tra URL, khóa API và kết nối Internet.'

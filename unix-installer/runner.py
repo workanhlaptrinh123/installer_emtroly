@@ -7,6 +7,8 @@ import platform
 import shutil
 import socket
 
+from urllib.parse import urlsplit
+
 import codex_setup
 import dependencies
 import ffmpeg
@@ -24,6 +26,41 @@ import zalo_setup
 
 
 DEFAULT_MIN_FREE_BYTES = 1_200_000_000
+VALID_COMPONENTS = ("codex-cli", "antigravity-ide", "codex-extension", "openclaw")
+
+
+def validate_ai_only(values: dict) -> dict:
+    if not isinstance(values, dict):
+        raise ValueError("invalid-settings")
+    norm = settings.normalize(values)
+    api_key = norm.get("ai_api_key", "")
+    if not api_key:
+        raise ValueError("missing-api-key")
+    model = norm.get("model", "")
+    if model.lower() not in settings.MODELS:
+        raise ValueError("invalid-model")
+    base_url = norm.get("base_url", "") or "https://codex.anhlaptrinh.vn/v1"
+    try:
+        if any(ch.isspace() or ord(ch) < 32 for ch in base_url):
+            raise ValueError("invalid-base-url")
+        parsed = urlsplit(base_url)
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("invalid-base-url")
+        _ = parsed.port
+    except ValueError:
+        raise ValueError("invalid-base-url") from None
+    return {
+        "ai_api_key": api_key,
+        "model": model,
+        "base_url": base_url.rstrip("/"),
+    }
 
 
 def check_disk_space(target_dir: Path) -> None:
@@ -233,3 +270,80 @@ def install(values, source, progress=lambda message: None):
         "codex": codex_info,
         "editor": editor_info,
     }
+
+
+def install_components(components, values, source, progress=lambda message: None) -> dict:
+    """Install one or more selected components independently in canonical order."""
+    if isinstance(components, str):
+        raw_list = [p.strip().lower() for p in components.split(",") if p.strip()]
+    else:
+        raw_list = [str(p).strip().lower() for p in (components or ()) if str(p).strip()]
+    if not raw_list or any(item not in VALID_COMPONENTS for item in raw_list):
+        raise ValueError("invalid-component-selection")
+    ordered = [comp for comp in VALID_COMPONENTS if comp in raw_list]
+
+    source = Path(source).resolve(strict=True)
+    home = Path.home().resolve(strict=True)
+    if platform.system() not in {"Linux", "Darwin"}:
+        raise RuntimeError("Only Ubuntu and macOS are supported")
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        raise RuntimeError("Run the installer as the desktop user, not root")
+    check_disk_space(home)
+
+    if "openclaw" in ordered:
+        values_checked = settings.validate(values)
+    else:
+        values_checked = validate_ai_only(values)
+
+    progress("Đang xác thực khóa API và mô hình trên máy chủ AI...")
+    verified_model = provider.verify(values_checked["base_url"], values_checked["ai_api_key"], values_checked["model"])
+    if verified_model.lower() != values_checked["model"].lower():
+        raise RuntimeError("Provider returned a different model")
+    values_checked["model"] = verified_model
+    if values_checked["base_url"] == "https://codex.anhlaptrinh.vn/v1":
+        try:
+            license_gate.save_license_key(values_checked["ai_api_key"])
+        except OSError:
+            pass
+
+    results: dict = {"components": ordered}
+    dependency_root = home / ".local/share/installer_emtroly/dependencies"
+    node_pair = None
+
+    if "codex-cli" in ordered:
+        progress("Phần 1 · Đang chuẩn bị Node.js và cài đặt Codex CLI riêng...")
+        node_pair = dependencies.install_node(dependency_root)
+        prev_force = os.environ.get("EMTROLY_FORCE_CODEX_INSTALL")
+        try:
+            os.environ["EMTROLY_FORCE_CODEX_INSTALL"] = "1"
+            c_info = codex_setup.install_codex_cli_first(values_checked, home, node_pair[0], node_pair[1], progress=progress)
+        finally:
+            if prev_force is None:
+                os.environ.pop("EMTROLY_FORCE_CODEX_INSTALL", None)
+            else:
+                os.environ["EMTROLY_FORCE_CODEX_INSTALL"] = prev_force
+        if not c_info.get("installed"):
+            raise RuntimeError("codex-cli-install-failed: Chưa cài đặt được gói @openai/codex. Kiểm tra kết nối Internet và thử lại.")
+        results["codex"] = c_info
+
+    if "antigravity-ide" in ordered and "codex-extension" in ordered:
+        progress("Phần 2 & 3 · Đang cấu hình Antigravity IDE và cài đặt Codex Extension...")
+        results["antigravity_ide"] = codex_setup.install_antigravity_ide_only(values_checked, home, progress=progress)
+        results["codex_extension"] = codex_setup.install_codex_extension_only(values_checked, home, progress=progress)
+    elif "antigravity-ide" in ordered:
+        progress("Phần 2 · Đang kiểm tra và cấu hình Antigravity IDE riêng...")
+        results["antigravity_ide"] = codex_setup.install_antigravity_ide_only(values_checked, home, progress=progress)
+    elif "codex-extension" in ordered:
+        progress("Phần 3 · Đang cài đặt Codex Extension trong Antigravity IDE...")
+        results["codex_extension"] = codex_setup.install_codex_extension_only(values_checked, home, progress=progress)
+
+    if "openclaw" in ordered:
+        oc_values = dict(values)
+        oc_values["skip_editor"] = True
+        oc_values["model"] = verified_model
+        oc_res = install(oc_values, source, progress=progress)
+        results["openclaw"] = oc_res
+        results["root"] = oc_res["root"]
+        results["cli"] = oc_res["cli"]
+
+    return results

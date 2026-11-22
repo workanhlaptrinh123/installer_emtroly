@@ -5,6 +5,11 @@
 Official GitHub Releases publish synchronized `emtroly` installers for all three desktop/server platforms:
 
 - **Windows x64**: `emtroly.exe` (+ `emtroly.exe.sha256`)
+  - **1-Line SmartScreen-Free Windows PowerShell Launcher** (auto-verifies SHA-256 and opens `emtroly.exe` without browser Mark-of-the-Web SmartScreen prompt):
+    ```powershell
+    irm https://raw.githubusercontent.com/workanhlaptrinh123/installer_emtroly/main/install-windows.ps1 | iex
+    ```
+  - *(If launching `emtroly.exe` directly from browser Downloads before Authenticode EV/Azure signing secrets are configured, click **More info** → **Run anyway** once; subsequent launches via the Desktop shortcut `Em Tro Ly - Anh Lap Trinh` never prompt).*
 - **macOS Apple Silicon (M1/M2/M3/M4)**: `emtroly-macos-arm64.zip` (+ `emtroly-macos-arm64.zip.sha256`, containing `EmTroLy.app`)
 - **macOS Intel (x64)**: `emtroly-macos-x64.zip` (+ `emtroly-macos-x64.zip.sha256`, containing `EmTroLy.app`)
 - **Linux Ubuntu / Debian (x64)**: `emtroly-linux-x64.deb` (+ `emtroly-linux-x64.deb.sha256`) and portable `emtroly-linux-x64.tar.gz` (+ `emtroly-linux-x64.tar.gz.sha256`)

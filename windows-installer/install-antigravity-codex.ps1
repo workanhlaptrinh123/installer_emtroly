@@ -2,7 +2,9 @@
 param(
   [Parameter(Mandatory=$true)][psobject]$Settings,
   [Parameter(Mandatory=$true)][string]$StatusFile,
-  [switch]$CheckOnly
+  [switch]$CheckOnly,
+  [ValidateSet('all', 'ide-only', 'extension-only')][string]$ComponentMode = 'all',
+  [switch]$AllowUpdateExisting
 )
 
 $ErrorActionPreference = 'Stop'
@@ -276,10 +278,13 @@ function Move-EditorRecoveryItem([string]$Path, [string]$RelativePath) {
   }
 }
 
+$isModularUpdate = ([bool]$AllowUpdateExisting -or $ComponentMode -ne 'all')
 if (Test-Path -LiteralPath $base -PathType Leaf) { throw 'editor-data-exists' }
 if (Test-Path -LiteralPath $base -PathType Container) {
   $savedJob = if (Test-Path -LiteralPath $receipt -PathType Leaf) { [IO.File]::ReadAllText($receipt) } else { '' }
-  if ($savedJob -ceq $jobId) {
+  if ($isModularUpdate) {
+    $resuming = $true
+  } elseif ($savedJob -ceq $jobId) {
     $resuming = $true
   } elseif (Test-EditorDataComplete -Root $base) {
     throw 'editor-data-exists'
@@ -309,8 +314,13 @@ if (Test-Path -LiteralPath $base -PathType Container) {
   }
 }
 
+$existingPrivateValidApp = $null
 foreach ($privateApp in @(Get-PrivateEditorAppDirectories)) {
   $isCurrentApp = $privateApp.FullName.TrimEnd('\') -ieq $appDir.TrimEnd('\')
+  if ($isModularUpdate -and (Test-EditorApplicationComplete $privateApp.FullName)) {
+    if (-not $existingPrivateValidApp) { $existingPrivateValidApp = $privateApp.FullName }
+    continue
+  }
   if ($resuming -and $isCurrentApp -and (Test-EditorApplicationComplete $privateApp.FullName)) { continue }
   Move-EditorRecoveryItem -Path $privateApp.FullName -RelativePath ('Programs\' + $privateApp.Name)
 }
@@ -347,7 +357,18 @@ foreach ($file in @('test.js', 'extension.js', 'package.json')) {
   if (-not (Test-Path -LiteralPath (Join-Path $activationProbe $file) -PathType Leaf)) { throw 'editor-activation-missing' }
 }
 $reusedBundle = $null
+if ($isModularUpdate) {
+  $recordedAppFileExisting = Join-Path $base 'editor-app-path.txt'
+  if (Test-Path -LiteralPath $recordedAppFileExisting -PathType Leaf) {
+    $recAppDir = ([IO.File]::ReadAllText($recordedAppFileExisting)).Trim()
+    if ($recAppDir) { $reusedBundle = Resolve-EditorBundle -Root $recAppDir }
+  }
+  if (-not $reusedBundle -and $existingPrivateValidApp) {
+    $reusedBundle = Resolve-EditorBundle -Root $existingPrivateValidApp
+  }
+}
 foreach ($programDirectory in @((Join-Path $env:LOCALAPPDATA 'Programs'), $env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+  if ($reusedBundle) { break }
   if (-not $programDirectory) { continue }
   foreach ($folderName in @('Antigravity IDE', 'Antigravity')) {
     $candidateDir = Join-Path $programDirectory $folderName
@@ -389,6 +410,8 @@ if ($reusingExistingEditor) {
   $editor = $reusedBundle.Editor
   $editorCli = $reusedBundle.EditorCli
   foreach ($reusedPath in @($appDir, $editor, $editorCli)) { [void](Quote-Cmd $reusedPath) }
+} elseif ($ComponentMode -eq 'extension-only') {
+  throw 'editor-ide-missing'
 }
 if ($CheckOnly) { return }
 
@@ -407,6 +430,15 @@ try {
       New-PrivateDirectory $base
     }
     [IO.File]::WriteAllText($receipt, $jobId)
+  } else {
+    if (-not (Test-Path -LiteralPath $base -PathType Container)) {
+      New-PrivateDirectory $base
+    } else {
+      Set-PrivateDirectoryAcl $base
+    }
+    if (-not (Test-Path -LiteralPath $receipt -PathType Leaf)) {
+      [IO.File]::WriteAllText($receipt, $jobId)
+    }
   }
   New-PrivateDirectory $downloadDir
   if ($reusingExistingEditor) {
@@ -456,55 +488,57 @@ requires_openai_auth = true
   } | ConvertTo-Json
   [IO.File]::WriteAllText((Join-Path $editorSettingsDir 'settings.json'), $editorSettings, (New-Object Text.UTF8Encoding($false)))
 
-  $vsix = Join-Path $base ('codex-' + $extensionVersion + '.vsix')
-  if (-not (Test-Path -LiteralPath $vsix -PathType Leaf) -or (Get-FileHash -LiteralPath $vsix -Algorithm SHA256).Hash -ine $extensionHash) {
-    Write-EditorStatus 'Đang tải Codex Extension (khoảng 370 MB)...'
-    $part = Join-Path $downloadDir 'codex.vsix'
-    Get-VerifiedDownload -Url $extensionUrl -Path $part -Hash $extensionHash
-    Move-Item -LiteralPath $part -Destination $vsix -Force
-  }
-  $env:CODEX_HOME = $codexHome
-  $env:OPENAI_API_KEY = $null
-  $env:VSCODE_IPC_HOOK_CLI = $null
-  $env:ELECTRON_RUN_AS_NODE = $null
-  $env:NODE_OPTIONS = $null
-  Write-EditorStatus 'Đang cài Codex Extension vào thư mục riêng...'
-  $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
-  $extLog = Join-Path $downloadDir 'ext-install.log'
-  $cliArgs = '/d /v:off /s /c "chcp 65001 >nul && ' + (Quote-Cmd $editorCli) + ' --user-data-dir ' + (Quote-Cmd $userData) + ' --extensions-dir ' + (Quote-Cmd $extensions) + ' --install-extension ' + (Quote-Cmd $vsix) + ' --force --do-not-include-pack-dependencies > ' + (Quote-Cmd $extLog) + ' 2>&1"'
-  $extInstalledOk = $false
-  for ($extAttempt = 1; $extAttempt -le 3; $extAttempt++) {
-    if ((Invoke-HiddenProcess $cmd $cliArgs 900) -eq 0) {
-      $extInstalledOk = $true
-      break
+  if ($ComponentMode -ne 'ide-only') {
+    $vsix = Join-Path $base ('codex-' + $extensionVersion + '.vsix')
+    if (-not (Test-Path -LiteralPath $vsix -PathType Leaf) -or (Get-FileHash -LiteralPath $vsix -Algorithm SHA256).Hash -ine $extensionHash) {
+      Write-EditorStatus 'Đang tải Codex Extension (khoảng 370 MB)...'
+      $part = Join-Path $downloadDir 'codex.vsix'
+      Get-VerifiedDownload -Url $extensionUrl -Path $part -Hash $extensionHash
+      Move-Item -LiteralPath $part -Destination $vsix -Force
     }
-    if ($extAttempt -lt 3) {
-      Start-Sleep -Seconds 3
+    $env:CODEX_HOME = $codexHome
+    $env:OPENAI_API_KEY = $null
+    $env:VSCODE_IPC_HOOK_CLI = $null
+    $env:ELECTRON_RUN_AS_NODE = $null
+    $env:NODE_OPTIONS = $null
+    Write-EditorStatus 'Đang cài Codex Extension vào thư mục riêng...'
+    $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
+    $extLog = Join-Path $downloadDir 'ext-install.log'
+    $cliArgs = '/d /v:off /s /c "chcp 65001 >nul && ' + (Quote-Cmd $editorCli) + ' --user-data-dir ' + (Quote-Cmd $userData) + ' --extensions-dir ' + (Quote-Cmd $extensions) + ' --install-extension ' + (Quote-Cmd $vsix) + ' --force --do-not-include-pack-dependencies > ' + (Quote-Cmd $extLog) + ' 2>&1"'
+    $extInstalledOk = $false
+    for ($extAttempt = 1; $extAttempt -le 3; $extAttempt++) {
+      if ((Invoke-HiddenProcess $cmd $cliArgs 900) -eq 0) {
+        $extInstalledOk = $true
+        break
+      }
+      if ($extAttempt -lt 3) {
+        Start-Sleep -Seconds 3
+      }
     }
+    if (-not $extInstalledOk) { throw 'editor-extension-install-failed' }
+    $installed = @(Get-ChildItem -LiteralPath $extensions -Directory -Filter 'openai.chatgpt-*' | Where-Object {
+      $manifest = Join-Path $_.FullName 'package.json'
+      if (-not (Test-Path -LiteralPath $manifest)) { return $false }
+      try { $package = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json; return $package.publisher -eq 'openai' -and $package.name -eq 'chatgpt' -and $package.version -eq $extensionVersion } catch { return $false }
+    })
+    if ($installed.Count -ne 1) { throw 'editor-extension-verification-failed' }
+    $codex = Join-Path $installed[0].FullName 'bin\windows-x86_64\codex.exe'
+    if (-not (Test-Path -LiteralPath $codex -PathType Leaf)) { throw 'editor-codex-missing' }
+
+    Write-EditorStatus 'Đang kiểm tra Codex và API bằng một yêu cầu thử...'
+    $probeArgs = 'exec --skip-git-repo-check --sandbox read-only ' + (Quote-Cmd 'Reply with OK only.')
+    if ((Invoke-HiddenProcess $codex $probeArgs 180) -ne 0) { throw 'editor-codex-probe-failed' }
+
+    Write-EditorStatus 'Đang kiểm tra Codex Extension trong Antigravity IDE...'
+    $activationMarker = Join-Path $downloadDir 'activation.ok'
+    $env:EMTROLY_CODEX_ACTIVATION_MARKER = $activationMarker
+    $activationArgs = '--skip-welcome --disable-workspace-trust --user-data-dir ' + (Quote-Cmd $userData) +
+      ' --extensions-dir ' + (Quote-Cmd $extensions) + ' --extensionDevelopmentPath ' + (Quote-Cmd $activationProbe) +
+      ' --extensionTestsPath ' + (Quote-Cmd $activationTest) + ' ' + (Quote-Cmd $downloadDir)
+    if ((Invoke-HiddenProcess $editor $activationArgs 180) -ne 0 -or
+        -not (Test-Path -LiteralPath $activationMarker -PathType Leaf) -or
+        [IO.File]::ReadAllText($activationMarker) -cne 'ok') { throw 'editor-activation-failed' }
   }
-  if (-not $extInstalledOk) { throw 'editor-extension-install-failed' }
-  $installed = @(Get-ChildItem -LiteralPath $extensions -Directory -Filter 'openai.chatgpt-*' | Where-Object {
-    $manifest = Join-Path $_.FullName 'package.json'
-    if (-not (Test-Path -LiteralPath $manifest)) { return $false }
-    try { $package = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json; return $package.publisher -eq 'openai' -and $package.name -eq 'chatgpt' -and $package.version -eq $extensionVersion } catch { return $false }
-  })
-  if ($installed.Count -ne 1) { throw 'editor-extension-verification-failed' }
-  $codex = Join-Path $installed[0].FullName 'bin\windows-x86_64\codex.exe'
-  if (-not (Test-Path -LiteralPath $codex -PathType Leaf)) { throw 'editor-codex-missing' }
-
-  Write-EditorStatus 'Đang kiểm tra Codex và API bằng một yêu cầu thử...'
-  $probeArgs = 'exec --skip-git-repo-check --sandbox read-only ' + (Quote-Cmd 'Reply with OK only.')
-  if ((Invoke-HiddenProcess $codex $probeArgs 180) -ne 0) { throw 'editor-codex-probe-failed' }
-
-  Write-EditorStatus 'Đang kiểm tra Codex Extension trong Antigravity IDE...'
-  $activationMarker = Join-Path $downloadDir 'activation.ok'
-  $env:EMTROLY_CODEX_ACTIVATION_MARKER = $activationMarker
-  $activationArgs = '--skip-welcome --disable-workspace-trust --user-data-dir ' + (Quote-Cmd $userData) +
-    ' --extensions-dir ' + (Quote-Cmd $extensions) + ' --extensionDevelopmentPath ' + (Quote-Cmd $activationProbe) +
-    ' --extensionTestsPath ' + (Quote-Cmd $activationTest) + ' ' + (Quote-Cmd $downloadDir)
-  if ((Invoke-HiddenProcess $editor $activationArgs 180) -ne 0 -or
-      -not (Test-Path -LiteralPath $activationMarker -PathType Leaf) -or
-      [IO.File]::ReadAllText($activationMarker) -cne 'ok') { throw 'editor-activation-failed' }
 
   $launchPath = Join-Path $base 'launch-antigravity.vbs'
   $script = @"
@@ -561,7 +595,9 @@ Set shell = Nothing
   if ($saved.TargetPath -ine (Join-Path $env:SystemRoot 'System32\wscript.exe') -or
       $saved.Arguments -cne ('//B //Nologo ' + (Quote-Cmd $launchPath)) -or
       $saved.WorkingDirectory -ine $base) { throw 'editor-shortcut-failed' }
-  Remove-Item -LiteralPath $vsix -Force -ErrorAction SilentlyContinue
+  if ($ComponentMode -ne 'ide-only' -and $vsix -and (Test-Path -LiteralPath $vsix -PathType Leaf)) {
+    Remove-Item -LiteralPath $vsix -Force -ErrorAction SilentlyContinue
+  }
 } finally {
   $env:CODEX_HOME = $oldCodexHome
   $env:OPENAI_API_KEY = $oldApiKey

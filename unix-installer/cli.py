@@ -7,6 +7,7 @@ import platform
 import shlex
 import sys
 
+import license_gate
 import python_runtime
 import runner
 import service
@@ -123,9 +124,19 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Cài Em Trợ Lý trên macOS / Linux qua terminal.")
     parser.add_argument("--check", action="store_true", help="Chỉ kiểm tra điều kiện, không cài.")
     parser.add_argument("--uninstall", metavar="MEMBER", help="Gỡ cài đặt an toàn instance đã chọn (ví dụ: emtroly).")
+    parser.add_argument("--logout-license", action="store_true", help="Thoát bản quyền ứng dụng (bắt buộc nhập lại API Key ở lần mở sau).")
+    parser.add_argument(
+        "--components",
+        metavar="LIST",
+        help="Cài từng phần (phân tách bằng dấu phẩy): codex-cli,antigravity-ide,codex-extension,openclaw",
+    )
     args = parser.parse_args(argv)
     values = {}
     try:
+        if args.logout_license:
+            license_gate.sign_out_license()
+            print("Đã thoát bản quyền ứng dụng (các dịch vụ chạy ngầm trước đó vẫn giữ nguyên).")
+            return 0
         preflight(interactive=not (args.check or args.uninstall))
         if args.check:
             print("Điều kiện user/systemd đạt. Chưa tải môi trường hoặc kiểm tra Telegram/provider.")
@@ -135,6 +146,22 @@ def main(argv=None):
             print(f"Đã gỡ cài đặt {res['member']} ({res['root']}). Sao lưu cấu hình tại: {res['backup']}")
             return 0
         bootstrap_python()
+        if args.components:
+            comps = [c.strip().lower() for c in args.components.split(",") if c.strip()]
+            source = Path(__file__).resolve().parent.parent
+            if "openclaw" in comps:
+                values = collect()
+                settings.validate(values)
+            else:
+                print("\nCài từng phần (" + ", ".join(comps) + ") — chỉ cần API Key codex.anhlaptrinh.vn và Model:")
+                values = {
+                    "base_url": DEFAULT_BASE_URL,
+                    "ai_api_key": prompt("Provider API key (codex.anhlaptrinh.vn)"),
+                    "model": prompt("Model", "gpt-6.2-sol"),
+                }
+            res = runner.install_components(comps, values, source, progress=lambda m: print(m, flush=True))
+            print("\nHoàn tất cài từng phần: " + ", ".join(res["components"]))
+            return 0
         values = collect()
         settings.validate(values)
         source = Path(__file__).resolve().parent.parent
