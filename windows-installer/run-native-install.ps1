@@ -149,6 +149,9 @@ try {
     $matching = @($ids | Where-Object { $_ -ieq [string]$settings.model })
     if ($matching.Count -eq 0) { throw 'provider-model-unavailable' }
     $settings.model = $matching[0]
+    if ($baseUrl -ceq 'https://codex.anhlaptrinh.vn/v1' -and (Get-Command Save-EmTroLyLicenseKey -ErrorAction SilentlyContinue)) {
+      try { Save-EmTroLyLicenseKey -ApiKey ([string]$settings.ai_api_key) } catch { }
+    }
 
     $stage = 'telegram'
     Write-SafeStatus 'Đang kiểm tra bot Telegram...'

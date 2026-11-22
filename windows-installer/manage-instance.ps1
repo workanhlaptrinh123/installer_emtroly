@@ -260,6 +260,10 @@ function Invoke-ManageWorkerMain {
   if (Test-Path -LiteralPath $autoHealFile -PathType Leaf) {
     . ([ScriptBlock]::Create([IO.File]::ReadAllText($autoHealFile, [System.Text.Encoding]::UTF8)))
   }
+  $wizardHelperFile = Join-Path $PayloadDir 'windows-installer\wizard-helpers.ps1'
+  if (Test-Path -LiteralPath $wizardHelperFile -PathType Leaf) {
+    . ([ScriptBlock]::Create([IO.File]::ReadAllText($wizardHelperFile, [System.Text.Encoding]::UTF8)))
+  }
 
   $req = $null
   try {
@@ -488,6 +492,9 @@ print(account_name)
       if (-not [string]::IsNullOrWhiteSpace($newApiKey)) {
         [IO.File]::WriteAllText($secretPath, "$newApiKey`n", $utf8NoBom)
         Protect-EmTroLySecretFile $secretPath
+        if (Get-Command Save-EmTroLyLicenseKey -ErrorAction SilentlyContinue) {
+          try { Save-EmTroLyLicenseKey -ApiKey $newApiKey } catch { }
+        }
       }
 
       $emCodexDir = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex' } else { '' }

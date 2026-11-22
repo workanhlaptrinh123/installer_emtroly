@@ -302,7 +302,7 @@ $xamlText = @'
               <Border Width="18" Height="18" CornerRadius="9" Background="#2563EB" VerticalAlignment="Center" Margin="0,0,8,0">
                 <Path Data="M 4,9.2 L 7.4,12.5 L 14,5.6" Stroke="#FFFFFF" StrokeThickness="2.1" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
               </Border>
-              <TextBlock Text="Bản quyền: Đã xác thực" FontSize="11.5" FontWeight="Bold" Foreground="#1E40AF" VerticalAlignment="Center"/>
+              <TextBlock Text="Bản quyền: Đã kích hoạt" FontSize="11.5" FontWeight="Bold" Foreground="#1E40AF" VerticalAlignment="Center"/>
             </StackPanel>
           </Border>
           <!-- Zalo Connected Icon Pill (Visible when installed & Zalo enabled) -->
@@ -933,7 +933,7 @@ $xamlText = @'
             </Border>
 
             <TextBlock Text="Kích hoạt Em Trợ Lý" FontSize="21" FontWeight="Bold" Foreground="#0F172A" HorizontalAlignment="Center"/>
-            <TextBlock Text="Nhập Khóa kích hoạt (Provider API Key trên codex.anhlaptrinh.vn) để mở khóa cài đặt &amp; quản lý" FontSize="12.5" Foreground="#64748B" TextAlignment="Center" TextWrapping="Wrap" Margin="0,5,0,18"/>
+            <TextBlock Text="Nhập Khóa kích hoạt (Provider API Key trên codex.anhlaptrinh.vn) — chỉ cần kích hoạt 1 lần duy nhất trên máy này, các lần sau mở thẳng phần mềm" FontSize="12.5" Foreground="#64748B" TextAlignment="Center" TextWrapping="Wrap" Margin="0,5,0,18"/>
 
             <!-- Auto-Checking Saved Key View -->
             <StackPanel x:Name="LicenseCheckingBox" Visibility="Collapsed" Margin="0,6,0,12">
@@ -1950,17 +1950,17 @@ function Show-LicenseGate([string]$ErrorMessage = '') {
   }
 }
 
-function Unlock-LicenseGate([string]$VerifiedKey) {
+function Unlock-LicenseGate([string]$VerifiedKey, [switch]$SkipSave) {
   $script:licenseVerified = $true
   $cleanKey = if ($VerifiedKey) { $VerifiedKey.Trim() } else { '' }
   if ($cleanKey) {
     $script:sessionApiKeyFallback = $cleanKey
-    if (Get-Command Save-EmTroLyLicenseKey -ErrorAction SilentlyContinue) {
+    if (-not $SkipSave -and (Get-Command Save-EmTroLyLicenseKey -ErrorAction SilentlyContinue)) {
       Save-EmTroLyLicenseKey -ApiKey $cleanKey
     }
     if (-not $script:isManageMode -and [string]::IsNullOrWhiteSpace($apiKeyBox.Text)) {
       $apiKeyBox.Text = $cleanKey
-      $apiKeyFieldLabel.Text = 'Provider API Key (✓ Đã tự động điền từ khóa kích hoạt bản quyền)'
+      $apiKeyFieldLabel.Text = 'Provider API Key (✓ Đã tự động điền từ khóa kích hoạt trên máy)'
     }
     if ($script:retryEditor -and [string]::IsNullOrWhiteSpace($retryKeyPwdBox.Password)) {
       $retryKeyPwdBox.Password = $cleanKey
@@ -1985,22 +1985,17 @@ function Invoke-LicenseVerifyFlow([string]$CandidateKey, [bool]$IsStartupAuto = 
 
   $script:licenseCheckRunning = $true
   $licenseGateOverlay.Visibility = [System.Windows.Visibility]::Visible
-  if ($IsStartupAuto) {
-    $licenseInputBox.Visibility = [System.Windows.Visibility]::Collapsed
-    $licenseCheckingBox.Visibility = [System.Windows.Visibility]::Visible
-  } else {
-    $licenseCheckingBox.Visibility = [System.Windows.Visibility]::Collapsed
-    $licenseInputBox.Visibility = [System.Windows.Visibility]::Visible
-    $licenseActivateBtn.IsEnabled = $false
-    $licenseActivateBtn.Content = 'Đang xác thực...'
-    $licenseMsgBanner.Visibility = [System.Windows.Visibility]::Collapsed
-  }
+  $licenseCheckingBox.Visibility = [System.Windows.Visibility]::Collapsed
+  $licenseInputBox.Visibility = [System.Windows.Visibility]::Visible
+  $licenseActivateBtn.IsEnabled = $false
+  $licenseActivateBtn.Content = 'Đang xác thực...'
+  $licenseMsgBanner.Visibility = [System.Windows.Visibility]::Collapsed
 
-  Start-AsyncUiTask -Params @{ HelperPath = $wizardHelperPath; Key = $keyToCheck; Auto = $IsStartupAuto } -Work {
-    param($HelperPath, $Key, $Auto)
+  Start-AsyncUiTask -Params @{ HelperPath = $wizardHelperPath; Key = $keyToCheck } -Work {
+    param($HelperPath, $Key)
     . ([ScriptBlock]::Create([IO.File]::ReadAllText($HelperPath, [System.Text.Encoding]::UTF8)))
     $chk = Test-EmTroLyLicenseKey -ApiKey $Key
-    return [pscustomobject]@{ Result = $chk; Key = $Key; Auto = $Auto }
+    return [pscustomobject]@{ Result = $chk; Key = $Key }
   } -OnComplete {
     param($payload, $err)
     $script:licenseCheckRunning = $false
@@ -2013,36 +2008,9 @@ function Invoke-LicenseVerifyFlow([string]$CandidateKey, [bool]$IsStartupAuto = 
       Unlock-LicenseGate $payload.Key
       return
     }
-    if ($r.Revoked -and (Get-Command Invoke-EmTroLyRevokeLockdown -ErrorAction SilentlyContinue)) {
-      Invoke-EmTroLyRevokeLockdown
-    }
-    $errMsg = if ($payload.Auto -and $r.Revoked) {
-      'Khóa bản quyền lưu trên máy đã hết hạn hoặc bị thu hồi trên codex.anhlaptrinh.vn. Vui lòng nhập khóa kích hoạt mới.'
-    } else {
-      [string]$r.Message
-    }
-    Show-LicenseGate $errMsg
+    Show-LicenseGate ([string]$r.Message)
   }
 }
-
-$licenseWatchTimer = New-Object System.Windows.Threading.DispatcherTimer
-$licenseWatchTimer.Interval = [TimeSpan]::FromMinutes(10)
-$licenseWatchTimer.Add_Tick({
-  if ($SmokeTest -or -not $script:licenseVerified -or $script:installRunning -or $script:licenseCheckRunning) { return }
-  $savedKey = if (Get-Command Get-EmTroLySavedLicenseKey -ErrorAction SilentlyContinue) { Get-EmTroLySavedLicenseKey } else { $script:sessionApiKeyFallback }
-  if ([string]::IsNullOrWhiteSpace($savedKey)) { return }
-  Start-AsyncUiTask -Params @{ HelperPath = $wizardHelperPath; Key = $savedKey } -Work {
-    param($HelperPath, $Key)
-    . ([ScriptBlock]::Create([IO.File]::ReadAllText($HelperPath, [System.Text.Encoding]::UTF8)))
-    return (Test-EmTroLyLicenseKey -ApiKey $Key)
-  } -OnComplete {
-    param($res, $err)
-    if (-not $err -and $res -and $res.Revoked) {
-      if (Get-Command Invoke-EmTroLyRevokeLockdown -ErrorAction SilentlyContinue) { Invoke-EmTroLyRevokeLockdown }
-      Show-LicenseGate 'Quyền sử dụng khóa API này vừa bị thu hồi trên hệ thống Anh Lập Trình. Vui lòng nhập khóa kích hoạt mới.'
-    }
-  }
-})
 
 function Start-ManageAction([string]$ActionName, [string]$ErrorDetail = '') {
   if (-not $script:licenseVerified -and -not $SmokeTest) {
@@ -3019,7 +2987,6 @@ $window.Add_Closing({
     Cleanup-CodexRun
   }
   Stop-ZaloQrSession
-  if ($licenseWatchTimer) { $licenseWatchTimer.Stop() }
   if ($liveSyncTimer) { $liveSyncTimer.Stop() }
   if ($script:zaloSyncProc) {
     try { if (-not $script:zaloSyncProc.HasExited) { $script:zaloSyncProc.Kill() } } catch { }
@@ -3064,17 +3031,18 @@ if ($SmokeTest) {
   exit 0
 }
 
+# One-time per-machine activation: if already activated on this PC, unlock immediately BEFORE rendering (zero prompt / zero delay)
+$savedLicOnStartup = if (Get-Command Get-EmTroLySavedLicenseKey -ErrorAction SilentlyContinue) { Get-EmTroLySavedLicenseKey } else { '' }
+if (-not [string]::IsNullOrWhiteSpace($savedLicOnStartup)) {
+  Unlock-LicenseGate $savedLicOnStartup -SkipSave
+} else {
+  Show-LicenseGate ''
+}
+
 $window.Add_ContentRendered({
   $window.Activate()
-  if (-not $SmokeTest) {
-    $savedLic = if (Get-Command Get-EmTroLySavedLicenseKey -ErrorAction SilentlyContinue) { Get-EmTroLySavedLicenseKey } else { '' }
-    if (-not [string]::IsNullOrWhiteSpace($savedLic)) {
-      Invoke-LicenseVerifyFlow -CandidateKey $savedLic -IsStartupAuto $true
-    } else {
-      Show-LicenseGate ''
-      [void]$licensePwdBox.Focus()
-    }
-    $licenseWatchTimer.Start()
+  if (-not $SmokeTest -and -not $script:licenseVerified) {
+    [void]$licensePwdBox.Focus()
   }
 })
 [void]$window.ShowDialog()

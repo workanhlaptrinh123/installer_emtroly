@@ -375,6 +375,12 @@ function Export-EmTroLySupportReport {
       } catch { }
     }
   }
+  if (Get-Command Get-EmTroLySavedLicenseKey -ErrorAction SilentlyContinue) {
+    try {
+      $savedLicKey = Get-EmTroLySavedLicenseKey
+      if ($savedLicKey) { $secrets += $savedLicKey }
+    } catch { }
+  }
 
   $sb = New-Object System.Text.StringBuilder
   [void]$sb.AppendLine('============================================================')
@@ -531,34 +537,104 @@ Set shell = Nothing
   }
 }
 
+function Get-EmTroLyMachineBindingId {
+  if (-not [string]::IsNullOrWhiteSpace($env:EMTROLY_TEST_MACHINE_ID)) {
+    return $env:EMTROLY_TEST_MACHINE_ID.Trim()
+  }
+  try {
+    $reg = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Cryptography' -Name 'MachineGuid' -ErrorAction Stop
+    if ($reg -and $reg.MachineGuid) {
+      return ([string]$reg.MachineGuid).Trim()
+    }
+  } catch { }
+  return ("{0}|{1}" -f $env:COMPUTERNAME, $env:USERNAME)
+}
+
+function Get-EmTroLyActivationFilePath {
+  if (-not $env:LOCALAPPDATA) { return '' }
+  return (Join-Path $env:LOCALAPPDATA 'AnhLapTrinh\EmTroLy\activation.dat')
+}
+
+function Protect-EmTroLyMachineActivationPayload([string]$ApiKey) {
+  Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
+  $machineId = Get-EmTroLyMachineBindingId
+  $payloadJson = (@{
+    key         = $ApiKey.Trim()
+    machine     = $machineId
+    activatedAt = [DateTimeOffset]::UtcNow.ToString('o')
+  } | ConvertTo-Json -Compress)
+  $plainBytes = [System.Text.Encoding]::UTF8.GetBytes($payloadJson)
+  $entropyBytes = [System.Text.Encoding]::UTF8.GetBytes("EmTroLy-Machine-v1|$machineId")
+  $cipherBytes = [System.Security.Cryptography.ProtectedData]::Protect(
+    $plainBytes,
+    $entropyBytes,
+    [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+  )
+  return [Convert]::ToBase64String($cipherBytes)
+}
+
+function Unprotect-EmTroLyMachineActivationPayload([string]$Base64Cipher) {
+  if ([string]::IsNullOrWhiteSpace($Base64Cipher)) { return '' }
+  try {
+    Add-Type -AssemblyName System.Security -ErrorAction SilentlyContinue
+    $machineId = Get-EmTroLyMachineBindingId
+    $cipherBytes = [Convert]::FromBase64String($Base64Cipher.Trim())
+    $entropyBytes = [System.Text.Encoding]::UTF8.GetBytes("EmTroLy-Machine-v1|$machineId")
+    $plainBytes = [System.Security.Cryptography.ProtectedData]::Unprotect(
+      $cipherBytes,
+      $entropyBytes,
+      [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+    )
+    $obj = [System.Text.Encoding]::UTF8.GetString($plainBytes) | ConvertFrom-Json
+    if ($obj -and ([string]$obj.machine -ceq $machineId) -and (-not [string]::IsNullOrWhiteSpace([string]$obj.key))) {
+      return ([string]$obj.key).Trim()
+    }
+  } catch { }
+  return ''
+}
+
 function Get-EmTroLySavedLicenseKey {
+  $actFile = Get-EmTroLyActivationFilePath
+  if ($actFile -and (Test-Path -LiteralPath $actFile -PathType Leaf)) {
+    try {
+      $rawCipher = ([IO.File]::ReadAllText($actFile, [System.Text.Encoding]::ASCII)).Trim()
+      $unsealed = Unprotect-EmTroLyMachineActivationPayload -Base64Cipher $rawCipher
+      if ($unsealed) { return $unsealed }
+    } catch { }
+  }
+
+  $legacyKey = ''
   if ($env:LOCALAPPDATA) {
     $licFile = Join-Path $env:LOCALAPPDATA 'EmTroLyUI\license.key'
     if (Test-Path -LiteralPath $licFile -PathType Leaf) {
       try {
         $v = ([IO.File]::ReadAllText($licFile, [System.Text.Encoding]::UTF8)).Trim()
-        if ($v) { return $v }
+        if ($v) { $legacyKey = $v }
       } catch { }
     }
   }
-  if ($env:USERPROFILE) {
+  if (-not $legacyKey -and $env:USERPROFILE) {
     $secFile = Join-Path $env:USERPROFILE 'openclaw\member-provider.secret'
     if (Test-Path -LiteralPath $secFile -PathType Leaf) {
       try {
         $v2 = ([IO.File]::ReadAllText($secFile, [System.Text.Encoding]::UTF8)).Trim()
-        if ($v2) { return $v2 }
+        if ($v2) { $legacyKey = $v2 }
       } catch { }
     }
   }
-  if ($env:LOCALAPPDATA) {
+  if (-not $legacyKey -and $env:LOCALAPPDATA) {
     $authFile = Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex\auth.json'
     if (Test-Path -LiteralPath $authFile -PathType Leaf) {
       try {
         $aObj = [IO.File]::ReadAllText($authFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
         $v3 = ([string]$aObj.OPENAI_API_KEY).Trim()
-        if ($v3) { return $v3 }
+        if ($v3) { $legacyKey = $v3 }
       } catch { }
     }
+  }
+  if ($legacyKey) {
+    try { Save-EmTroLyLicenseKey -ApiKey $legacyKey } catch { }
+    return $legacyKey
   }
   return ''
 }
@@ -571,6 +647,17 @@ function Save-EmTroLyLicenseKey {
   $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 
   if ($env:LOCALAPPDATA) {
+    $actFile = Get-EmTroLyActivationFilePath
+    if ($actFile) {
+      try {
+        $actDir = Split-Path -Parent $actFile
+        [void][IO.Directory]::CreateDirectory($actDir)
+        $sealed = Protect-EmTroLyMachineActivationPayload -ApiKey $cleanKey
+        [IO.File]::WriteAllText($actFile, "$sealed`n", [System.Text.Encoding]::ASCII)
+        & icacls $actFile /inheritance:r /grant:r "${currentUser}:(F)" '*S-1-5-18:(F)' *> $null
+      } catch { }
+    }
+
     $uiDir = Join-Path $env:LOCALAPPDATA 'EmTroLyUI'
     [void][IO.Directory]::CreateDirectory($uiDir)
     $licFile = Join-Path $uiDir 'license.key'
@@ -599,6 +686,10 @@ function Save-EmTroLyLicenseKey {
 
 function Invoke-EmTroLyRevokeLockdown {
   if ($env:LOCALAPPDATA) {
+    $actFile = Get-EmTroLyActivationFilePath
+    if ($actFile) {
+      Remove-Item -LiteralPath $actFile -Force -ErrorAction SilentlyContinue
+    }
     $licFile = Join-Path $env:LOCALAPPDATA 'EmTroLyUI\license.key'
     Remove-Item -LiteralPath $licFile -Force -ErrorAction SilentlyContinue
   }
