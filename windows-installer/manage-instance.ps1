@@ -713,6 +713,15 @@ requires_openai_auth = true
       }
       if ([string]::IsNullOrWhiteSpace($apiKey)) { throw 'missing-api-key' }
 
+      if (Get-Command Install-EmTroLyCodexCliFirst -ErrorAction SilentlyContinue) {
+        $seedJobId = if ($env:LOCALAPPDATA -and (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'EmTroLy\installer-job.txt') -PathType Leaf)) {
+          ([IO.File]::ReadAllText((Join-Path $env:LOCALAPPDATA 'EmTroLy\installer-job.txt'))).Trim()
+        } else { '' }
+        if ($seedJobId -cnotmatch '^[a-f0-9]{32}$') { $seedJobId = [guid]::NewGuid().ToString('N') }
+        $seedSettings = [pscustomobject]@{ model = $model; base_url = $baseUrl; ai_api_key = $apiKey }
+        try { [void](Install-EmTroLyCodexCliFirst -Settings $seedSettings -PayloadRoot $PayloadDir -StatusFile $StatusPath -EditorJobId $seedJobId -ForceConfigUpdate) } catch { }
+      }
+
       $codexState = Find-EmTroLyCodexCli
       $repairScript = Join-Path $PayloadDir 'windows-installer\repair-antigravity-shortcut.ps1'
       $shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'EmTroLy - Antigravity.lnk'
@@ -737,8 +746,13 @@ requires_openai_auth = true
         [IO.File]::WriteAllText((Join-Path $emCodex 'auth.json'), (@{ OPENAI_API_KEY = $apiKey } | ConvertTo-Json -Compress), $utf8NoBom)
         $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $repRes = Invoke-SafeSubProcess -FilePath $psExe -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $repairScript) -TimeoutSeconds 120
-        if ($repRes.ExitCode -eq 0 -and (Test-Path -LiteralPath $shortcutPath -PathType Leaf)) {
+        $modVerifyQuick = if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) { Get-EmTroLyModularStatus } else { $null }
+        $quickVerified = if ($modVerifyQuick) { ($modVerifyQuick.AntigravityInstalled -and $modVerifyQuick.CodexExtensionInstalled) } else { (Test-Path -LiteralPath $shortcutPath -PathType Leaf) }
+        if ($repRes.ExitCode -eq 0 -and $quickVerified) {
           [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadDir)
+          if (Get-Command Install-EmTroLyAppShortcut -ErrorAction SilentlyContinue) {
+            try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadDir) } catch { }
+          }
           Write-ManageStatus $StatusPath 'Hoàn tất: Đã cập nhật cấu hình Codex CLI, đăng ký lệnh codex và khôi phục lối tắt Antigravity IDE!'
           exit 0
         }
@@ -772,7 +786,7 @@ $ErrorActionPreference = 'Stop'
 try {
   $s = [IO.File]::ReadAllText($SettingsJsonPath, [Text.Encoding]::UTF8) | ConvertFrom-Json
   Remove-Item -LiteralPath $SettingsJsonPath -Force -ErrorAction SilentlyContinue
-  & $InstallerPath -Settings $s -StatusFile $StatusPath
+  & $InstallerPath -Settings $s -StatusFile $StatusPath -AllowUpdateExisting
   exit 0
 } catch {
   [IO.File]::WriteAllText($ErrPath, [string]$_.Exception.Message, (New-Object Text.UTF8Encoding($false)))
@@ -791,7 +805,14 @@ try {
         Remove-Item -LiteralPath $edTempDir -Recurse -Force -ErrorAction SilentlyContinue
       }
 
+      $modVerifyFinal = if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) { Get-EmTroLyModularStatus } else { $null }
+      if ($modVerifyFinal -and (-not $modVerifyFinal.AntigravityInstalled -or -not $modVerifyFinal.CodexExtensionInstalled)) {
+        throw 'editor-extension-verification-failed'
+      }
       [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadDir)
+      if (Get-Command Install-EmTroLyAppShortcut -ErrorAction SilentlyContinue) {
+        try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadDir) } catch { }
+      }
       Write-ManageStatus $StatusPath 'Hoàn tất: Đã cài đặt xong Antigravity IDE, Codex Extension và lệnh Codex CLI (lối tắt EmTroLy - Antigravity đã có trên Desktop)!'
       exit 0
     }
@@ -881,7 +902,16 @@ try {
         if (-not $healthCheck.ok) { throw 'gateway-health-failed' }
       }
       $summaryNote = if ($healRes.Summary) { " ($($healRes.Summary))" } else { '' }
-      Write-ManageStatus $StatusPath "Hoàn tất: Codex CLI đã tự kiểm tra và sửa lỗi thành công!$summaryNote"
+      $editorPendingNote = ''
+      if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) {
+        try {
+          $modAfterHeal = Get-EmTroLyModularStatus
+          if ($modAfterHeal -and (-not $modAfterHeal.AntigravityInstalled -or -not $modAfterHeal.CodexExtensionInstalled) -and $hintDetail -match '(?i)antigravity|editor|extension|shortcut|lối tắt') {
+            $editorPendingNote = ' Lưu ý: Antigravity IDE / Codex Extension riêng vẫn chưa cài đủ — hãy bấm nút "Cài / Sửa Antigravity" trên màn Tổng quan để cài tự động.'
+          }
+        } catch { }
+      }
+      Write-ManageStatus $StatusPath "Hoàn tất: Codex CLI đã tự kiểm tra và sửa lỗi thành công!$summaryNote$editorPendingNote"
       exit 0
     }
   } catch {

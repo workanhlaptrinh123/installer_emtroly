@@ -50,7 +50,7 @@ function Set-PrivateDirectoryAcl([string]$Path) {
     $acl.AddAccessRule($rule)
   }
   if (Test-Path -LiteralPath $Path -PathType Container) {
-    Set-Acl -LiteralPath $Path -AclObject $acl
+    [IO.Directory]::SetAccessControl($Path, $acl)
   } else {
     [void][IO.Directory]::CreateDirectory($Path, $acl)
   }
@@ -63,16 +63,76 @@ function New-PrivateDirectory([string]$Path) {
 
 function Get-VerifiedDownload([string]$Url, [string]$Path, [string]$Hash) {
   $maxAttempts = if ($env:EMTROLY_DOWNLOAD_RETRIES -match '^[1-5]$') { [int]$env:EMTROLY_DOWNLOAD_RETRIES } else { 3 }
+  $legacyTransport = { Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Path -TimeoutSec 900 }
+  $iwrCmd = Get-Command Invoke-WebRequest -ErrorAction SilentlyContinue
+  $useLegacy = ($legacyTransport.ToString() -notmatch 'Invoke-WebRequest') -or
+    ($iwrCmd -and $iwrCmd.CommandType -eq 'Function') -or
+    ($Url -notmatch '^https?://')
+  if (-not $useLegacy) {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    [Net.ServicePointManager]::DefaultConnectionLimit = 16
+    [Net.ServicePointManager]::Expect100Continue = $false
+  }
+  $label = if ($Url -match '\.vsix($|\?)') { 'Codex Extension' } else { 'Antigravity IDE' }
+  $partPath = "$Path.part"
   $downloaded = $false
   for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+    $resp = $null
+    $inStream = $null
+    $outStream = $null
     try {
       if (Test-Path -LiteralPath $Path -PathType Leaf) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
-      Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Path -TimeoutSec 900
+      if (Test-Path -LiteralPath $partPath -PathType Leaf) { Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue }
+      if ($useLegacy) {
+        & $legacyTransport
+      } else {
+        $req = [System.Net.HttpWebRequest]::Create([uri]$Url)
+        $req.UserAgent = 'AnhLapTrinh-EmTroLy-Installer/1.0'
+        $req.AllowAutoRedirect = $true
+        $req.MaximumAutomaticRedirections = 10
+        $req.Timeout = 30000
+        $req.ReadWriteTimeout = 60000
+        $resp = $req.GetResponse()
+        $totalBytes = [long]$resp.ContentLength
+        $inStream = $resp.GetResponseStream()
+        $outStream = New-Object System.IO.FileStream($partPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read, 262144)
+        $buf = New-Object byte[] 262144
+        $readTotal = 0L
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        $lastTick = -2000L
+        while (($n = $inStream.Read($buf, 0, $buf.Length)) -gt 0) {
+          $outStream.Write($buf, 0, $n)
+          $readTotal += $n
+          if (($sw.ElapsedMilliseconds - $lastTick) -ge 450) {
+            $lastTick = $sw.ElapsedMilliseconds
+            if ((Get-Command Write-EditorStatus -ErrorAction SilentlyContinue) -and $StatusFile) {
+              $mbCur = [Math]::Round($readTotal / 1MB, 1)
+              $spd = [Math]::Round(($readTotal / 1MB) / [Math]::Max(0.1, $sw.Elapsed.TotalSeconds), 1)
+              if ($totalBytes -gt 0) {
+                $pct = [Math]::Min(99, [int][Math]::Floor(($readTotal * 100.0) / $totalBytes))
+                $mbMax = [Math]::Round($totalBytes / 1MB, 0)
+                try { Write-EditorStatus "Đang tải $label... $pct% ($mbCur / $mbMax MB · $spd MB/s)" } catch { }
+              } else {
+                try { Write-EditorStatus "Đang tải $label... ($mbCur MB · $spd MB/s)" } catch { }
+              }
+            }
+          }
+        }
+        $outStream.Flush()
+        $outStream.Dispose(); $outStream = $null
+        $inStream.Dispose(); $inStream = $null
+        $resp.Close(); $resp = $null
+        Move-Item -LiteralPath $partPath -Destination $Path -Force
+      }
       $downloaded = $true
       break
     } catch {
+      if ($outStream) { try { $outStream.Dispose() } catch { } }
+      if ($inStream) { try { $inStream.Dispose() } catch { } }
+      if ($resp) { try { $resp.Close() } catch { } }
+      if (Test-Path -LiteralPath $partPath -PathType Leaf) { Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue }
       if (Test-Path -LiteralPath $Path -PathType Leaf) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
-      if ($attempt -lt $maxAttempts) { Start-Sleep -Milliseconds (400 * $attempt) }
+      if ($attempt -lt $maxAttempts) { Start-Sleep -Milliseconds (500 * $attempt) }
     }
   }
   if (-not $downloaded) { throw 'editor-download-failed' }
@@ -540,8 +600,10 @@ requires_openai_auth = true
         [IO.File]::ReadAllText($activationMarker) -cne 'ok') { throw 'editor-activation-failed' }
   }
 
-  $launchPath = Join-Path $base 'launch-antigravity.vbs'
-  $script = @"
+  $hasInstalledCodexExt = @(Get-ChildItem -LiteralPath $extensions -Directory -Filter 'openai.chatgpt-*' -ErrorAction SilentlyContinue).Count -gt 0
+  if ($ComponentMode -ne 'ide-only' -or $hasInstalledCodexExt) {
+    $launchPath = Join-Path $base 'launch-antigravity.vbs'
+    $script = @"
 Option Explicit
 Dim shell, procEnv, name, command
 Set shell = CreateObject("WScript.Shell")
@@ -561,40 +623,41 @@ shell.Run command, 1, False
 Set procEnv = Nothing
 Set shell = Nothing
 "@
-  [IO.File]::WriteAllText($launchPath, $script, [Text.Encoding]::Unicode)
-  $shell = New-Object -ComObject WScript.Shell
-  $temporaryShortcut = Join-Path $downloadDir 'antigravity.lnk'
-  $shortcut = $shell.CreateShortcut($temporaryShortcut)
-  $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
-  $shortcut.Arguments = '//B //Nologo ' + (Quote-Cmd $launchPath)
-  $shortcut.WorkingDirectory = $base
-  $shortcut.IconLocation = $editor + ',0'
-  $shortcut.Description = 'Em Trợ Lý - Antigravity IDE và Codex riêng'
-  $shortcut.Save()
-  $shortcutMoved = $false
-  for ($scTry = 1; $scTry -le 3; $scTry++) {
-    try {
-      if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }
-      [IO.File]::Move($temporaryShortcut, $shortcutPath)
-      $shortcutMoved = $true
-      break
-    } catch {
-      if ($scTry -lt 3) { Start-Sleep -Milliseconds (400 * $scTry) }
+    [IO.File]::WriteAllText($launchPath, $script, [Text.Encoding]::Unicode)
+    $shell = New-Object -ComObject WScript.Shell
+    $temporaryShortcut = Join-Path $downloadDir 'antigravity.lnk'
+    $shortcut = $shell.CreateShortcut($temporaryShortcut)
+    $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
+    $shortcut.Arguments = '//B //Nologo ' + (Quote-Cmd $launchPath)
+    $shortcut.WorkingDirectory = $base
+    $shortcut.IconLocation = $editor + ',0'
+    $shortcut.Description = 'Em Trợ Lý - Antigravity IDE và Codex riêng'
+    $shortcut.Save()
+    $shortcutMoved = $false
+    for ($scTry = 1; $scTry -le 3; $scTry++) {
+      try {
+        if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }
+        [IO.File]::Move($temporaryShortcut, $shortcutPath)
+        $shortcutMoved = $true
+        break
+      } catch {
+        if ($scTry -lt 3) { Start-Sleep -Milliseconds (400 * $scTry) }
+      }
     }
+    if (-not $shortcutMoved -and $startMenuShortcutPath -and ($shortcutPath -ine $startMenuShortcutPath) -and $env:EMTROLY_DISABLE_STARTMENU_FALLBACK -ne '1' -and (Test-Path -LiteralPath (Split-Path -Parent $startMenuShortcutPath) -PathType Container)) {
+      try {
+        if (Test-Path -LiteralPath $startMenuShortcutPath) { Remove-Item -LiteralPath $startMenuShortcutPath -Force }
+        [IO.File]::Move($temporaryShortcut, $startMenuShortcutPath)
+        $shortcutPath = $startMenuShortcutPath
+        $shortcutMoved = $true
+      } catch { }
+    }
+    if (-not $shortcutMoved) { throw 'editor-shortcut-failed' }
+    $saved = $shell.CreateShortcut($shortcutPath)
+    if ($saved.TargetPath -ine (Join-Path $env:SystemRoot 'System32\wscript.exe') -or
+        $saved.Arguments -cne ('//B //Nologo ' + (Quote-Cmd $launchPath)) -or
+        $saved.WorkingDirectory -ine $base) { throw 'editor-shortcut-failed' }
   }
-  if (-not $shortcutMoved -and $startMenuShortcutPath -and ($shortcutPath -ine $startMenuShortcutPath) -and $env:EMTROLY_DISABLE_STARTMENU_FALLBACK -ne '1' -and (Test-Path -LiteralPath (Split-Path -Parent $startMenuShortcutPath) -PathType Container)) {
-    try {
-      if (Test-Path -LiteralPath $startMenuShortcutPath) { Remove-Item -LiteralPath $startMenuShortcutPath -Force }
-      [IO.File]::Move($temporaryShortcut, $startMenuShortcutPath)
-      $shortcutPath = $startMenuShortcutPath
-      $shortcutMoved = $true
-    } catch { }
-  }
-  if (-not $shortcutMoved) { throw 'editor-shortcut-failed' }
-  $saved = $shell.CreateShortcut($shortcutPath)
-  if ($saved.TargetPath -ine (Join-Path $env:SystemRoot 'System32\wscript.exe') -or
-      $saved.Arguments -cne ('//B //Nologo ' + (Quote-Cmd $launchPath)) -or
-      $saved.WorkingDirectory -ine $base) { throw 'editor-shortcut-failed' }
   if ($ComponentMode -ne 'ide-only' -and $vsix -and (Test-Path -LiteralPath $vsix -PathType Leaf)) {
     Remove-Item -LiteralPath $vsix -Force -ErrorAction SilentlyContinue
   }

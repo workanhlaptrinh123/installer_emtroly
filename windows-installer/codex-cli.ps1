@@ -241,7 +241,7 @@ requires_openai_auth = true
   }
 
   $existingInfo = Find-EmTroLyCodexCli
-  if ($existingInfo.Available -and $existingInfo.Executable -and (Test-Path -LiteralPath $existingInfo.Executable -PathType Leaf)) {
+  if ($existingInfo.Available -and ($existingInfo.Source -eq 'emtroly' -or $baseUrl -cne 'https://codex.anhlaptrinh.vn/v1') -and $existingInfo.Executable -and (Test-Path -LiteralPath $existingInfo.Executable -PathType Leaf)) {
     try { [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot) } catch { }
     $openclawBin = Join-Path $env:LOCALAPPDATA 'OpenClaw\bin'
     if ((Test-Path -LiteralPath $openclawBin -PathType Container) -and ($env:Path -notlike "*$openclawBin*")) {
@@ -524,26 +524,56 @@ function Register-EmTroLyCodexCli {
       $emUiDir = Join-Path $env:LOCALAPPDATA 'EmTroLyUI'
       $emWinDir = Join-Path $emUiDir 'windows-installer'
       [void][IO.Directory]::CreateDirectory($emWinDir)
-      foreach ($name in @('wizard.ps1', 'wizard-helpers.ps1', 'codex-cli.ps1', 'auto-heal-codex.ps1', 'manage-instance.ps1', 'validation.ps1', 'repair-antigravity-shortcut.ps1')) {
-        $srcFile = Join-Path $PayloadRoot ('windows-installer\' + $name)
-        if (Test-Path -LiteralPath $srcFile -PathType Leaf) {
-          $txt = [IO.File]::ReadAllText($srcFile, [System.Text.Encoding]::UTF8)
-          [IO.File]::WriteAllText((Join-Path $emWinDir $name), $txt, (New-Object System.Text.UTF8Encoding($true)))
+      $isSameRoot = $false
+      if (Test-Path -LiteralPath $PayloadRoot -PathType Container) {
+        try {
+          $isSameRoot = ([IO.Path]::GetFullPath($PayloadRoot).TrimEnd('\') -ieq [IO.Path]::GetFullPath($emUiDir).TrimEnd('\'))
+        } catch { }
+      }
+      if (-not $isSameRoot -and (Test-Path -LiteralPath $PayloadRoot -PathType Container)) {
+        $utf8WithBom = New-Object System.Text.UTF8Encoding($true)
+        foreach ($name in @(
+          'wizard.ps1', 'wizard-helpers.ps1', 'codex-cli.ps1', 'auto-heal-codex.ps1',
+          'manage-instance.ps1', 'validation.ps1', 'repair-antigravity-shortcut.ps1',
+          'install-antigravity-codex.ps1', 'run-native-install.ps1', 'verify-openclaw-command.ps1'
+        )) {
+          $srcFile = Join-Path $PayloadRoot ('windows-installer\' + $name)
+          if (Test-Path -LiteralPath $srcFile -PathType Leaf) {
+            $txt = [IO.File]::ReadAllText($srcFile, [System.Text.Encoding]::UTF8)
+            [IO.File]::WriteAllText((Join-Path $emWinDir $name), $txt, $utf8WithBom)
+          }
         }
-      }
-      $qrBridge = Join-Path $PayloadRoot 'windows-installer\zalo-qr-session.mjs'
-      if (Test-Path -LiteralPath $qrBridge -PathType Leaf) {
-        Copy-Item -LiteralPath $qrBridge -Destination (Join-Path $emWinDir 'zalo-qr-session.mjs') -Force
-      }
-      foreach ($rf in @('alt.png', 'MANIFEST.txt')) {
-        $rSrc = Join-Path $PayloadRoot $rf
-        if (Test-Path -LiteralPath $rSrc -PathType Leaf) {
-          Copy-Item -LiteralPath $rSrc -Destination (Join-Path $emUiDir $rf) -Force
+        foreach ($assetName in @('zalo-qr-session.mjs', 'alt.ico', 'launch-wizard.vbs')) {
+          $assetSrc = Join-Path $PayloadRoot ('windows-installer\' + $assetName)
+          if (Test-Path -LiteralPath $assetSrc -PathType Leaf) {
+            Copy-Item -LiteralPath $assetSrc -Destination (Join-Path $emWinDir $assetName) -Force
+          }
         }
-      }
-      $icoSrc = Join-Path $PayloadRoot 'windows-installer\alt.ico'
-      if (Test-Path -LiteralPath $icoSrc -PathType Leaf) {
-        Copy-Item -LiteralPath $icoSrc -Destination (Join-Path $emWinDir 'alt.ico') -Force
+        $probeSrc = Join-Path $PayloadRoot 'windows-installer\activation-probe'
+        if (Test-Path -LiteralPath $probeSrc -PathType Container) {
+          $probeDst = Join-Path $emWinDir 'activation-probe'
+          [void][IO.Directory]::CreateDirectory($probeDst)
+          Copy-Item -Path (Join-Path $probeSrc '*') -Destination $probeDst -Recurse -Force
+        }
+        foreach ($rf in @('alt.png', 'MANIFEST.txt', 'configure.py')) {
+          $rSrc = Join-Path $PayloadRoot $rf
+          if (Test-Path -LiteralPath $rSrc -PathType Leaf) {
+            Copy-Item -LiteralPath $rSrc -Destination (Join-Path $emUiDir $rf) -Force
+          }
+        }
+        $nativeRootPs = Join-Path $PayloadRoot 'install-native-windows.ps1'
+        if (Test-Path -LiteralPath $nativeRootPs -PathType Leaf) {
+          $nativeTxt = [IO.File]::ReadAllText($nativeRootPs, [System.Text.Encoding]::UTF8)
+          [IO.File]::WriteAllText((Join-Path $emUiDir 'install-native-windows.ps1'), $nativeTxt, $utf8WithBom)
+        }
+        foreach ($subDir in @('native', 'modules', 'profiles', 'zalo')) {
+          $subSrc = Join-Path $PayloadRoot $subDir
+          if (Test-Path -LiteralPath $subSrc -PathType Container) {
+            $subDst = Join-Path $emUiDir $subDir
+            [void][IO.Directory]::CreateDirectory($subDst)
+            Copy-Item -Path (Join-Path $subSrc '*') -Destination $subDst -Recurse -Force
+          }
+        }
       }
       $uiLauncher = Join-Path $binDir 'emtroly-ui.cmd'
       $uiWizard = Join-Path $emWinDir 'wizard.ps1'

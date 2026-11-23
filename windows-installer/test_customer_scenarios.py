@@ -705,6 +705,32 @@ class WindowsCustomerScenarioTests(unittest.TestCase):
                     timeout=15,
                 )
                 self.assertEqual(sign_res.returncode, 0, sign_res.stdout + sign_res.stderr)
+
+                # 5. Verify Install-EmTroLyAppShortcut stages complete EmTroLyUI payload (including editor & runner) and handles self-root safely
+                sc_res = run_ps(
+                    f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{ROOT / "windows-installer/codex-cli.ps1"}", [Text.Encoding]::UTF8)))\n'
+                    f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{ROOT / "windows-installer/manage-instance.ps1"}", [Text.Encoding]::UTF8)))\n'
+                    f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{ROOT / "windows-installer/wizard-helpers.ps1"}", [Text.Encoding]::UTF8)))\n'
+                    "$ErrorActionPreference = 'Stop'\n"
+                    f"$r1 = Install-EmTroLyAppShortcut -PayloadRoot '{ROOT}'\n"
+                    "$uiDir = Join-Path $env:LOCALAPPDATA 'EmTroLyUI'\n"
+                    "foreach ($reqRel in @('windows-installer\\install-antigravity-codex.ps1', 'windows-installer\\run-native-install.ps1', 'windows-installer\\activation-probe\\test.js', 'install-native-windows.ps1', 'zalo\\onboard-zalouser-windows.ps1')) {\n"
+                    "  if (-not (Test-Path -LiteralPath (Join-Path $uiDir $reqRel) -PathType Leaf)) { throw ('missing-ui-payload:' + $reqRel) }\n"
+                    "}\n"
+                    "# Self-sync from EmTroLyUI itself must not error on self-copy\n"
+                    "[void](Install-EmTroLyAppShortcut -PayloadRoot $uiDir)\n"
+                    "# Dashboard live status must report CodexExtensionInstalled=False until extension + shortcut exist\n"
+                    "$dash = Get-EmTroLyLiveDashboardStatus\n"
+                    "if ($dash.CodexExtensionInstalled) { throw 'expected-extension-false-before-install' }\n"
+                    "# Ensure Set-Acl cmdlet (which requires SeSecurityPrivilege on non-elevated Windows users) is not used\n"
+                    "foreach ($psCheck in Get-ChildItem (Join-Path $uiDir 'windows-installer') -Filter '*.ps1') {\n"
+                    "  if ([IO.File]::ReadAllText($psCheck.FullName) -match '\\bSet-Acl\\b') { throw ('unsafe-set-acl:' + $psCheck.Name) }\n"
+                    "}\n"
+                    "Write-Output 'EMTROLY_UI_FULL_SYNC_OK'\n",
+                    env=env,
+                )
+                self.assertEqual(sc_res.returncode, 0, sc_res.stdout + sc_res.stderr)
+                self.assertIn("EMTROLY_UI_FULL_SYNC_OK", sc_res.stdout)
         finally:
             server.shutdown()
             server.server_close()

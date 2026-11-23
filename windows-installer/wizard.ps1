@@ -23,7 +23,52 @@ if (-not $SmokeTest -and $env:EMTROLY_ALLOW_MULTI_INSTANCE -ne '1') {
   $script:singleInstanceMutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
   if (-not $createdNew) {
     try { $script:singleInstanceMutex.Dispose() } catch { }
-    if ($env:EMTROLY_SUPPRESS_SINGLE_INSTANCE_MSGBOX -ne '1') {
+    $activatedExisting = $false
+    try {
+      if (-not ('EmTroLySingleInstanceFocus' -as [type])) {
+        Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class EmTroLySingleInstanceFocus {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+  public static bool ActivateExistingWindow(uint currentPid) {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows((hWnd, lParam) => {
+      uint pid;
+      GetWindowThreadProcessId(hWnd, out pid);
+      if (pid == currentPid || pid == 0) return true;
+      if (!IsWindowVisible(hWnd) && !IsIconic(hWnd)) return true;
+      var sb = new StringBuilder(256);
+      if (GetWindowText(hWnd, sb, sb.Capacity) > 0) {
+        string title = sb.ToString();
+        if (title.StartsWith("Em Trợ Lý", StringComparison.OrdinalIgnoreCase)) {
+          found = hWnd;
+          return false;
+        }
+      }
+      return true;
+    }, IntPtr.Zero);
+    if (found == IntPtr.Zero) return false;
+    ShowWindow(found, IsIconic(found) ? 9 : 5);
+    BringWindowToTop(found);
+    SetForegroundWindow(found);
+    return true;
+  }
+}
+"@ -ErrorAction Stop
+      }
+      $activatedExisting = [EmTroLySingleInstanceFocus]::ActivateExistingWindow([uint32]$PID)
+    } catch { }
+    if (-not $activatedExisting -and $env:EMTROLY_SUPPRESS_SINGLE_INSTANCE_MSGBOX -ne '1') {
       [void][System.Windows.MessageBox]::Show(
         'Ứng dụng Em Trợ Lý đang mở sẵn trên màn hình. Hãy kiểm tra thanh tác vụ (Taskbar) bên dưới.',
         'Em Trợ Lý đang chạy',
@@ -1921,27 +1966,38 @@ function Update-DashboardCards {
     $cardZaloStatus.Text = 'Chưa cài đặt Zalo (bấm nút bên dưới để cài và hiện mã QR đăng nhập).'
   }
 
-  if ($st.CodexInstalled -and $dash.HasAntigravityShortcut) {
+  $codexCliOk = if ($dash.PSObject.Properties['CodexCliInstalled']) { [bool]$dash.CodexCliInstalled } else { [bool]$st.CodexInstalled }
+  $ideOk = if ($dash.PSObject.Properties['AntigravityInstalled']) { [bool]$dash.AntigravityInstalled } else { [bool]$dash.HasAntigravityShortcut }
+  $extOk = if ($dash.PSObject.Properties['CodexExtensionInstalled']) { [bool]$dash.CodexExtensionInstalled } else { [bool]$dash.HasAntigravityShortcut }
+
+  if ($codexCliOk -and $ideOk -and $extOk -and $dash.HasAntigravityShortcut) {
     $cardCodexDot.Fill = New-Brush '#059669'
     $cardCodexBadge.Background = New-Brush '#ECFDF5'
     $cardCodexBadge.BorderBrush = New-Brush '#A7F3D0'
     $cardCodexBadgeText.Foreground = New-Brush '#065F46'
     $cardCodexBadgeText.Text = '✓ Đã cài đặt'
-    $cardCodexStatus.Text = 'Antigravity IDE & Codex CLI đã sẵn sàng · Đã có lối tắt trên Desktop.'
-  } elseif ($st.CodexInstalled) {
+    $cardCodexStatus.Text = 'Antigravity IDE, Codex Extension & Codex CLI đã sẵn sàng · Đã có lối tắt trên Desktop.'
+  } elseif ($ideOk -and -not $extOk) {
     $cardCodexDot.Fill = New-Brush '#D97706'
     $cardCodexBadge.Background = New-Brush '#FFFBEB'
     $cardCodexBadge.BorderBrush = New-Brush '#FDE68A'
     $cardCodexBadgeText.Foreground = New-Brush '#B45309'
-    $cardCodexBadgeText.Text = '● Thiếu lối tắt IDE'
-    $cardCodexStatus.Text = 'Đã có Codex CLI nhưng chưa cài đủ Antigravity IDE riêng — bấm "Cài / Sửa Antigravity & Codex" bên dưới.'
+    $cardCodexBadgeText.Text = '● Thiếu Codex Extension'
+    $cardCodexStatus.Text = 'Đã có Antigravity IDE nhưng chưa cài Codex Extension riêng (EmTroLy - Antigravity) — bấm "Cài / Sửa Antigravity" bên dưới.'
+  } elseif ($codexCliOk) {
+    $cardCodexDot.Fill = New-Brush '#D97706'
+    $cardCodexBadge.Background = New-Brush '#FFFBEB'
+    $cardCodexBadge.BorderBrush = New-Brush '#FDE68A'
+    $cardCodexBadgeText.Foreground = New-Brush '#B45309'
+    $cardCodexBadgeText.Text = '● Thiếu Antigravity IDE'
+    $cardCodexStatus.Text = 'Đã có Codex CLI nhưng chưa cài đủ Antigravity IDE & Codex Extension riêng — bấm "Cài / Sửa Antigravity" bên dưới.'
   } else {
     $cardCodexDot.Fill = New-Brush '#D97706'
     $cardCodexBadge.Background = New-Brush '#FFFBEB'
     $cardCodexBadge.BorderBrush = New-Brush '#FDE68A'
     $cardCodexBadgeText.Foreground = New-Brush '#B45309'
     $cardCodexBadgeText.Text = '● Chưa cài'
-    $cardCodexStatus.Text = 'Chưa cài Antigravity IDE & Codex CLI — bấm "Cài / Sửa Antigravity & Codex" để cài đặt tự động.'
+    $cardCodexStatus.Text = 'Chưa cài Antigravity IDE & Codex CLI — bấm "Cài / Sửa Antigravity" để cài đặt tự động.'
   }
 
   Update-ZaloGlobalBadges
@@ -2518,6 +2574,12 @@ function Update-ModularCards {
   Set-ModularBadgeVisual $modBadge3 $modBadgeText3 ([bool]$ms.CodexExtensionInstalled)
   $modDetail3.Text = $ms.CodexExtensionDetail
   $modInstall3Btn.Content = if ($ms.CodexExtensionInstalled) { 'Đồng bộ / Cài lại' } else { 'Cài phần này' }
+
+  if (-not $script:installRunning) {
+    $modCheck1.IsChecked = (-not [bool]$ms.CodexCliInstalled)
+    $modCheck2.IsChecked = (-not [bool]$ms.AntigravityInstalled)
+    $modCheck3.IsChecked = (-not [bool]$ms.CodexExtensionInstalled)
+  }
 
   Set-ModularBadgeVisual $modBadge4 $modBadgeText4 ([bool]$ms.OpenClawInstalled)
   $modDetail4.Text = $ms.OpenClawDetail

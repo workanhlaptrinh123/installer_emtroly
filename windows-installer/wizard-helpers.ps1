@@ -398,7 +398,13 @@ function Get-EmTroLyLiveDashboardStatus {
 
   $ownerCount = @($st.OwnerIds -split ',' | Where-Object { $_ -match '^[1-9][0-9]*$' }).Count
   $desktopDir = [Environment]::GetFolderPath('Desktop')
-  $hasAntigravityShortcut = ($desktopDir -and (Test-Path -LiteralPath (Join-Path $desktopDir 'EmTroLy - Antigravity.lnk') -PathType Leaf))
+  $progMenu = [Environment]::GetFolderPath('Programs')
+  $hasAntigravityShortcut = ($desktopDir -and (Test-Path -LiteralPath (Join-Path $desktopDir 'EmTroLy - Antigravity.lnk') -PathType Leaf)) -or
+    ($progMenu -and (Test-Path -LiteralPath (Join-Path $progMenu 'EmTroLy - Antigravity.lnk') -PathType Leaf))
+  $modSt = if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) { Get-EmTroLyModularStatus } else { $null }
+  $codexCliReady = if ($modSt) { [bool]$modSt.CodexCliInstalled } else { [bool]$st.CodexInstalled }
+  $ideReady = if ($modSt) { [bool]$modSt.AntigravityInstalled } else { $hasAntigravityShortcut }
+  $codexExtReady = if ($modSt) { [bool]$modSt.CodexExtensionInstalled } else { $hasAntigravityShortcut }
 
   $zaloCredDir = if ($st.Root) { Join-Path $st.Root 'credentials\zalouser' } else { '' }
   $legacyLinked = ($zaloCredDir -and (Test-Path -LiteralPath $zaloCredDir -PathType Container) -and @(Get-ChildItem -LiteralPath $zaloCredDir -Recurse -File -ErrorAction SilentlyContinue).Count -gt 0)
@@ -421,15 +427,18 @@ function Get-EmTroLyLiveDashboardStatus {
 
   $gwUrl = if ($portNum -ge 1024) { "http://127.0.0.1:$portNum/" } else { '' }
   return [pscustomobject]@{
-    State                  = $st
-    GatewayOnline          = $gatewayOnline
-    GatewayPort            = $portNum
-    GatewayUrl             = $gwUrl
-    OwnerCount             = $ownerCount
-    HasAntigravityShortcut = $hasAntigravityShortcut
-    ZaloLinked             = [bool]$zaloLinked
-    ZaloConnected          = [bool]$zaloConnected
-    HasZaloStatusCache     = [bool]$hasZaloStatusCache
+    State                   = $st
+    GatewayOnline           = $gatewayOnline
+    GatewayPort             = $portNum
+    GatewayUrl              = $gwUrl
+    OwnerCount              = $ownerCount
+    HasAntigravityShortcut  = $hasAntigravityShortcut
+    CodexCliInstalled       = $codexCliReady
+    AntigravityInstalled    = $ideReady
+    CodexExtensionInstalled = $codexExtReady
+    ZaloLinked              = [bool]$zaloLinked
+    ZaloConnected           = [bool]$zaloConnected
+    HasZaloStatusCache      = [bool]$hasZaloStatusCache
   }
 }
 
@@ -568,26 +577,54 @@ function Install-EmTroLyAppShortcut {
   [void][IO.Directory]::CreateDirectory($emWinDir)
 
   if ($PayloadRoot -and (Test-Path -LiteralPath $PayloadRoot -PathType Container)) {
-    foreach ($name in @('wizard.ps1', 'wizard-helpers.ps1', 'codex-cli.ps1', 'auto-heal-codex.ps1', 'manage-instance.ps1', 'validation.ps1', 'repair-antigravity-shortcut.ps1')) {
-      $srcFile = Join-Path $PayloadRoot ('windows-installer\' + $name)
-      if (Test-Path -LiteralPath $srcFile -PathType Leaf) {
-        $txt = [IO.File]::ReadAllText($srcFile, [System.Text.Encoding]::UTF8)
-        [IO.File]::WriteAllText((Join-Path $emWinDir $name), $txt, (New-Object System.Text.UTF8Encoding($true)))
+    $isSameUiRoot = $false
+    try {
+      $isSameUiRoot = ([IO.Path]::GetFullPath($PayloadRoot).TrimEnd('\') -ieq [IO.Path]::GetFullPath($emUiDir).TrimEnd('\'))
+    } catch { }
+    if (-not $isSameUiRoot) {
+      $utf8Bom = New-Object System.Text.UTF8Encoding($true)
+      foreach ($name in @(
+        'wizard.ps1', 'wizard-helpers.ps1', 'codex-cli.ps1', 'auto-heal-codex.ps1',
+        'manage-instance.ps1', 'validation.ps1', 'repair-antigravity-shortcut.ps1',
+        'install-antigravity-codex.ps1', 'run-native-install.ps1', 'verify-openclaw-command.ps1'
+      )) {
+        $srcFile = Join-Path $PayloadRoot ('windows-installer\' + $name)
+        if (Test-Path -LiteralPath $srcFile -PathType Leaf) {
+          $txt = [IO.File]::ReadAllText($srcFile, [System.Text.Encoding]::UTF8)
+          [IO.File]::WriteAllText((Join-Path $emWinDir $name), $txt, $utf8Bom)
+        }
       }
-    }
-    $qrBridgeSrc = Join-Path $PayloadRoot 'windows-installer\zalo-qr-session.mjs'
-    if (Test-Path -LiteralPath $qrBridgeSrc -PathType Leaf) {
-      Copy-Item -LiteralPath $qrBridgeSrc -Destination (Join-Path $emWinDir 'zalo-qr-session.mjs') -Force
-    }
-    foreach ($rootFile in @('alt.png', 'MANIFEST.txt')) {
-      $srcRoot = Join-Path $PayloadRoot $rootFile
-      if (Test-Path -LiteralPath $srcRoot -PathType Leaf) {
-        Copy-Item -LiteralPath $srcRoot -Destination (Join-Path $emUiDir $rootFile) -Force
+      foreach ($assetName in @('zalo-qr-session.mjs', 'alt.ico', 'launch-wizard.vbs')) {
+        $assetSrc = Join-Path $PayloadRoot ('windows-installer\' + $assetName)
+        if (Test-Path -LiteralPath $assetSrc -PathType Leaf) {
+          Copy-Item -LiteralPath $assetSrc -Destination (Join-Path $emWinDir $assetName) -Force
+        }
       }
-    }
-    $icoSrc = Join-Path $PayloadRoot 'windows-installer\alt.ico'
-    if (Test-Path -LiteralPath $icoSrc -PathType Leaf) {
-      Copy-Item -LiteralPath $icoSrc -Destination (Join-Path $emWinDir 'alt.ico') -Force
+      $probeSrcDir = Join-Path $PayloadRoot 'windows-installer\activation-probe'
+      if (Test-Path -LiteralPath $probeSrcDir -PathType Container) {
+        $probeDstDir = Join-Path $emWinDir 'activation-probe'
+        [void][IO.Directory]::CreateDirectory($probeDstDir)
+        Copy-Item -Path (Join-Path $probeSrcDir '*') -Destination $probeDstDir -Recurse -Force
+      }
+      foreach ($rootFile in @('alt.png', 'MANIFEST.txt', 'configure.py')) {
+        $srcRoot = Join-Path $PayloadRoot $rootFile
+        if (Test-Path -LiteralPath $srcRoot -PathType Leaf) {
+          Copy-Item -LiteralPath $srcRoot -Destination (Join-Path $emUiDir $rootFile) -Force
+        }
+      }
+      $nativePsSrc = Join-Path $PayloadRoot 'install-native-windows.ps1'
+      if (Test-Path -LiteralPath $nativePsSrc -PathType Leaf) {
+        $nativePsTxt = [IO.File]::ReadAllText($nativePsSrc, [System.Text.Encoding]::UTF8)
+        [IO.File]::WriteAllText((Join-Path $emUiDir 'install-native-windows.ps1'), $nativePsTxt, $utf8Bom)
+      }
+      foreach ($subFolder in @('native', 'modules', 'profiles', 'zalo')) {
+        $subSrc = Join-Path $PayloadRoot $subFolder
+        if (Test-Path -LiteralPath $subSrc -PathType Container) {
+          $subDst = Join-Path $emUiDir $subFolder
+          [void][IO.Directory]::CreateDirectory($subDst)
+          Copy-Item -Path (Join-Path $subSrc '*') -Destination $subDst -Recurse -Force
+        }
+      }
     }
   }
 
@@ -866,7 +903,7 @@ function Set-EmTroLyPrivateFileAcl([string]$FilePath) {
       )
       $acl.AddAccessRule($rule)
     }
-    Set-Acl -LiteralPath $FilePath -AclObject $acl -ErrorAction SilentlyContinue
+    [IO.File]::SetAccessControl($FilePath, $acl)
   } catch { }
 }
 
