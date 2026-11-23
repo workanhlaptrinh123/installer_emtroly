@@ -1034,6 +1034,21 @@ class StaticIntegrityTests(unittest.TestCase):
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
         self.assertIn("BOM_AND_AST_OK", res.stdout)
 
+        # Root 1-line bootstrap (`irm .../install-windows.ps1 | iex`) MUST be pure ASCII without UTF-8 BOM
+        # so Windows PowerShell 5.1 Invoke-RestMethod | Invoke-Expression never chokes on U+FEFF.
+        bootstrap_ps = ROOT / "install-windows.ps1"
+        boot_raw = bootstrap_ps.read_bytes()
+        self.assertFalse(boot_raw.startswith(b"\xef\xbb\xbf"), "install-windows.ps1 must NOT start with UTF-8 BOM for irm | iex")
+        iex_res = run_ps(
+            f"$env:EMTROLY_BOOTSTRAP_NO_AUTORUN = '1'\n"
+            f"$txt = [IO.File]::ReadAllText('{str(bootstrap_ps)}', [System.Text.Encoding]::UTF8)\n"
+            "Invoke-Expression $txt\n"
+            "if (-not (Get-Command Install-EmTroLyWindows -ErrorAction SilentlyContinue)) { throw 'missing-bootstrap-fn' }\n"
+            "Write-Output 'IRM_IEX_PARSE_OK'\n"
+        )
+        self.assertEqual(iex_res.returncode, 0, iex_res.stdout + iex_res.stderr)
+        self.assertIn("IRM_IEX_PARSE_OK", iex_res.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

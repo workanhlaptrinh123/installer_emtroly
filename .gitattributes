@@ -1,3 +1,4 @@
 *.sh text eol=lf
 MANIFEST.txt text eol=lf
 unix-installer/*.py text eol=lf
+install-windows.ps1 text eol=lf
