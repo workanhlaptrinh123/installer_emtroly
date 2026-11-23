@@ -845,20 +845,22 @@ def main():
         ("codex-extension", "3. Codex Extension trong Antigravity", "Cài tiện ích openai.chatgpt vào Antigravity IDE riêng và tạo lối tắt EmTroLy - Antigravity."),
         ("openclaw", "4. Trợ lý OpenClaw riêng (+ Zalo tùy chọn)", "Cài Node.js, Python, FFmpeg, OpenClaw 2026.11.4 & Gateway (cần điền Telegram ở Tab 1)."),
     ]
-    mod_single_btns = []
+    mod_single_btns = {}
 
     def refresh_modular_status():
         try:
             st_map = codex_setup.get_modular_status(preferred_member=variables["member"].get().strip() or "emtroly")
             mapping = {
-                "codex-cli": st_map["codex_cli"],
-                "antigravity-ide": st_map["antigravity_ide"],
-                "codex-extension": st_map["codex_extension"],
-                "openclaw": st_map["openclaw"],
+                "codex-cli": (st_map["codex_cli"], "Cập nhật / Cài lại"),
+                "antigravity-ide": (st_map["antigravity_ide"], "Kiểm tra / Sửa lại"),
+                "codex-extension": (st_map["codex_extension"], "Đồng bộ / Cài lại"),
+                "openclaw": (st_map["openclaw"], "Cài lại / Cấu hình"),
             }
-            for comp_id, info in mapping.items():
+            for comp_id, (info, installed_lbl) in mapping.items():
                 prefix = "✓ " if info["installed"] else "○ "
                 mod_status_vars[comp_id].set(prefix + info["detail"])
+                if comp_id in mod_single_btns:
+                    mod_single_btns[comp_id].configure(text=installed_lbl if info["installed"] else "Cài phần này")
         except Exception:
             pass
 
@@ -894,7 +896,7 @@ def main():
         busy = True
         button.state(["disabled"])
         mod_run_selected_btn.state(["disabled"])
-        for b_ref in mod_single_btns:
+        for b_ref in mod_single_btns.values():
             b_ref.state(["disabled"])
         exit_btn.configure(text="Dừng & Thoát")
         mod_progress_var.set("Đang bắt đầu cài đặt thành phần: " + ", ".join(selected_list) + "...")
@@ -929,11 +931,12 @@ def main():
         single_b = ttk.Button(
             row_frame,
             text="Cài phần này",
+            width=18,
             style="Secondary.TButton",
             command=lambda k=comp_key: start_modular_components([k]),
         )
         single_b.grid(row=0, column=3, rowspan=2, sticky="e")
-        mod_single_btns.append(single_b)
+        mod_single_btns[comp_key] = single_b
 
     mod_progress_var = tk.StringVar(value="Mẹo: Tích chọn các phần bạn cần hoặc bấm 'Cài phần này' ở từng dòng.")
     ttk.Label(tab_modular, textvariable=mod_progress_var, style="Hint.TLabel", wraplength=760, padding=10).grid(
@@ -1053,7 +1056,7 @@ def main():
                 busy = False
                 button.state(["!disabled"])
                 mod_run_selected_btn.state(["!disabled"])
-                for b_ref in mod_single_btns:
+                for b_ref in mod_single_btns.values():
                     b_ref.state(["!disabled"])
                 exit_btn.configure(text="Thoát")
                 refresh_codex_state()
@@ -1069,7 +1072,7 @@ def main():
                 busy = False
                 button.state(["!disabled"])
                 mod_run_selected_btn.state(["!disabled"])
-                for b_ref in mod_single_btns:
+                for b_ref in mod_single_btns.values():
                     b_ref.state(["!disabled"])
                 exit_btn.configure(text="Thoát")
                 refresh_codex_state()
