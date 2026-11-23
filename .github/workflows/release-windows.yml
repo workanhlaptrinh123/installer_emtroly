@@ -63,6 +63,18 @@ jobs:
           RELEASE_VERSION="${{ steps.version.outputs.version }}" \
           ./build-windows-installer.sh emtroly.exe
 
+      - name: Stage immutable EmTroLy-Setup.exe bootstrapper
+        shell: powershell
+        run: |
+          Copy-Item -LiteralPath ./windows-installer/bootstrap-stub/EmTroLy-Setup.exe -Destination ./EmTroLy-Setup.exe -Force
+          Copy-Item -LiteralPath ./windows-installer/bootstrap-stub/EmTroLy-Setup.exe.sha256 -Destination ./EmTroLy-Setup.exe.sha256 -Force
+          $expected = ([regex]::Match((Get-Content -LiteralPath ./EmTroLy-Setup.exe.sha256 -Raw), '(?i)\b([a-f0-9]{64})\b')).Groups[1].Value.ToLowerInvariant()
+          $actual = (Get-FileHash -LiteralPath ./EmTroLy-Setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if (-not $expected -or $actual -ne $expected) {
+            throw "Immutable EmTroLy-Setup.exe hash mismatch (expected $expected, got $actual)."
+          }
+          Write-Host "Verified immutable EmTroLy-Setup.exe SHA-256: $actual"
+
       - name: Sign installer with Authenticode (when certificate secrets are configured)
         shell: powershell
         env:
@@ -95,6 +107,7 @@ jobs:
           } while ((Get-Date) -lt $deadline)
           $status | Select-Object AMRunningMode, AMServiceEnabled, AntivirusEnabled, RealTimeProtectionEnabled
           ./windows-installer/scan-release.ps1 -FilePath ./emtroly.exe
+          ./windows-installer/scan-release.ps1 -FilePath ./EmTroLy-Setup.exe
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
@@ -104,6 +117,8 @@ jobs:
           path: |
             emtroly.exe
             emtroly.exe.sha256
+            EmTroLy-Setup.exe
+            EmTroLy-Setup.exe.sha256
             native-full-bundle.tar.gz
             native-full-bundle.sha256
             MANIFEST.txt
@@ -121,6 +136,26 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" --clobber \
             emtroly.exe \
             emtroly.exe.sha256 \
+            EmTroLy-Setup.exe \
+            EmTroLy-Setup.exe.sha256 \
             native-full-bundle.tar.gz \
             native-full-bundle.sha256 \
             MANIFEST.txt
+
+      - name: Attach immutable EmTroLy-Setup.exe to latest release if missing
+        if: github.ref == 'refs/heads/main'
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $raw = (& gh release view --json tagName,assets 2>$null | Out-String).Trim()
+          if (-not $raw) { exit 0 }
+          $rel = $raw | ConvertFrom-Json
+          $names = @($rel.assets | ForEach-Object { [string]$_.name })
+          if ('EmTroLy-Setup.exe' -notin $names) {
+            Write-Host "Attaching immutable EmTroLy-Setup.exe to existing release $($rel.tagName)..."
+            & gh release upload $rel.tagName EmTroLy-Setup.exe EmTroLy-Setup.exe.sha256
+            if ($LASTEXITCODE -ne 0) { throw "Failed to attach EmTroLy-Setup.exe to $($rel.tagName)" }
+          } else {
+            Write-Host "Release $($rel.tagName) already has EmTroLy-Setup.exe."
+          }

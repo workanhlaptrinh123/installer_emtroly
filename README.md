@@ -4,7 +4,9 @@
 
 Official GitHub Releases publish synchronized `emtroly` installers for all three desktop/server platforms:
 
-- **Windows x64**: `emtroly.exe` (+ `emtroly.exe.sha256`)
+- **Windows x64**:
+  - **Immutable Direct-Click Setup (`EmTroLy-Setup.exe` + `EmTroLy-Setup.exe.sha256`)**: Fixed-hash lightweight GUI bootstrapper (`releases/latest/download/EmTroLy-Setup.exe`) that verifies `emtroly.exe.sha256`, downloads the latest `emtroly.exe` without browser Mark-of-the-Web, and launches the full installer UI directly. Because `EmTroLy-Setup.exe` keeps an identical SHA-256 across all future releases, Microsoft SmartScreen reputation submission is required only once.
+  - **Full Standalone Offline/Bundled Installer (`emtroly.exe` + `emtroly.exe.sha256`)**
   - **1-Line SmartScreen-Free Windows PowerShell Launcher** (auto-verifies SHA-256 and opens `emtroly.exe` without browser Mark-of-the-Web SmartScreen prompt):
     ```powershell
     irm https://raw.githubusercontent.com/workanhlaptrinh123/installer_emtroly/main/install-windows.ps1 | iex

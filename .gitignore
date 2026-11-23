@@ -6,6 +6,8 @@
 *.deb
 *.sha256
 SHA256SUMS
+!windows-installer/bootstrap-stub/EmTroLy-Setup.exe
+!windows-installer/bootstrap-stub/EmTroLy-Setup.exe.sha256
 
 # Python caches and local backup snapshots
 __pycache__/

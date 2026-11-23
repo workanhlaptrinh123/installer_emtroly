@@ -1049,6 +1049,76 @@ class StaticIntegrityTests(unittest.TestCase):
         self.assertEqual(iex_res.returncode, 0, iex_res.stdout + iex_res.stderr)
         self.assertIn("IRM_IEX_PARSE_OK", iex_res.stdout)
 
+    @unittest.skipUnless(os.name == "nt", "Requires Windows x64")
+    def test_immutable_bootstrap_stub_integrity_and_mock_download(self):
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        import threading
+
+        stub_dir = ROOT / "windows-installer/bootstrap-stub"
+        stub_exe = stub_dir / "EmTroLy-Setup.exe"
+        stub_sha = stub_dir / "EmTroLy-Setup.exe.sha256"
+        self.assertTrue(stub_exe.is_file(), "Missing immutable EmTroLy-Setup.exe")
+        self.assertTrue(stub_sha.is_file(), "Missing EmTroLy-Setup.exe.sha256")
+
+        expected_stub_hash = re.search(r"\b([a-fA-F0-9]{64})\b", stub_sha.read_text(encoding="utf-8")).group(1).lower()
+        actual_stub_hash = hashlib.sha256(stub_exe.read_bytes()).hexdigest().lower()
+        self.assertEqual(actual_stub_hash, expected_stub_hash, "EmTroLy-Setup.exe SHA-256 drifted; SmartScreen reputation depends on immutability!")
+
+        fake_payload = b"MZ-FAKE-EMTROLY-INSTALLER-PAYLOAD-FOR-UNIT-TEST-2026" * 64
+        good_hash = hashlib.sha256(fake_payload).hexdigest().lower()
+        state = {"sha": good_hash}
+
+        class MockReleaseHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/download/MANIFEST.txt":
+                    data = b"installer_version=2026.11.23.4\n"
+                elif self.path == "/download/emtroly.exe.sha256":
+                    data = f"{state['sha']} *emtroly.exe\n".encode("ascii")
+                elif self.path == "/download/emtroly.exe":
+                    data = fake_payload
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *args):
+                pass
+
+        srv = HTTPServer(("127.0.0.1", 0), MockReleaseHandler)
+        port = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            with tempfile.TemporaryDirectory(prefix="emtroly-stub-test-") as td:
+                out_ok = Path(td) / "downloaded-ok.exe"
+                r_ok = subprocess.run(
+                    [str(stub_exe), "--quiet", "--download-only", "--test-loopback-port", str(port), "--out", str(out_ok)],
+                    capture_output=True,
+                    timeout=20,
+                    **TEXT_KWARGS,
+                )
+                self.assertEqual(r_ok.returncode, 0, r_ok.stdout + r_ok.stderr)
+                self.assertTrue(out_ok.is_file())
+                self.assertEqual(out_ok.read_bytes(), fake_payload)
+
+                # Tampered SHA-256 must be rejected and never leave corrupted exe
+                state["sha"] = "0" * 64
+                out_bad = Path(td) / "downloaded-bad.exe"
+                r_bad = subprocess.run(
+                    [str(stub_exe), "--quiet", "--download-only", "--test-loopback-port", str(port), "--out", str(out_bad)],
+                    capture_output=True,
+                    timeout=20,
+                    **TEXT_KWARGS,
+                )
+                self.assertNotEqual(r_bad.returncode, 0)
+                self.assertFalse(out_bad.exists())
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()
