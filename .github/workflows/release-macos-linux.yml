@@ -49,7 +49,7 @@ jobs:
           if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" == v* ]]; then
             version="${GITHUB_REF_NAME#v}"
           else
-            version="$(sed -n 's/^installer_version=//p' MANIFEST.txt | head -n 1)"
+            version="$(tr -d '\r' < MANIFEST.txt | sed -n 's/^installer_version=//p' | head -n 1)"
           fi
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
             echo "Invalid release version: $version" >&2

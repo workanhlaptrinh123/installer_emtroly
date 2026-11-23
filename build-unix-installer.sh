@@ -18,7 +18,7 @@ case "$SYSTEM" in
   *) echo "Unsupported build platform: $SYSTEM" >&2; exit 1 ;;
 esac
 
-RELEASE_VERSION="${RELEASE_VERSION:-$(sed -n 's/^installer_version=//p' "$BASE/MANIFEST.txt" | head -n 1)}"
+RELEASE_VERSION="${RELEASE_VERSION:-$(tr -d '\r' < "$BASE/MANIFEST.txt" | sed -n 's/^installer_version=//p' | head -n 1)}"
 [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || {
   echo "Invalid release version: $RELEASE_VERSION" >&2
   exit 1
