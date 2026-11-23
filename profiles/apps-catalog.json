@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "categories": [
+    { "id": "all", "label": "Tất cả" },
+    { "id": "core", "label": "Lập trình AI" },
+    { "id": "automation", "label": "Tự động hóa" },
+    { "id": "media", "label": "Nội dung" },
+    { "id": "installed", "label": "Đã cài" }
+  ],
+  "combos": [
+    {
+      "id": "combo-dev-3",
+      "name": "Gói Combo 1 chạm: Bộ Lập Trình AI (3 món)",
+      "badge": "GÓI GỘP",
+      "description": "Cài gộp Codex CLI + Antigravity IDE + Codex Extension tự động trong 1 lần bấm (không cần Telegram)",
+      "button_label": "Cài cả gói (3 app)",
+      "action_type": "modular",
+      "components": ["codex-cli", "antigravity-ide", "codex-extension"]
+    }
+  ],
+  "apps": [
+    {
+      "id": "codex-cli",
+      "name": "Codex CLI độc lập",
+      "category": "core",
+      "description": "Viết code, sửa lỗi & tự vận hành từ dòng lệnh",
+      "version": "Bản chuẩn",
+      "icon_bg": "#EFF6FF",
+      "icon_fg": "#2563EB",
+      "icon_path": "M 5,7 L 10,11 L 5,15 M 11,15 L 17,15",
+      "action_type": "modular",
+      "components": ["codex-cli"],
+      "open_view": "codex"
+    },
+    {
+      "id": "antigravity-suite",
+      "name": "Antigravity IDE & Extension",
+      "category": "core",
+      "description": "Môi trường lập trình AI tích hợp sẵn Codex",
+      "version": "Google IDE",
+      "icon_bg": "#EEF2FF",
+      "icon_fg": "#4F46E5",
+      "icon_path": "M 12,3 L 14.5,9.5 L 21,12 L 14.5,14.5 L 12,21 L 9.5,14.5 L 3,12 L 9.5,9.5 Z",
+      "action_type": "modular",
+      "components": ["antigravity-ide", "codex-extension"],
+      "launch_shortcut": "EmTroLy - Antigravity.lnk"
+    },
+    {
+      "id": "zalo-personal",
+      "name": "Zalo cá nhân & Quét QR",
+      "category": "core",
+      "description": "Kết nối trợ lý OpenClaw trực tiếp với Zalo cá nhân",
+      "version": "Tích hợp sẵn",
+      "icon_bg": "#ECFDF5",
+      "icon_fg": "#059669",
+      "icon_path": "M 4,6 L 20,6 L 20,16 L 9,16 L 4,20 Z",
+      "action_type": "zalo-plugin"
+    },
+    {
+      "id": "n8n-automation",
+      "name": "n8n Tự động hóa",
+      "category": "automation",
+      "badge": "SẮP RA MẮT",
+      "description": "Quy trình tự động hóa chạy cục bộ ngay trên máy",
+      "version": "Mở rộng",
+      "icon_bg": "#FFFBEB",
+      "icon_fg": "#D97706",
+      "icon_path": "M 6,6 A 3,3 0 1,0 6,12 A 3,3 0 1,0 6,6 M 18,12 A 3,3 0 1,0 18,18 A 3,3 0 1,0 18,12 M 9,9 L 15,15",
+      "action_type": "coming_soon",
+      "detect_command": "n8n",
+      "launch_url": "http://127.0.0.1:5678",
+      "note": "Để kích hoạt cài đặt thật cho n8n, chỉ cần thêm script cài vào modules/ và đổi action_type thành \"script\" trong profiles/apps-catalog.json."
+    },
+    {
+      "id": "video-factory-ai",
+      "name": "Xưởng Video AI",
+      "category": "media",
+      "badge": "SẮP RA MẮT",
+      "description": "Tạo video, kịch bản & lồng tiếng tự động",
+      "version": "Mở rộng",
+      "icon_bg": "#FFF1F2",
+      "icon_fg": "#E11D48",
+      "icon_path": "M 5,5 L 19,12 L 5,19 Z",
+      "action_type": "coming_soon",
+      "note": "Sẵn sàng gắn gói mở rộng Xưởng Video AI thông qua profiles/apps-catalog.json mà không cần sửa lại giao diện."
+    },
+    {
+      "id": "fanpage-auto-reply",
+      "name": "Auto Fanpage & Báo cáo",
+      "category": "automation",
+      "badge": "SẮP RA MẮT",
+      "description": "Tự trả lời bình luận, inbox & tổng hợp báo cáo",
+      "version": "Mở rộng",
+      "icon_bg": "#F0F9FF",
+      "icon_fg": "#0284C7",
+      "icon_path": "M 4,4 L 20,4 L 20,20 L 4,20 Z M 4,10 L 20,10 M 10,10 L 10,20",
+      "action_type": "coming_soon",
+      "note": "Sẵn sàng tích hợp module chăm sóc Fanpage & báo cáo tự động trong bản cập nhật tiếp theo."
+    }
+  ]
+}
