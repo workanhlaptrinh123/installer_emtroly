@@ -285,11 +285,298 @@ function Invoke-ManageWorkerMain {
   $lastManageTechDetail = ''
 
   try {
-    if ($action -notin @('update-config', 'install-zalo', 'reinstall-codex', 'health-restart', 'auto-heal', 'uninstall-instance')) {
+    function Remove-EmTroLyDirectoryTree([string]$TargetDir) {
+      if ([string]::IsNullOrWhiteSpace($TargetDir) -or -not (Test-Path -LiteralPath $TargetDir)) { return }
+      $itemCheck = Get-Item -LiteralPath $TargetDir -Force -ErrorAction SilentlyContinue
+      if ($itemCheck -and ($itemCheck.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'unsafe-symlink-instance'
+      }
+      try {
+        $cmdExeRm = Join-Path $env:SystemRoot 'System32\cmd.exe'
+        if (Test-Path -LiteralPath $cmdExeRm -PathType Leaf) {
+          $rmPsiTree = New-Object System.Diagnostics.ProcessStartInfo
+          $rmPsiTree.FileName = $cmdExeRm
+          $rmPsiTree.Arguments = '/d /s /c "rmdir /s /q "' + $TargetDir + '""'
+          $rmPsiTree.UseShellExecute = $false
+          $rmPsiTree.CreateNoWindow = $true
+          $rmPsiTree.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+          $rmProcTree = [System.Diagnostics.Process]::Start($rmPsiTree)
+          [void]$rmProcTree.WaitForExit(30000)
+          $rmProcTree.Dispose()
+        }
+      } catch { }
+      if (Test-Path -LiteralPath $TargetDir) {
+        Remove-Item -LiteralPath $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
+      }
+    }
+
+    if ($action -notin @('update-config', 'install-zalo', 'reinstall-codex', 'health-restart', 'auto-heal', 'uninstall-instance', 'factory-reset', 'upgrade-openclaw')) {
       throw 'invalid-manage-action'
     }
-    if ($action -notin @('reinstall-codex', 'auto-heal', 'uninstall-instance') -and -not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+    if ($action -notin @('reinstall-codex', 'auto-heal', 'uninstall-instance', 'factory-reset') -and -not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
       throw 'instance-missing'
+    }
+
+    if ($action -eq 'factory-reset') {
+      $localApp = $env:LOCALAPPDATA
+      $emBase = if ($localApp) { Join-Path $localApp 'EmTroLy' } else { '' }
+      $emUiDir = if ($localApp) { Join-Path $localApp 'EmTroLyUI' } else { '' }
+      $altDir = if ($localApp) { Join-Path $localApp 'AnhLapTrinh\EmTroLy' } else { '' }
+      $altParent = if ($localApp) { Join-Path $localApp 'AnhLapTrinh' } else { '' }
+      $depDir = if ($localApp) { Join-Path $localApp 'MemberInstaller' } else { '' }
+      $ocAppDir = if ($localApp) { Join-Path $localApp 'OpenClaw' } else { '' }
+      $ocBinDir = if ($ocAppDir) { Join-Path $ocAppDir 'bin' } else { '' }
+
+      foreach ($chkDir in @($root, $emBase, $emUiDir, $altDir, $depDir, $ocAppDir)) {
+        if ($chkDir -and (Test-Path -LiteralPath $chkDir -PathType Container)) {
+          $chkItem = Get-Item -LiteralPath $chkDir -Force -ErrorAction Stop
+          if ($chkItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw 'unsafe-symlink-instance'
+          }
+        }
+      }
+
+      Write-ManageStatus $StatusPath 'Đang dừng dịch vụ nền OpenClaw Gateway và các tiến trình của Em Trợ Lý...'
+      if ($root -and (Test-Path -LiteralPath $root -PathType Container)) {
+        try { [IO.File]::WriteAllText((Join-Path $root 'user-gateway.stop'), 'stop', $utf8NoBom) } catch { }
+        if (Test-Path -LiteralPath (Join-Path $root 'openclaw-instance.ps1') -PathType Leaf) {
+          try { [void](Invoke-EmTroLyGatewayInstance -Root $root -CliArgs @('gateway', 'stop')) } catch { }
+        }
+      }
+
+      if ($env:EMTROLY_SKIP_PROCESS_SWEEP -ne '1') {
+        try {
+          $privIdePrefix = if ($localApp) { (Join-Path $localApp 'Programs\EmTroLy-Antigravity-IDE-').TrimEnd('\') } else { '' }
+          $emAgDir = if ($emBase) { Join-Path $emBase 'Antigravity' } else { '' }
+          $emProcs = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe' OR Name = 'codex.exe' OR Name = 'Antigravity IDE.exe' OR Name = 'Antigravity.exe'" -ErrorAction SilentlyContinue)
+          foreach ($pr in $emProcs) {
+            if (-not $pr.ProcessId -or [int]$pr.ProcessId -eq $PID) { continue }
+            $pName = [string]$pr.Name
+            $cmdLine = [string]$pr.CommandLine
+            $exePath = [string]$pr.ExecutablePath
+            $shouldKill = $false
+            if ($pName -ieq 'node.exe') {
+              foreach ($mk in @($root, $emBase, $depDir)) {
+                if ($mk -and (($cmdLine -and $cmdLine.IndexOf($mk, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
+                              ($exePath -and $exePath.IndexOf($mk, [StringComparison]::OrdinalIgnoreCase) -ge 0))) {
+                  $shouldKill = $true; break
+                }
+              }
+            } elseif ($pName -ieq 'codex.exe') {
+              if ($emBase -and (($exePath -and $exePath.IndexOf($emBase, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or
+                                ($cmdLine -and $cmdLine.IndexOf($emBase, [StringComparison]::OrdinalIgnoreCase) -ge 0))) {
+                $shouldKill = $true
+              }
+            } else {
+              if (($privIdePrefix -and $exePath -and $exePath.StartsWith($privIdePrefix, [StringComparison]::OrdinalIgnoreCase)) -or
+                  ($emAgDir -and $cmdLine -and $cmdLine.IndexOf($emAgDir, [StringComparison]::OrdinalIgnoreCase) -ge 0)) {
+                $shouldKill = $true
+              }
+            }
+            if ($shouldKill) {
+              Stop-Process -Id ([int]$pr.ProcessId) -Force -ErrorAction SilentlyContinue
+            }
+          }
+        } catch { }
+      }
+
+      Write-ManageStatus $StatusPath 'Đang gỡ bỏ khởi động cùng Windows, lối tắt Desktop và lệnh CLI...'
+      $startupDirReset = if ($env:EMTROLY_TEST_STARTUP_DIR) { $env:EMTROLY_TEST_STARTUP_DIR } else { [Environment]::GetFolderPath([Environment+SpecialFolder]::Startup) }
+      if ($startupDirReset -and (Test-Path -LiteralPath $startupDirReset -PathType Container)) {
+        foreach ($vbs in @(Get-ChildItem -LiteralPath $startupDirReset -Filter 'OpenClaw-*.vbs' -File -ErrorAction SilentlyContinue)) {
+          try {
+            $vbsTxt = [IO.File]::ReadAllText($vbs.FullName, [Text.Encoding]::Unicode)
+            if ((-not $root) -or $vbsTxt.IndexOf($root, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or $vbs.Name -ieq 'OpenClaw-member-emtroly.vbs') {
+              Remove-Item -LiteralPath $vbs.FullName -Force -ErrorAction SilentlyContinue
+            }
+          } catch { }
+        }
+      }
+
+      $desktopDirs = @()
+      if ($env:EMTROLY_TEST_DESKTOP_DIR) {
+        $desktopDirs += $env:EMTROLY_TEST_DESKTOP_DIR
+      } else {
+        $sysDesktop = [Environment]::GetFolderPath('Desktop')
+        if ($sysDesktop) { $desktopDirs += $sysDesktop }
+        if ($env:USERPROFILE) { $desktopDirs += (Join-Path $env:USERPROFILE 'Desktop') }
+      }
+      foreach ($dDir in @($desktopDirs | Where-Object { $_ } | Select-Object -Unique)) {
+        if (Test-Path -LiteralPath $dDir -PathType Container) {
+          foreach ($lnkName in @('EmTroLy - Antigravity.lnk', 'Em Tro Ly - Anh Lap Trinh.lnk')) {
+            $lnkTarget = Join-Path $dDir $lnkName
+            if (Test-Path -LiteralPath $lnkTarget -PathType Leaf) {
+              Remove-Item -LiteralPath $lnkTarget -Force -ErrorAction SilentlyContinue
+            }
+          }
+        }
+      }
+
+      $programsMenu = if ($env:EMTROLY_TEST_PROGRAMS_DIR) { $env:EMTROLY_TEST_PROGRAMS_DIR } else { [Environment]::GetFolderPath('Programs') }
+      if ($programsMenu -and (Test-Path -LiteralPath $programsMenu -PathType Container)) {
+        $agStartLnk = Join-Path $programsMenu 'EmTroLy - Antigravity.lnk'
+        if (Test-Path -LiteralPath $agStartLnk -PathType Leaf) {
+          Remove-Item -LiteralPath $agStartLnk -Force -ErrorAction SilentlyContinue
+        }
+        $altMenuFolder = Join-Path $programsMenu 'Anh Lap Trinh'
+        $appStartLnk = Join-Path $altMenuFolder 'Em Tro Ly - Anh Lap Trinh.lnk'
+        if (Test-Path -LiteralPath $appStartLnk -PathType Leaf) {
+          Remove-Item -LiteralPath $appStartLnk -Force -ErrorAction SilentlyContinue
+        }
+        if ((Test-Path -LiteralPath $altMenuFolder -PathType Container) -and @(Get-ChildItem -LiteralPath $altMenuFolder -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+          Remove-Item -LiteralPath $altMenuFolder -Force -ErrorAction SilentlyContinue
+        }
+      }
+
+      if ($ocBinDir -and (Test-Path -LiteralPath $ocBinDir -PathType Container)) {
+        foreach ($shimFile in @(Get-ChildItem -LiteralPath $ocBinDir -Filter '*.cmd' -File -ErrorAction SilentlyContinue)) {
+          $sName = $shimFile.Name
+          $shouldDeleteShim = ($sName -like 'openclaw*.cmd' -or $sName -ieq 'codex-emtroly.cmd' -or $sName -ieq 'emtroly-ui.cmd')
+          if (-not $shouldDeleteShim -and $sName -ieq 'codex.cmd') {
+            try {
+              $shimContent = [IO.File]::ReadAllText($shimFile.FullName, [Text.Encoding]::UTF8)
+              if ($shimContent -match 'EmTroLy|CODEX_HOME') { $shouldDeleteShim = $true }
+            } catch { }
+          }
+          if ($shouldDeleteShim) {
+            Remove-Item -LiteralPath $shimFile.FullName -Force -ErrorAction SilentlyContinue
+          }
+        }
+        if (@(Get-ChildItem -LiteralPath $ocBinDir -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+          Remove-Item -LiteralPath $ocBinDir -Force -ErrorAction SilentlyContinue
+          if ($env:EMTROLY_SKIP_REGISTRY_CLEANUP -ne '1') {
+            try {
+              $userEnvKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+              if ($userEnvKey) {
+                try {
+                  $rawPathVal = $userEnvKey.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+                  if ($rawPathVal -is [string] -and -not [string]::IsNullOrWhiteSpace($rawPathVal)) {
+                    $normOcBin = [Environment]::ExpandEnvironmentVariables($ocBinDir).Trim().Trim('"').TrimEnd('\')
+                    $keptSegments = @()
+                    $pathChanged = $false
+                    foreach ($seg in @($rawPathVal -split ';')) {
+                      if ([string]::IsNullOrWhiteSpace($seg)) { continue }
+                      $normSeg = [Environment]::ExpandEnvironmentVariables($seg.Trim().Trim('"')).TrimEnd('\')
+                      if ($normSeg -ieq $normOcBin) { $pathChanged = $true }
+                      else { $keptSegments += $seg }
+                    }
+                    if ($pathChanged) {
+                      $pathKind = $userEnvKey.GetValueKind('Path')
+                      $userEnvKey.SetValue('Path', ($keptSegments -join ';'), $pathKind)
+                    }
+                  }
+                } finally {
+                  $userEnvKey.Dispose()
+                }
+              }
+            } catch { }
+          }
+        }
+        if ($ocAppDir -and (Test-Path -LiteralPath $ocAppDir -PathType Container) -and @(Get-ChildItem -LiteralPath $ocAppDir -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+          Remove-Item -LiteralPath $ocAppDir -Force -ErrorAction SilentlyContinue
+        }
+      }
+
+      if ($localApp) {
+        $progLocalDir = Join-Path $localApp 'Programs'
+        if (Test-Path -LiteralPath $progLocalDir -PathType Container) {
+          foreach ($privIde in @(Get-ChildItem -LiteralPath $progLocalDir -Directory -Filter 'EmTroLy-Antigravity-IDE-*' -ErrorAction SilentlyContinue)) {
+            if ($privIde.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
+            Write-ManageStatus $StatusPath 'Đang gỡ bỏ bộ Antigravity IDE cài riêng của Em Trợ Lý...'
+            $uninsPath = Join-Path $privIde.FullName 'unins000.exe'
+            if ($env:EMTROLY_SKIP_UNINSTALLER_EXEC -ne '1' -and (Test-Path -LiteralPath $uninsPath -PathType Leaf)) {
+              try {
+                [void](Invoke-SafeSubProcess -FilePath $uninsPath -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -TimeoutSeconds 90)
+              } catch { }
+            }
+            Remove-EmTroLyDirectoryTree $privIde.FullName
+          }
+        }
+        if ($env:EMTROLY_SKIP_REGISTRY_CLEANUP -ne '1') {
+          try {
+            $agUnKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{AA73B3E3-C6C8-45C8-B1DC-4AE56C751432}_is1'
+            if (Test-Path -LiteralPath $agUnKey) {
+              $agUnProp = Get-ItemProperty -LiteralPath $agUnKey -ErrorAction SilentlyContinue
+              $agLocStr = if ($agUnProp -and $agUnProp.InstallLocation) { [string]$agUnProp.InstallLocation } else { '' }
+              $agCmdStr = if ($agUnProp -and $agUnProp.UninstallString) { [string]$agUnProp.UninstallString } else { '' }
+              if ($agLocStr -match 'EmTroLy-Antigravity-IDE-' -or $agCmdStr -match 'EmTroLy-Antigravity-IDE-') {
+                Remove-Item -LiteralPath $agUnKey -Recurse -Force -ErrorAction SilentlyContinue
+              }
+            }
+          } catch { }
+        }
+      }
+
+      if ($depDir -and (Test-Path -LiteralPath $depDir -PathType Container)) {
+        Write-ManageStatus $StatusPath 'Đang gỡ bỏ gói môi trường tải riêng (Node.js, Python, FFmpeg)...'
+        $privPythonExe = Join-Path $depDir 'dependencies\python313\python.exe'
+        if ($env:EMTROLY_SKIP_UNINSTALLER_EXEC -ne '1' -and (Test-Path -LiteralPath $privPythonExe -PathType Leaf) -and
+            (-not (Test-Path -LiteralPath (Join-Path $localApp 'Programs\Python\Python313\python.exe') -PathType Leaf))) {
+          try {
+            $pyEntries = @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object {
+              $_.DisplayName -eq 'Python 3.13.16 (64-bit)' -and $_.QuietUninstallString -match 'python-3\.13\.16-amd64\.exe'
+            })
+            foreach ($pyEnt in $pyEntries) {
+              if ([string]$pyEnt.QuietUninstallString -match '^"([^"]+\.exe)"') {
+                $pyInstallerCache = $Matches[1]
+                if (Test-Path -LiteralPath $pyInstallerCache -PathType Leaf) {
+                  [void](Invoke-SafeSubProcess -FilePath $pyInstallerCache -ArgumentList @('/uninstall', '/quiet') -TimeoutSeconds 90)
+                }
+              }
+            }
+          } catch { }
+        }
+        Remove-EmTroLyDirectoryTree $depDir
+      }
+
+      Write-ManageStatus $StatusPath 'Đang xóa sạch dữ liệu OpenClaw, Codex CLI, thông số lưu nháp và khóa kích hoạt trên máy...'
+      if ($root -and (Test-Path -LiteralPath $root)) {
+        Remove-EmTroLyDirectoryTree $root
+        if (Test-Path -LiteralPath $root) { throw 'uninstall-cleanup-locked' }
+      }
+      if ($emBase -and (Test-Path -LiteralPath $emBase)) {
+        Remove-EmTroLyDirectoryTree $emBase
+        if (Test-Path -LiteralPath $emBase) { throw 'editor-data-recovery-failed' }
+      }
+      if ($localApp -and (Test-Path -LiteralPath $localApp -PathType Container)) {
+        foreach ($failedItem in @(Get-ChildItem -LiteralPath $localApp -Directory -Filter 'EmTroLy.failed-*' -ErrorAction SilentlyContinue)) {
+          if (-not ($failedItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            Remove-EmTroLyDirectoryTree $failedItem.FullName
+          }
+        }
+      }
+      if ($emUiDir -and (Test-Path -LiteralPath $emUiDir)) {
+        $activePayloadNorm = if ($PayloadDir) { [IO.Path]::GetFullPath($PayloadDir).TrimEnd('\') } else { '' }
+        $emUiNorm = [IO.Path]::GetFullPath($emUiDir).TrimEnd('\')
+        if ($activePayloadNorm -ieq $emUiNorm) {
+          Remove-Item -LiteralPath (Join-Path $emUiDir 'license.key') -Force -ErrorAction SilentlyContinue
+        } else {
+          Remove-EmTroLyDirectoryTree $emUiDir
+        }
+      }
+      if ($altDir -and (Test-Path -LiteralPath $altDir -PathType Container)) {
+        foreach ($stateLeaf in @('activation.dat', 'setup-draft.dat', 'signed-out.flag')) {
+          $leafPath = Join-Path $altDir $stateLeaf
+          if (Test-Path -LiteralPath $leafPath -PathType Leaf) {
+            Remove-Item -LiteralPath $leafPath -Force -ErrorAction SilentlyContinue
+          }
+        }
+        foreach ($stateSub in @('backups', 'bootstrap')) {
+          $subPath = Join-Path $altDir $stateSub
+          if (Test-Path -LiteralPath $subPath -PathType Container) {
+            Remove-EmTroLyDirectoryTree $subPath
+          }
+        }
+        if (@(Get-ChildItem -LiteralPath $altDir -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+          Remove-Item -LiteralPath $altDir -Force -ErrorAction SilentlyContinue
+        }
+        if ($altParent -and (Test-Path -LiteralPath $altParent -PathType Container) -and @(Get-ChildItem -LiteralPath $altParent -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+          Remove-Item -LiteralPath $altParent -Force -ErrorAction SilentlyContinue
+        }
+      }
+
+      Write-ManageStatus $StatusPath 'Hoàn tất: Đã reset toàn bộ Em Trợ Lý về trạng thái trắng tinh từ đầu — giống hệt một người mới chưa từng cài ứng dụng!'
+      exit 0
     }
 
     if ($action -eq 'uninstall-instance') {

@@ -124,6 +124,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Cài Em Trợ Lý trên macOS / Linux qua terminal.")
     parser.add_argument("--check", action="store_true", help="Chỉ kiểm tra điều kiện, không cài.")
     parser.add_argument("--uninstall", metavar="MEMBER", help="Gỡ cài đặt an toàn instance đã chọn (ví dụ: emtroly).")
+    parser.add_argument(
+        "--reset-all",
+        action="store_true",
+        help="Reset toàn bộ Em Trợ Lý về trạng thái ban đầu như một người mới chưa từng cài ứng dụng.",
+    )
     parser.add_argument("--logout-license", action="store_true", help="Thoát bản quyền ứng dụng (bắt buộc nhập lại API Key ở lần mở sau).")
     parser.add_argument(
         "--components",
@@ -136,6 +141,12 @@ def main(argv=None):
         if args.logout_license:
             license_gate.sign_out_license()
             print("Đã thoát bản quyền ứng dụng (các dịch vụ chạy ngầm trước đó vẫn giữ nguyên).")
+            return 0
+        if args.reset_all:
+            if hasattr(os, "geteuid") and os.geteuid() == 0:
+                raise RuntimeError("Không chạy bằng root hoặc sudo; hãy đăng nhập bằng tài khoản người dùng thường.")
+            res = uninstaller.factory_reset_emtroly()
+            print(f"Đã reset toàn bộ Em Trợ Lý về trạng thái ban đầu như máy mới ({res['home']}).")
             return 0
         preflight(interactive=not (args.check or args.uninstall))
         if args.check:
