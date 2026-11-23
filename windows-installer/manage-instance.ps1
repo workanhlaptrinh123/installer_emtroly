@@ -914,6 +914,92 @@ try {
       Write-ManageStatus $StatusPath "Hoàn tất: Codex CLI đã tự kiểm tra và sửa lỗi thành công!$summaryNote$editorPendingNote"
       exit 0
     }
+
+    if ($action -eq 'upgrade-openclaw') {
+      if (-not $state.OpenClawInstalled) { throw 'openclaw-not-installed' }
+      $verInfo = if (Get-Command Get-EmTroLyOpenClawVersionInfo -ErrorAction SilentlyContinue) {
+        Get-EmTroLyOpenClawVersionInfo -PayloadRoot $PayloadDir -OpenClawRoot $root
+      } else { $null }
+      $targetVer = if ($verInfo -and $verInfo.TargetVersion) { [string]$verInfo.TargetVersion } else { '2026.11.4' }
+      $curVer = if ($verInfo -and $verInfo.InstalledVersion) { [string]$verInfo.InstalledVersion } else { '' }
+      if ($verInfo -and $verInfo.IsUpToDate) {
+        Write-ManageStatus $StatusPath "Hoàn tất: Trợ lý OpenClaw đã ở phiên bản mới nhất (v$curVer) — không cần nâng cấp."
+        exit 0
+      }
+
+      Write-ManageStatus $StatusPath "Đang sao lưu cấu hình OpenClaw hiện tại (v$curVer) trước khi nâng cấp lên v$targetVer..."
+      $backupDir = Join-Path $root ('backups\upgrade-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+      New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+      foreach ($bf in @('openclaw.json', 'installer-instance.json', 'openclaw-instance.ps1', 'windows-cli.json')) {
+        $bSrc = Join-Path $root $bf
+        if (Test-Path -LiteralPath $bSrc -PathType Leaf) {
+          Copy-Item -LiteralPath $bSrc -Destination (Join-Path $backupDir $bf) -Force
+        }
+      }
+
+      $nodeExe = Resolve-EmTroLyNodeBinary -OpenClawRoot $root
+      if (-not $nodeExe) { throw 'node-not-found' }
+      $nodeDir = Split-Path -Parent $nodeExe
+      $npmCmd = Join-Path $nodeDir 'npm.cmd'
+      if (-not (Test-Path -LiteralPath $npmCmd -PathType Leaf)) {
+        $npmFound = @(Get-Command npm.cmd -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1)
+        if ($npmFound.Count -gt 0) { $npmCmd = $npmFound[0].Source }
+      }
+      if (-not $npmCmd -or -not (Test-Path -LiteralPath $npmCmd -PathType Leaf)) { throw 'npm-not-found' }
+
+      $env:Path = "$nodeDir;$env:Path"
+      $rtTarget = Join-Path $root ("runtime\$targetVer")
+      New-Item -ItemType Directory -Path $rtTarget -Force | Out-Null
+      $rtPkg = @{ name='member-openclaw-runtime'; version='1.0.0'; private=$true }
+      [IO.File]::WriteAllText((Join-Path $rtTarget 'package.json'), ($rtPkg | ConvertTo-Json -Depth 4), $utf8NoBom)
+
+      Write-ManageStatus $StatusPath "Đang tải và nâng cấp OpenClaw lên phiên bản v$targetVer (giữ nguyên toàn bộ dữ liệu cũ)..."
+      & $npmCmd install --prefix $rtTarget "openclaw@$targetVer" --no-audit --no-fund *> $null
+      if ($LASTEXITCODE -ne 0) { throw 'openclaw-upgrade-install-failed' }
+
+      $newCliEntry = Join-Path $rtTarget 'node_modules\openclaw\openclaw.mjs'
+      if (-not (Test-Path -LiteralPath $newCliEntry -PathType Leaf)) { throw 'openclaw-upgrade-entry-missing' }
+
+      $env:OPENCLAW_STATE_DIR = $root
+      $env:OPENCLAW_CONFIG_PATH = $configPath
+      $env:OPENCLAW_CLI_ENTRY = $newCliEntry
+      if ($instance -and $instance.profile) { $env:OPENCLAW_PROFILE = [string]$instance.profile }
+
+      Write-ManageStatus $StatusPath 'Đang đồng bộ cấu trúc dữ liệu và khởi động lại Gateway...'
+      try { [void](Invoke-EmTroLyGatewayInstance -Root $root -CliArgs @('gateway', 'stop')) } catch { }
+      try { & $nodeExe $newCliEntry doctor --fix --non-interactive --yes *> $null } catch { }
+
+      $instProfile = if ($instance -and $instance.profile) { [string]$instance.profile } else { $state.AccountName }
+      $gwPort = if ($state.GatewayPort -match '^[0-9]+$' -and [int]$state.GatewayPort -ge 1024) { [int]$state.GatewayPort } else { 19789 }
+      $winInstHelper = Join-Path $PayloadDir 'native\windows-instance.ps1'
+      if (Test-Path -LiteralPath $winInstHelper -PathType Leaf) {
+        . $winInstHelper
+        if (Get-Command Save-OpenClawInstanceLauncher -ErrorAction SilentlyContinue) {
+          Save-OpenClawInstanceLauncher -Root $root -InstanceProfile $instProfile -CliEntry $newCliEntry -Port $gwPort
+        }
+      } else {
+        $instMeta = if ($instance) { $instance } else { [pscustomobject]@{ profile = $instProfile; port = $gwPort } }
+        $instMeta | Add-Member -NotePropertyName cli_entry -NotePropertyValue $newCliEntry -Force
+        [IO.File]::WriteAllText((Join-Path $root 'installer-instance.json'), ($instMeta | ConvertTo-Json -Depth 6), $utf8NoBom)
+      }
+
+      $winCliHelper = Join-Path $PayloadDir 'native\windows-cli.ps1'
+      if (Test-Path -LiteralPath $winCliHelper -PathType Leaf) {
+        . $winCliHelper
+        if (Get-Command Install-UserOpenClawCli -ErrorAction SilentlyContinue) {
+          try { Install-UserOpenClawCli -Root $root -CliEntry $newCliEntry -Port $gwPort -Profile $instProfile } catch { }
+        }
+      }
+
+      & $nodeExe $newCliEntry gateway restart *> $null
+      if ($LASTEXITCODE -ne 0) {
+        & $nodeExe $newCliEntry gateway install --port $gwPort --force *> $null
+        & $nodeExe $newCliEntry gateway restart *> $null
+      }
+      $fromLabel = if ($curVer) { "v$curVer " } else { '' }
+      Write-ManageStatus $StatusPath "Hoàn tất: Đã nâng cấp Trợ lý OpenClaw từ ${fromLabel}lên v$targetVer thành công (giữ nguyên cấu hình, Telegram & Zalo)!"
+      exit 0
+    }
   } catch {
     $errCode = [string]$_.Exception.Message
     $errMap = @{

@@ -272,8 +272,115 @@ def install(values, source, progress=lambda message: None):
     }
 
 
-def install_components(components, values, source, progress=lambda message: None) -> dict:
-    """Install one or more selected components independently in canonical order."""
+def _parse_version_tuple(raw: str) -> tuple[int, ...]:
+    cleaned = str(raw or "").strip().lstrip("vV")
+    main = cleaned.split("-", 1)[0].split("+", 1)[0]
+    parts: list[int] = []
+    for seg in main.split("."):
+        try:
+            parts.append(int(seg))
+        except ValueError:
+            parts.append(0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts)
+
+
+def compare_versions(current: str, target: str) -> int:
+    a = _parse_version_tuple(current)
+    b = _parse_version_tuple(target)
+    max_len = max(len(a), len(b))
+    a_pad = a + (0,) * (max_len - len(a))
+    b_pad = b + (0,) * (max_len - len(b))
+    if a_pad < b_pad:
+        return -1
+    if a_pad > b_pad:
+        return 1
+    return 0
+
+
+def get_openclaw_version_info(root: Path, source: Path | None = None) -> dict:
+    import json
+
+    target_ver = runtime.OPENCLAW_VERSION
+    if source:
+        manifest = Path(source) / "MANIFEST.txt"
+        if manifest.is_file():
+            for line in manifest.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if line.startswith("openclaw="):
+                    val = line.split("=", 1)[1].strip()
+                    if val:
+                        target_ver = val
+                    break
+
+    installed = bool(root and (Path(root) / "openclaw.json").is_file())
+    cur_ver = ""
+    if installed:
+        rt_dir = Path(root) / "runtime"
+        if rt_dir.is_dir():
+            for cand in sorted(rt_dir.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+                if not cand.is_dir():
+                    continue
+                pkg = cand / "node_modules/openclaw/package.json"
+                if pkg.is_file():
+                    try:
+                        cur_ver = str(json.loads(pkg.read_text(encoding="utf-8")).get("version", "")).strip()
+                        if cur_ver:
+                            break
+                    except Exception:
+                        pass
+                if cand.name and cand.name[0].isdigit():
+                    cur_ver = cand.name
+                    break
+
+    needs_upgrade = bool(installed and cur_ver and compare_versions(cur_ver, target_ver) < 0)
+    up_to_date = bool(installed and cur_ver and compare_versions(cur_ver, target_ver) >= 0)
+    return {
+        "installed": installed,
+        "installed_version": cur_ver,
+        "target_version": target_ver,
+        "needs_upgrade": needs_upgrade,
+        "up_to_date": up_to_date,
+    }
+
+
+def upgrade_openclaw_runtime(root: Path, home: Path, source: Path, progress=lambda message: None) -> dict:
+    import json
+
+    ver_info = get_openclaw_version_info(root, source)
+    if ver_info["up_to_date"]:
+        progress(f"✓ OpenClaw đã ở phiên bản mới nhất (v{ver_info['installed_version']}) — không cần nâng cấp.")
+        return {"root": str(root), "upgraded": False, "skipped": True, **ver_info}
+
+    target_ver = ver_info["target_version"]
+    progress(f"Đang nâng cấp OpenClaw từ v{ver_info['installed_version'] or '?'} lên v{target_ver} (giữ nguyên dữ liệu cũ)...")
+    dependency_root = home / ".local/share/installer_emtroly/dependencies"
+    node, npm = dependencies.install_node(dependency_root)
+    python_binary = python_runtime.install(dependency_root)
+    ffmpeg_binary = ffmpeg.install(dependency_root)
+
+    target_rt = root / "runtime" / target_ver
+    if target_rt.exists():
+        shutil.rmtree(target_rt, ignore_errors=True)
+    entry, env = runtime.install(root, home, node, npm, extra_bins=(python_binary.parent, ffmpeg_binary.parent))
+
+    cfg_path = root / "openclaw.json"
+    port = 19789
+    if cfg_path.is_file():
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            port = int(cfg.get("gateway", {}).get("port") or 19789)
+        except Exception:
+            pass
+    enable_zalo = (root / "workspace/skills/telegram-zalo-owner-login/SKILL.md").is_file()
+    service.install_and_verify(node, entry, env, port, enable_zalo=enable_zalo)
+    return {"root": str(root), "upgraded": True, "skipped": False, "installed_version": target_ver, "target_version": target_ver}
+
+
+def install_components(components, values, source, progress=lambda message: None, force_reinstall: bool = False) -> dict:
+    """Install one or more selected components independently in canonical order.
+    Already-installed components are automatically skipped unless force_reinstall=True;
+    OpenClaw is automatically upgraded in-place if its installed version is lower than target."""
     if isinstance(components, str):
         raw_list = [p.strip().lower() for p in components.split(",") if p.strip()]
     else:
@@ -290,7 +397,12 @@ def install_components(components, values, source, progress=lambda message: None
         raise RuntimeError("Run the installer as the desktop user, not root")
     check_disk_space(home)
 
-    if "openclaw" in ordered:
+    member_name = str(values.get("member", "emtroly") or "emtroly").strip() or "emtroly"
+    existing_oc_root = home / (".openclaw-member-" + member_name)
+    oc_ver_info = get_openclaw_version_info(existing_oc_root, source)
+    oc_already_installed = oc_ver_info["installed"]
+
+    if "openclaw" in ordered and not oc_already_installed:
         values_checked = settings.validate(values)
     else:
         values_checked = validate_ai_only(values)
@@ -306,44 +418,67 @@ def install_components(components, values, source, progress=lambda message: None
         except OSError:
             pass
 
-    results: dict = {"components": ordered}
+    results: dict = {"components": ordered, "skipped": []}
     dependency_root = home / ".local/share/installer_emtroly/dependencies"
     node_pair = None
+    mod_status = codex_setup.get_modular_status(home, preferred_member=member_name)
 
     if "codex-cli" in ordered:
-        progress("Phần 1 · Đang chuẩn bị Node.js và cài đặt Codex CLI riêng...")
-        node_pair = dependencies.install_node(dependency_root)
-        prev_force = os.environ.get("EMTROLY_FORCE_CODEX_INSTALL")
-        try:
-            os.environ["EMTROLY_FORCE_CODEX_INSTALL"] = "1"
-            c_info = codex_setup.install_codex_cli_first(values_checked, home, node_pair[0], node_pair[1], progress=progress)
-        finally:
-            if prev_force is None:
-                os.environ.pop("EMTROLY_FORCE_CODEX_INSTALL", None)
-            else:
-                os.environ["EMTROLY_FORCE_CODEX_INSTALL"] = prev_force
-        if not c_info.get("installed"):
-            raise RuntimeError("codex-cli-install-failed: Chưa cài đặt được gói @openai/codex. Kiểm tra kết nối Internet và thử lại.")
-        results["codex"] = c_info
+        if not force_reinstall and mod_status.get("codex_cli", {}).get("installed"):
+            progress("✓ Codex CLI đã có sẵn trên máy — bỏ qua không cài lại.")
+            results["codex"] = {"installed": True, "skipped": True, "reason": "already-installed"}
+            results["skipped"].append("codex-cli")
+        else:
+            progress("Phần 1 · Đang chuẩn bị Node.js và cài đặt Codex CLI riêng...")
+            node_pair = dependencies.install_node(dependency_root)
+            prev_force = os.environ.get("EMTROLY_FORCE_CODEX_INSTALL")
+            try:
+                os.environ["EMTROLY_FORCE_CODEX_INSTALL"] = "1"
+                c_info = codex_setup.install_codex_cli_first(values_checked, home, node_pair[0], node_pair[1], progress=progress)
+            finally:
+                if prev_force is None:
+                    os.environ.pop("EMTROLY_FORCE_CODEX_INSTALL", None)
+                else:
+                    os.environ["EMTROLY_FORCE_CODEX_INSTALL"] = prev_force
+            if not c_info.get("installed"):
+                raise RuntimeError("codex-cli-install-failed: Chưa cài đặt được gói @openai/codex. Kiểm tra kết nối Internet và thử lại.")
+            results["codex"] = c_info
 
-    if "antigravity-ide" in ordered and "codex-extension" in ordered:
-        progress("Phần 2 & 3 · Đang cấu hình Antigravity IDE và cài đặt Codex Extension...")
-        results["antigravity_ide"] = codex_setup.install_antigravity_ide_only(values_checked, home, progress=progress)
-        results["codex_extension"] = codex_setup.install_codex_extension_only(values_checked, home, progress=progress)
-    elif "antigravity-ide" in ordered:
-        progress("Phần 2 · Đang kiểm tra và cấu hình Antigravity IDE riêng...")
-        results["antigravity_ide"] = codex_setup.install_antigravity_ide_only(values_checked, home, progress=progress)
-    elif "codex-extension" in ordered:
-        progress("Phần 3 · Đang cài đặt Codex Extension trong Antigravity IDE...")
-        results["codex_extension"] = codex_setup.install_codex_extension_only(values_checked, home, progress=progress)
+    if "antigravity-ide" in ordered:
+        if not force_reinstall and mod_status.get("antigravity_ide", {}).get("installed"):
+            progress("✓ Antigravity IDE đã có sẵn trên máy — bỏ qua không cài lại.")
+            results["antigravity_ide"] = {"installed": True, "skipped": True, "reason": "already-installed"}
+            results["skipped"].append("antigravity-ide")
+        else:
+            progress("Phần 2 · Đang kiểm tra và cấu hình Antigravity IDE riêng...")
+            results["antigravity_ide"] = codex_setup.install_antigravity_ide_only(values_checked, home, progress=progress)
+
+    if "codex-extension" in ordered:
+        if not force_reinstall and mod_status.get("codex_extension", {}).get("installed"):
+            progress("✓ Codex Extension đã có sẵn trên máy — bỏ qua không cài lại.")
+            results["codex_extension"] = {"configured": True, "installed": True, "skipped": True, "reason": "already-installed"}
+            results["skipped"].append("codex-extension")
+        else:
+            progress("Phần 3 · Đang cài đặt Codex Extension trong Antigravity IDE...")
+            results["codex_extension"] = codex_setup.install_codex_extension_only(values_checked, home, progress=progress)
 
     if "openclaw" in ordered:
-        oc_values = dict(values)
-        oc_values["skip_editor"] = True
-        oc_values["model"] = verified_model
-        oc_res = install(oc_values, source, progress=progress)
-        results["openclaw"] = oc_res
-        results["root"] = oc_res["root"]
-        results["cli"] = oc_res["cli"]
+        if oc_already_installed:
+            if oc_ver_info["needs_upgrade"]:
+                oc_upg = upgrade_openclaw_runtime(existing_oc_root, home, source, progress=progress)
+                results["openclaw"] = oc_upg
+                results["root"] = oc_upg["root"]
+            else:
+                progress(f"✓ Trợ lý OpenClaw đã ở phiên bản mới nhất (v{oc_ver_info['installed_version']}) — bỏ qua không cài lại.")
+                results["openclaw"] = {"root": str(existing_oc_root), "installed": True, "skipped": True, **oc_ver_info}
+                results["skipped"].append("openclaw")
+        else:
+            oc_values = dict(values)
+            oc_values["skip_editor"] = True
+            oc_values["model"] = verified_model
+            oc_res = install(oc_values, source, progress=progress)
+            results["openclaw"] = oc_res
+            results["root"] = oc_res["root"]
+            results["cli"] = oc_res["cli"]
 
     return results

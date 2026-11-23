@@ -211,11 +211,13 @@ def main():
     tab_connect = ttk.Frame(notebook, style="Card.TFrame", padding=20)
     tab_profile = ttk.Frame(notebook, style="Card.TFrame", padding=20)
     tab_modular = ttk.Frame(notebook, style="Card.TFrame", padding=20)
+    tab_store = ttk.Frame(notebook, style="Card.TFrame", padding=20)
     tab_zalo_qr = ttk.Frame(notebook, style="Card.TFrame", padding=20)
     tab_codex = ttk.Frame(notebook, style="Card.TFrame", padding=20)
     notebook.add(tab_connect, text="1. Kết nối & Bảo mật")
     notebook.add(tab_profile, text="2. Cài trọn gói A–Z")
-    notebook.add(tab_modular, text="Cài từng phần")
+    notebook.add(tab_modular, text="Cài từng phần (Lõi)")
+    notebook.add(tab_store, text="Kho ứng dụng")
     notebook.add(tab_zalo_qr, text="Quét QR Zalo")
     notebook.add(tab_codex, text="Codex CLI")
 
@@ -226,7 +228,7 @@ def main():
         header_actions,
         text="Mở Codex CLI",
         style="Secondary.TButton",
-        command=lambda: notebook.select(tab_connect if notebook.index("current") == 4 else tab_codex),
+        command=lambda: notebook.select(tab_connect if notebook.select() == str(tab_codex) else tab_codex),
     )
     quick_btn.pack(side="left", padx=(0, 8))
 
@@ -801,13 +803,15 @@ def main():
     run_codex_btn.pack(side="right")
 
     def on_tab_changed(_event=None):
-        cur_idx = notebook.index("current")
-        on_codex = cur_idx == 4
+        cur_tab = notebook.select()
+        on_codex = cur_tab == str(tab_codex)
         quick_btn.configure(text="← Về phần Cài đặt" if on_codex else "Mở Codex CLI")
         if on_codex:
             refresh_codex_state()
-        if cur_idx == 2:
+        if cur_tab == str(tab_modular):
             refresh_modular_status()
+        if cur_tab == str(tab_store):
+            refresh_store_view()
 
     notebook.bind("<<NotebookTabChanged>>", on_tab_changed)
 
@@ -849,18 +853,29 @@ def main():
 
     def refresh_modular_status():
         try:
-            st_map = codex_setup.get_modular_status(preferred_member=variables["member"].get().strip() or "emtroly")
+            member_val = variables["member"].get().strip() or "emtroly"
+            st_map = codex_setup.get_modular_status(preferred_member=member_val)
+            inst_root = find_installed_instance_root(member_val)
+            oc_ver = runner.get_openclaw_version_info(inst_root, source) if inst_root else {}
+            oc_btn_lbl = (
+                f"Nâng cấp v{oc_ver.get('target_version', '')}"
+                if oc_ver.get("needs_upgrade")
+                else "Đã mới nhất"
+            )
             mapping = {
-                "codex-cli": (st_map["codex_cli"], "Cập nhật / Cài lại"),
-                "antigravity-ide": (st_map["antigravity_ide"], "Kiểm tra / Sửa lại"),
-                "codex-extension": (st_map["codex_extension"], "Đồng bộ / Cài lại"),
-                "openclaw": (st_map["openclaw"], "Cài lại / Cấu hình"),
+                "codex-cli": (st_map["codex_cli"], "Cài lại"),
+                "antigravity-ide": (st_map["antigravity_ide"], "Kiểm tra"),
+                "codex-extension": (st_map["codex_extension"], "Đồng bộ"),
+                "openclaw": (st_map["openclaw"], oc_btn_lbl),
             }
             for comp_id, (info, installed_lbl) in mapping.items():
                 prefix = "✓ " if info["installed"] else "○ "
-                mod_status_vars[comp_id].set(prefix + info["detail"])
+                detail_txt = info["detail"]
+                if comp_id == "openclaw" and oc_ver.get("needs_upgrade"):
+                    detail_txt = f"Đang dùng v{oc_ver.get('installed_version')} · Có bản mới v{oc_ver.get('target_version')}"
+                mod_status_vars[comp_id].set(prefix + detail_txt)
                 if comp_id in mod_single_btns:
-                    mod_single_btns[comp_id].configure(text=installed_lbl if info["installed"] else "Cài phần này")
+                    mod_single_btns[comp_id].configure(text=installed_lbl if info["installed"] else "Cài đặt")
         except Exception:
             pass
 
@@ -952,6 +967,175 @@ def main():
         command=lambda: start_modular_components([k for k, v in mod_checks.items() if v.get()]),
     )
     mod_run_selected_btn.pack(side="right")
+
+    # =========================================================================
+    # TAB STORE: EXTENSIBLE APP CATALOG (Driven by profiles/apps-catalog.json)
+    # =========================================================================
+    tab_store.columnconfigure(0, weight=1)
+    tab_store.rowconfigure(3, weight=1)
+
+    store_hdr = ttk.Frame(tab_store, style="Card.TFrame")
+    store_hdr.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+    store_hdr.columnconfigure(0, weight=1)
+    ttk.Label(store_hdr, text="Kho ứng dụng mở rộng", style="Section.TLabel").grid(row=0, column=0, sticky="w")
+    store_search_var = tk.StringVar(value="")
+    store_search_entry = ttk.Entry(store_hdr, textvariable=store_search_var, width=26)
+    store_search_entry.grid(row=0, column=1, sticky="e", padx=(8, 6))
+    ttk.Button(store_hdr, text="Làm mới", style="Secondary.TButton", command=lambda: refresh_store_view()).grid(
+        row=0, column=2, sticky="e"
+    )
+
+    store_filter_bar = ttk.Frame(tab_store, style="Card.TFrame")
+    store_filter_bar.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+    store_combo_frame = tk.Frame(tab_store, bg="#EFF6FF", bd=1, relief="solid", padx=14, pady=10)
+    store_combo_frame.grid(row=2, column=0, sticky="ew", pady=(0, 10))
+    store_combo_frame.columnconfigure(0, weight=1)
+    store_cards_frame = ttk.Frame(tab_store, style="Card.TFrame")
+    store_cards_frame.grid(row=3, column=0, sticky="nsew")
+    store_cards_frame.columnconfigure(0, weight=1)
+    store_cards_frame.columnconfigure(1, weight=1)
+
+    store_active_cat = {"id": "all"}
+
+    def load_store_catalog():
+        for cand in (source / "profiles/apps-catalog.json", source / "apps-catalog.json"):
+            if cand.is_file():
+                try:
+                    return json.loads(cand.read_text(encoding="utf-8"))
+                except Exception:
+                    return {}
+        return {}
+
+    def is_catalog_app_installed(app_item, st_map):
+        act_type = (app_item.get("action_type") or "").strip().lower()
+        if act_type == "modular":
+            comps = [c.strip().lower() for c in (app_item.get("components") or []) if c]
+            key_map = {
+                "codex-cli": "codex_cli",
+                "antigravity-ide": "antigravity_ide",
+                "codex-extension": "codex_extension",
+                "openclaw": "openclaw",
+            }
+            return bool(comps) and all(st_map.get(key_map.get(c, ""), {}).get("installed") for c in comps)
+        if act_type == "zalo-plugin":
+            inst_root = find_installed_instance_root(variables["member"].get().strip() or "emtroly")
+            return bool(inst_root and (inst_root / "workspace/skills/telegram-zalo-owner-login/SKILL.md").is_file())
+        detect_cmd = (app_item.get("detect_command") or "").strip()
+        if detect_cmd and shutil.which(detect_cmd):
+            return True
+        return False
+
+    def invoke_store_app(app_item, installed, force_reinstall=False):
+        act_type = (app_item.get("action_type") or "coming_soon").strip().lower()
+        if act_type == "coming_soon":
+            messagebox.showinfo(
+                f"{app_item.get('name', 'Ứng dụng')} · Sắp ra mắt",
+                app_item.get("note") or "Ứng dụng này đang được chuẩn bị cho bản cập nhật tiếp theo.",
+            )
+            return
+        if installed and not force_reinstall:
+            if app_item.get("open_view") == "codex":
+                notebook.select(tab_codex)
+                return
+            if act_type == "zalo-plugin":
+                notebook.select(tab_zalo_qr)
+                return
+        if act_type == "modular":
+            comps = [c for c in (app_item.get("components") or []) if c]
+            if comps:
+                notebook.select(tab_modular)
+                start_modular_components(comps)
+            return
+        if act_type == "zalo-plugin":
+            notebook.select(tab_zalo_qr)
+            start_qr_session()
+
+    def refresh_store_view(*_args):
+        catalog = load_store_catalog()
+        try:
+            st_map = codex_setup.get_modular_status(preferred_member=variables["member"].get().strip() or "emtroly")
+        except Exception:
+            st_map = {}
+
+        for w in store_filter_bar.winfo_children():
+            w.destroy()
+        apps = list(catalog.get("apps") or [])
+        inst_states = {a.get("id"): is_catalog_app_installed(a, st_map) for a in apps}
+        inst_total = sum(1 for v in inst_states.values() if v)
+        for cat in catalog.get("categories") or [{"id": "all", "label": "Tất cả"}]:
+            cid = cat.get("id", "all")
+            lbl = cat.get("label", cid)
+            if cid == "all":
+                lbl = f"{lbl} ({len(apps)})"
+            elif cid == "installed":
+                lbl = f"{lbl} ({inst_total})"
+            st_btn = "Primary.TButton" if store_active_cat["id"] == cid else "Secondary.TButton"
+            ttk.Button(
+                store_filter_bar,
+                text=lbl,
+                style=st_btn,
+                command=lambda c=cid: (store_active_cat.__setitem__("id", c), refresh_store_view()),
+            ).pack(side="left", padx=(0, 6))
+
+        for w in store_combo_frame.winfo_children():
+            w.destroy()
+        combos = list(catalog.get("combos") or [])
+        if combos:
+            cb = combos[0]
+            cb_done = is_catalog_app_installed(cb, st_map)
+            ttk.Label(store_combo_frame, text=cb.get("name", "Gói Combo"), font=font_bold, foreground="#1E3A8A", background="#EFF6FF").grid(
+                row=0, column=0, sticky="w"
+            )
+            ttk.Label(store_combo_frame, text=cb.get("description", ""), font=font_hint, foreground="#2563EB", background="#EFF6FF", wraplength=580).grid(
+                row=1, column=0, sticky="w", pady=(2, 0)
+            )
+            ttk.Button(
+                store_combo_frame,
+                text="✓ Đã cài cả gói" if cb_done else (cb.get("button_label") or "Cài cả gói"),
+                style="Primary.TButton",
+                command=lambda item=cb: (notebook.select(tab_modular), start_modular_components(list(item.get("components") or []))),
+            ).grid(row=0, column=1, rowspan=2, sticky="e", padx=(12, 0))
+
+        for w in store_cards_frame.winfo_children():
+            w.destroy()
+        q = store_search_var.get().strip().lower()
+        shown = 0
+        for app_item in apps:
+            installed = bool(inst_states.get(app_item.get("id")))
+            cid = store_active_cat["id"]
+            if cid == "installed" and not installed:
+                continue
+            if cid not in ("all", "installed") and app_item.get("category") != cid:
+                continue
+            hay = f"{app_item.get('name', '')} {app_item.get('description', '')}".lower()
+            if q and q not in hay:
+                continue
+            r_idx, c_idx = divmod(shown, 2)
+            card = tk.Frame(store_cards_frame, bg="#F8FAFC", bd=1, relief="solid", padx=12, pady=10)
+            card.grid(row=r_idx, column=c_idx, sticky="nsew", padx=(0, 6) if c_idx == 0 else (6, 0), pady=4)
+            card.columnconfigure(0, weight=1)
+            title_txt = app_item.get("name", "") + (" · Đã cài" if installed else "")
+            ttk.Label(card, text=title_txt, font=font_bold, foreground="#065F46" if installed else "#0F172A", background="#F8FAFC").grid(
+                row=0, column=0, sticky="w"
+            )
+            ttk.Label(card, text=app_item.get("description", ""), font=font_hint, foreground="#64748B", background="#F8FAFC", wraplength=270).grid(
+                row=1, column=0, sticky="w", pady=(2, 0)
+            )
+            btn_lbl = "Mở" if installed else ("Chi tiết" if app_item.get("action_type") == "coming_soon" else "Cài đặt")
+            ttk.Button(
+                card,
+                text=btn_lbl,
+                style="Secondary.TButton",
+                command=lambda item=app_item, inst=installed: invoke_store_app(item, inst),
+            ).grid(row=0, column=1, rowspan=2, sticky="e", padx=(8, 0))
+            shown += 1
+        if shown == 0:
+            ttk.Label(store_cards_frame, text="Không tìm thấy ứng dụng phù hợp.", style="Hint.TLabel", padding=14).grid(
+                row=0, column=0, columnspan=2, sticky="ew"
+            )
+
+    store_search_var.trace_add("write", refresh_store_view)
+    refresh_store_view()
 
     def collect_form_values():
         vals = {key: variable.get() for key, variable in variables.items()}

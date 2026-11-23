@@ -426,19 +426,25 @@ function Get-EmTroLyLiveDashboardStatus {
   }
 
   $gwUrl = if ($portNum -ge 1024) { "http://127.0.0.1:$portNum/" } else { '' }
+  $ocVerDash = if (Get-Command Get-EmTroLyOpenClawVersionInfo -ErrorAction SilentlyContinue) {
+    Get-EmTroLyOpenClawVersionInfo -OpenClawRoot ([string]$st.Root)
+  } else { $null }
   return [pscustomobject]@{
-    State                   = $st
-    GatewayOnline           = $gatewayOnline
-    GatewayPort             = $portNum
-    GatewayUrl              = $gwUrl
-    OwnerCount              = $ownerCount
-    HasAntigravityShortcut  = $hasAntigravityShortcut
-    CodexCliInstalled       = $codexCliReady
-    AntigravityInstalled    = $ideReady
-    CodexExtensionInstalled = $codexExtReady
-    ZaloLinked              = [bool]$zaloLinked
-    ZaloConnected           = [bool]$zaloConnected
-    HasZaloStatusCache      = [bool]$hasZaloStatusCache
+    State                    = $st
+    GatewayOnline            = $gatewayOnline
+    GatewayPort              = $portNum
+    GatewayUrl               = $gwUrl
+    OwnerCount               = $ownerCount
+    HasAntigravityShortcut   = $hasAntigravityShortcut
+    CodexCliInstalled        = $codexCliReady
+    AntigravityInstalled     = $ideReady
+    CodexExtensionInstalled  = $codexExtReady
+    OpenClawInstalledVersion = if ($ocVerDash) { [string]$ocVerDash.InstalledVersion } else { '' }
+    OpenClawTargetVersion    = if ($ocVerDash) { [string]$ocVerDash.TargetVersion } else { '2026.11.4' }
+    OpenClawNeedsUpgrade     = if ($ocVerDash) { [bool]$ocVerDash.NeedsUpgrade } else { $false }
+    ZaloLinked               = [bool]$zaloLinked
+    ZaloConnected            = [bool]$zaloConnected
+    HasZaloStatusCache       = [bool]$hasZaloStatusCache
   }
 }
 
@@ -1111,24 +1117,39 @@ function Get-EmTroLyModularStatus {
   $ocState = if (Get-Command Get-EmTroLyInstalledState -ErrorAction SilentlyContinue) { Get-EmTroLyInstalledState } else { $null }
   $ocInstalled = ($ocState -and [bool]$ocState.OpenClawInstalled)
   $zaloInstalled = ($ocState -and [bool]$ocState.ZaloInstalled)
+  $ocVerInfo = if (Get-Command Get-EmTroLyOpenClawVersionInfo -ErrorAction SilentlyContinue) {
+    Get-EmTroLyOpenClawVersionInfo -OpenClawRoot $(if ($ocState) { [string]$ocState.Root } else { '' })
+  } else { $null }
+  $ocCurVer = if ($ocVerInfo) { [string]$ocVerInfo.InstalledVersion } else { '' }
+  $ocTargetVer = if ($ocVerInfo) { [string]$ocVerInfo.TargetVersion } else { '2026.11.4' }
+  $ocNeedsUpgrade = ($ocInstalled -and $ocVerInfo -and [bool]$ocVerInfo.NeedsUpgrade)
   $ocDetail = if ($ocInstalled) {
     $zTxt = if ($zaloInstalled) { 'Có Zalo QR' } else { 'Không kèm Zalo' }
-    "Đã cài đặt ($($ocState.AssistantName) · Cổng $($ocState.GatewayPort) · $zTxt)"
+    if ($ocNeedsUpgrade) {
+      "Đã cài v$ocCurVer (có bản mới v$ocTargetVer — bấm Nâng cấp để cập nhật, giữ nguyên dữ liệu cũ)"
+    } elseif ($ocCurVer) {
+      "Đã cài đặt v$ocCurVer ($($ocState.AssistantName) · Cổng $($ocState.GatewayPort) · $zTxt)"
+    } else {
+      "Đã cài đặt ($($ocState.AssistantName) · Cổng $($ocState.GatewayPort) · $zTxt)"
+    }
   } else {
-    'Chưa cài đặt — cài Node.js, Python, FFmpeg, OpenClaw 2026.11.4 & Gateway'
+    "Chưa cài đặt — cài Node.js, Python, FFmpeg, OpenClaw $ocTargetVer & Gateway"
   }
 
   return [pscustomobject]@{
-    CodexCliInstalled       = $codexInstalled
-    CodexCliDetail          = $codexDetail
-    AntigravityInstalled    = $ideInstalled
-    AntigravityPath         = $idePath
-    AntigravityDetail       = $ideDetail
-    CodexExtensionInstalled = ($extInstalled -and $hasShortcut)
-    CodexExtensionDetail    = $extDetail
-    OpenClawInstalled       = $ocInstalled
-    ZaloInstalled           = $zaloInstalled
-    OpenClawDetail          = $ocDetail
+    CodexCliInstalled        = $codexInstalled
+    CodexCliDetail           = $codexDetail
+    AntigravityInstalled     = $ideInstalled
+    AntigravityPath          = $idePath
+    AntigravityDetail        = $ideDetail
+    CodexExtensionInstalled  = ($extInstalled -and $hasShortcut)
+    CodexExtensionDetail     = $extDetail
+    OpenClawInstalled        = $ocInstalled
+    OpenClawInstalledVersion = $ocCurVer
+    OpenClawTargetVersion    = $ocTargetVer
+    OpenClawNeedsUpgrade     = [bool]$ocNeedsUpgrade
+    ZaloInstalled            = $zaloInstalled
+    OpenClawDetail           = $ocDetail
   }
 }
 
@@ -1239,5 +1260,253 @@ function Test-EmTroLyLicenseKey {
       Models       = @()
       Message      = 'Không kết nối được máy chủ xác thực codex.anhlaptrinh.vn (hoặc khóa sai). Hãy kiểm tra mạng rồi thử lại.'
     }
+  }
+}
+
+function Resolve-EmTroLyAppCatalogPath([string]$PayloadRoot = '') {
+  $candidates = @()
+  if ($PayloadRoot) {
+    $candidates += (Join-Path $PayloadRoot 'profiles\apps-catalog.json')
+    $candidates += (Join-Path $PayloadRoot 'apps-catalog.json')
+  }
+  if ($PSScriptRoot) {
+    $parent = Split-Path -Parent $PSScriptRoot
+    if ($parent) {
+      $candidates += (Join-Path $parent 'profiles\apps-catalog.json')
+      $candidates += (Join-Path $parent 'apps-catalog.json')
+    }
+  }
+  foreach ($cand in @($candidates | Select-Object -Unique)) {
+    if ($cand -and (Test-Path -LiteralPath $cand -PathType Leaf)) {
+      return $cand
+    }
+  }
+  return ''
+}
+
+function Test-EmTroLyCatalogAppInstalled {
+  param(
+    [Parameter(Mandatory=$true)]$App,
+    $ModularStatus = $null,
+    $InstalledState = $null
+  )
+  $actType = if ($App.PSObject.Properties['action_type']) { ([string]$App.action_type).Trim().ToLowerInvariant() } else { '' }
+  if ($actType -eq 'modular') {
+    $comps = @()
+    if ($App.PSObject.Properties['components'] -and $App.components) {
+      $comps = @($App.components | ForEach-Object { ([string]$_).Trim().ToLowerInvariant() } | Where-Object { $_ })
+    }
+    if ($comps.Count -gt 0 -and $ModularStatus) {
+      $allReady = $true
+      foreach ($c in $comps) {
+        switch ($c) {
+          'codex-cli'       { if (-not [bool]$ModularStatus.CodexCliInstalled) { $allReady = $false } }
+          'antigravity-ide' { if (-not [bool]$ModularStatus.AntigravityInstalled) { $allReady = $false } }
+          'codex-extension' { if (-not [bool]$ModularStatus.CodexExtensionInstalled) { $allReady = $false } }
+          'openclaw'        { if (-not [bool]$ModularStatus.OpenClawInstalled) { $allReady = $false } }
+          default           { $allReady = $false }
+        }
+      }
+      return $allReady
+    }
+    return $false
+  }
+  if ($actType -eq 'zalo-plugin') {
+    if ($InstalledState -and [bool]$InstalledState.ZaloInstalled) { return $true }
+    if ($ModularStatus -and [bool]$ModularStatus.ZaloInstalled) { return $true }
+    return $false
+  }
+  if ($App.PSObject.Properties['detect_path'] -and -not [string]::IsNullOrWhiteSpace([string]$App.detect_path)) {
+    $expanded = [Environment]::ExpandEnvironmentVariables([string]$App.detect_path)
+    if ($expanded -and (Test-Path -LiteralPath $expanded)) { return $true }
+  }
+  if ($App.PSObject.Properties['detect_command'] -and -not [string]::IsNullOrWhiteSpace([string]$App.detect_command)) {
+    $cmdName = ([string]$App.detect_command).Trim()
+    if (@(Get-Command $cmdName -CommandType Application -ErrorAction SilentlyContinue).Count -gt 0) {
+      return $true
+    }
+  }
+  return $false
+}
+
+function Get-EmTroLyAppCatalog {
+  param(
+    [string]$PayloadRoot = ''
+  )
+  $catalogPath = Resolve-EmTroLyAppCatalogPath -PayloadRoot $PayloadRoot
+  $rawObj = $null
+  if ($catalogPath) {
+    try {
+      $rawObj = [IO.File]::ReadAllText($catalogPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    } catch { $rawObj = $null }
+  }
+
+  $ms = if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) { Get-EmTroLyModularStatus } else { $null }
+  $st = if (Get-Command Get-EmTroLyInstalledState -ErrorAction SilentlyContinue) { Get-EmTroLyInstalledState } else { $null }
+
+  $categories = if ($rawObj -and $rawObj.PSObject.Properties['categories'] -and $rawObj.categories) {
+    @($rawObj.categories)
+  } else {
+    @(
+      [pscustomobject]@{ id = 'all'; label = 'Tất cả' },
+      [pscustomobject]@{ id = 'core'; label = 'Lập trình & Trợ lý' },
+      [pscustomobject]@{ id = 'installed'; label = 'Đã cài' }
+    )
+  }
+
+  $combos = @()
+  if ($rawObj -and $rawObj.PSObject.Properties['combos'] -and $rawObj.combos) {
+    foreach ($cb in @($rawObj.combos)) {
+      $cbInstalled = Test-EmTroLyCatalogAppInstalled -App $cb -ModularStatus $ms -InstalledState $st
+      $combos += [pscustomobject]@{
+        Id           = [string]$cb.id
+        Name         = [string]$cb.name
+        Badge        = if ($cb.PSObject.Properties['badge']) { [string]$cb.badge } else { '' }
+        Description  = [string]$cb.description
+        ButtonLabel  = if ($cb.PSObject.Properties['button_label']) { [string]$cb.button_label } else { 'Cài cả gói' }
+        ActionType   = if ($cb.PSObject.Properties['action_type']) { [string]$cb.action_type } else { 'modular' }
+        Components   = if ($cb.PSObject.Properties['components']) { @($cb.components | ForEach-Object { [string]$_ }) } else { @() }
+        Installed    = [bool]$cbInstalled
+      }
+    }
+  }
+
+  $apps = @()
+  if ($rawObj -and $rawObj.PSObject.Properties['apps'] -and $rawObj.apps) {
+    foreach ($ap in @($rawObj.apps)) {
+      $isInst = Test-EmTroLyCatalogAppInstalled -App $ap -ModularStatus $ms -InstalledState $st
+      $actType = if ($ap.PSObject.Properties['action_type']) { ([string]$ap.action_type).Trim().ToLowerInvariant() } else { 'coming_soon' }
+      $apps += [pscustomobject]@{
+        Id             = [string]$ap.id
+        Name           = [string]$ap.name
+        Category       = if ($ap.PSObject.Properties['category']) { [string]$ap.category } else { 'core' }
+        Badge          = if ($ap.PSObject.Properties['badge']) { [string]$ap.badge } else { '' }
+        Description    = [string]$ap.description
+        Version        = if ($ap.PSObject.Properties['version']) { [string]$ap.version } else { '' }
+        IconBg         = if ($ap.PSObject.Properties['icon_bg']) { [string]$ap.icon_bg } else { '#EFF6FF' }
+        IconFg         = if ($ap.PSObject.Properties['icon_fg']) { [string]$ap.icon_fg } else { '#2563EB' }
+        IconPath       = if ($ap.PSObject.Properties['icon_path']) { [string]$ap.icon_path } else { 'M 4,8 L 20,8 L 20,19 L 4,19 Z' }
+        ActionType     = $actType
+        Components     = if ($ap.PSObject.Properties['components']) { @($ap.components | ForEach-Object { [string]$_ }) } else { @() }
+        InstallScript  = if ($ap.PSObject.Properties['install_script']) { [string]$ap.install_script } else { '' }
+        LaunchUrl      = if ($ap.PSObject.Properties['launch_url']) { [string]$ap.launch_url } else { '' }
+        LaunchShortcut = if ($ap.PSObject.Properties['launch_shortcut']) { [string]$ap.launch_shortcut } else { '' }
+        OpenView       = if ($ap.PSObject.Properties['open_view']) { [string]$ap.open_view } else { '' }
+        Note           = if ($ap.PSObject.Properties['note']) { [string]$ap.note } else { '' }
+        Installed      = [bool]$isInst
+      }
+    }
+  }
+
+  return [pscustomobject]@{
+    CatalogPath = $catalogPath
+    Categories  = $categories
+    Combos      = $combos
+    Apps        = $apps
+  }
+}
+
+function Compare-EmTroLyVersion {
+  param(
+    [string]$Current = '',
+    [string]$Target = ''
+  )
+  $parseParts = {
+    param([string]$Raw)
+    $clean = ([string]$Raw).Trim().TrimStart('v', 'V')
+    $main = ($clean -split '[-+]')[0]
+    $nums = @()
+    foreach ($seg in @($main -split '\.')) {
+      $val = 0
+      if ([int]::TryParse($seg, [ref]$val)) { $nums += $val }
+      else { $nums += 0 }
+    }
+    while ($nums.Count -lt 3) { $nums += 0 }
+    return ,$nums
+  }
+  $a = & $parseParts $Current
+  $b = & $parseParts $Target
+  $maxLen = [Math]::Max($a.Count, $b.Count)
+  for ($i = 0; $i -lt $maxLen; $i++) {
+    $av = if ($i -lt $a.Count) { [int]$a[$i] } else { 0 }
+    $bv = if ($i -lt $b.Count) { [int]$b[$i] } else { 0 }
+    if ($av -lt $bv) { return -1 }
+    if ($av -gt $bv) { return 1 }
+  }
+  return 0
+}
+
+function Get-EmTroLyOpenClawVersionInfo {
+  param(
+    [string]$PayloadRoot = '',
+    [string]$OpenClawRoot = ''
+  )
+  $targetVer = '2026.11.4'
+  try {
+    $appVer = Get-EmTroLyAppVersion -PayloadRoot $PayloadRoot
+    if ($appVer -and -not [string]::IsNullOrWhiteSpace([string]$appVer.OpenClawVersion)) {
+      $targetVer = ([string]$appVer.OpenClawVersion).Trim()
+    }
+  } catch { }
+
+  $root = if (-not [string]::IsNullOrWhiteSpace($OpenClawRoot)) {
+    $OpenClawRoot
+  } elseif ($env:USERPROFILE) {
+    Join-Path $env:USERPROFILE 'openclaw'
+  } else { '' }
+
+  $installed = ($root -and (Test-Path -LiteralPath (Join-Path $root 'openclaw.json') -PathType Leaf))
+  $curVer = ''
+  if ($installed) {
+    # 1. Check installer-instance.json -> cli_entry -> package.json
+    $instJson = Join-Path $root 'installer-instance.json'
+    if (Test-Path -LiteralPath $instJson -PathType Leaf) {
+      try {
+        $instObj = [IO.File]::ReadAllText($instJson, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        if ($instObj -and $instObj.cli_entry) {
+          $pkgPath = Join-Path (Split-Path -Parent ([string]$instObj.cli_entry)) 'package.json'
+          if (Test-Path -LiteralPath $pkgPath -PathType Leaf) {
+            $pkg = [IO.File]::ReadAllText($pkgPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+            if ($pkg -and $pkg.version) { $curVer = ([string]$pkg.version).Trim() }
+          }
+        }
+      } catch { }
+    }
+    # 2. Fallback: scan runtime\*\node_modules\openclaw\package.json (newest first)
+    if (-not $curVer) {
+      $rtBase = Join-Path $root 'runtime'
+      if (Test-Path -LiteralPath $rtBase -PathType Container) {
+        foreach ($rtDir in @(Get-ChildItem -LiteralPath $rtBase -Directory -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending)) {
+          $pCand = Join-Path $rtDir.FullName 'node_modules\openclaw\package.json'
+          if (Test-Path -LiteralPath $pCand -PathType Leaf) {
+            try {
+              $pObj = [IO.File]::ReadAllText($pCand, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+              if ($pObj -and $pObj.version) { $curVer = ([string]$pObj.version).Trim(); break }
+            } catch { }
+          }
+          if ($rtDir.Name -match '^\d+\.\d+\.\d+') {
+            $curVer = $rtDir.Name
+            break
+          }
+        }
+      }
+    }
+  }
+
+  $needsUpgrade = $false
+  $isUpToDate = $false
+  if ($installed -and $curVer) {
+    $cmp = Compare-EmTroLyVersion -Current $curVer -Target $targetVer
+    $needsUpgrade = ($cmp -lt 0)
+    $isUpToDate = ($cmp -ge 0)
+  }
+
+  return [pscustomobject]@{
+    Installed        = [bool]$installed
+    InstalledVersion = $curVer
+    TargetVersion    = $targetVer
+    NeedsUpgrade     = [bool]$needsUpgrade
+    IsUpToDate       = [bool]$isUpToDate
+    Root             = $root
   }
 }

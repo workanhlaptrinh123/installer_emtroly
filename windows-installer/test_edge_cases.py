@@ -58,6 +58,63 @@ def run_ps(script_text: str, *, env: dict[str, str] | None = None, sta: bool = F
 
 
 class PureUnitTests(unittest.TestCase):
+    def test_app_catalog_and_openclaw_version_comparison_windows_and_unix(self):
+        # 1. Verify shared profiles/apps-catalog.json schema
+        catalog_path = ROOT / "profiles/apps-catalog.json"
+        self.assertTrue(catalog_path.is_file(), "Missing profiles/apps-catalog.json")
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        self.assertGreaterEqual(len(catalog.get("apps", [])), 3)
+        self.assertGreaterEqual(len(catalog.get("combos", [])), 1)
+
+        # 2. Verify Unix version comparison & upgrade detection
+        sys.path.insert(0, str(ROOT / "unix-installer"))
+        try:
+            import runner as unix_runner
+
+            self.assertEqual(unix_runner.compare_versions("2026.10.1", "2026.11.4"), -1)
+            self.assertEqual(unix_runner.compare_versions("2026.11.4", "2026.11.4"), 0)
+            self.assertEqual(unix_runner.compare_versions("2026.12.0", "2026.11.4"), 1)
+            with tempfile.TemporaryDirectory(prefix="emtroly-ver-unix-") as td:
+                oc_root = Path(td) / "openclaw"
+                pkg = oc_root / "runtime/2026.10.1/node_modules/openclaw/package.json"
+                pkg.parent.mkdir(parents=True)
+                (oc_root / "openclaw.json").write_text("{}", encoding="utf-8")
+                pkg.write_text(json.dumps({"version": "2026.10.1"}), encoding="utf-8")
+                info_old = unix_runner.get_openclaw_version_info(oc_root, ROOT)
+                self.assertTrue(info_old["installed"])
+                self.assertTrue(info_old["needs_upgrade"])
+                self.assertFalse(info_old["up_to_date"])
+                pkg.write_text(json.dumps({"version": info_old["target_version"]}), encoding="utf-8")
+                info_cur = unix_runner.get_openclaw_version_info(oc_root, ROOT)
+                self.assertFalse(info_cur["needs_upgrade"])
+                self.assertTrue(info_cur["up_to_date"])
+        finally:
+            sys.path.pop(0)
+
+        # 3. Verify Windows PowerShell version comparison & catalog reader
+        if SHELL and os.name == "nt":
+            helpers = ROOT / "windows-installer/wizard-helpers.ps1"
+            with tempfile.TemporaryDirectory(prefix="emtroly-ver-win-") as td:
+                oc_root = Path(td) / "openclaw"
+                pkg = oc_root / "runtime/2026.10.1/node_modules/openclaw/package.json"
+                pkg.parent.mkdir(parents=True)
+                (oc_root / "openclaw.json").write_text("{}", encoding="utf-8")
+                pkg.write_text(json.dumps({"version": "2026.10.1"}), encoding="utf-8")
+                res = run_ps(
+                    f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{helpers}", [Text.Encoding]::UTF8)))\n'
+                    "$ErrorActionPreference = 'Stop'\n"
+                    "if ((Compare-EmTroLyVersion '2026.10.1' '2026.11.4') -ne -1) { throw 'cmp-lt-failed' }\n"
+                    "if ((Compare-EmTroLyVersion '2026.11.4' '2026.11.4') -ne 0) { throw 'cmp-eq-failed' }\n"
+                    "if ((Compare-EmTroLyVersion '2026.12.0' '2026.11.4') -ne 1) { throw 'cmp-gt-failed' }\n"
+                    f"$v = Get-EmTroLyOpenClawVersionInfo -PayloadRoot '{ROOT}' -OpenClawRoot '{oc_root}'\n"
+                    "if (-not $v.Installed -or -not $v.NeedsUpgrade -or $v.IsUpToDate) { throw 'old-ver-not-detected' }\n"
+                    f"$cat = Get-EmTroLyAppCatalog -PayloadRoot '{ROOT}'\n"
+                    "if (@($cat.Apps).Count -lt 3 -or @($cat.Combos).Count -lt 1) { throw 'catalog-load-failed' }\n"
+                    "Write-Output 'CATALOG_AND_VERSION_UNIT_OK'\n"
+                )
+                self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+                self.assertIn("CATALOG_AND_VERSION_UNIT_OK", res.stdout)
+
     def test_unix_license_gate_pure_unit_tests(self):
         sys.path.insert(0, str(ROOT / "unix-installer"))
         try:

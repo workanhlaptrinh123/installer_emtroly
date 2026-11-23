@@ -10,6 +10,14 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $expectedVersion = '2026.11.4'
+$manifestPathInit = Join-Path $PayloadRoot 'MANIFEST.txt'
+if (Test-Path -LiteralPath $manifestPathInit -PathType Leaf) {
+  try {
+    foreach ($ml in [IO.File]::ReadAllLines($manifestPathInit, [Text.Encoding]::UTF8)) {
+      if ($ml -match '^openclaw=(.+)$') { $expectedVersion = $Matches[1].Trim(); break }
+    }
+  } catch { }
+}
 . (Join-Path $PayloadRoot 'windows-installer\validation.ps1')
 $codexHelperScript = Join-Path $PayloadRoot 'windows-installer\codex-cli.ps1'
 if (Test-Path -LiteralPath $codexHelperScript -PathType Leaf) {
@@ -382,26 +390,44 @@ requires_openai_auth = true
   }
 
   if (-not $EditorOnly) {
+    $forceReinstall = ($settings -and $settings.PSObject.Properties['force_reinstall'] -and [bool]$settings.force_reinstall)
     $wantOpenClaw = (-not $isModularRun) -or ('openclaw' -in $requestedComponents)
+    $openClawUpgradeMode = $false
+    $openClawSkipUpToDate = $false
     if ($wantOpenClaw) {
-      Test-MemberInstallerSettings $settings
       if (Test-Path -LiteralPath $root) {
         if (Test-IsRecoverableIncompleteOpenClawDir -DirPath $root) {
           Write-SafeStatus 'Phát hiện thư mục OpenClaw cài dở từ lần trước — đang tự động dọn sạch để cài mới...'
           Remove-IncompleteOpenClawDirectory -DirPath $root
         }
-        if (Test-Path -LiteralPath $root) { throw 'instance-exists' }
-      }
-      Test-InstallDiskFreeSpace -TargetPath $env:USERPROFILE -SkipEditor ([bool]$settings.skip_editor -or ($isModularRun -and 'antigravity-ide' -notin $requestedComponents -and 'codex-extension' -notin $requestedComponents))
-      if ($env:OS -eq 'Windows_NT') {
-        $existingOpenClawCmd = Get-Command openclaw -ErrorAction SilentlyContinue
-        if ($existingOpenClawCmd) {
-          $ownShimDir = if ($env:LOCALAPPDATA) { (Join-Path $env:LOCALAPPDATA 'OpenClaw\bin').TrimEnd('\') } else { '' }
-          $cmdSrcDir = if ($existingOpenClawCmd.Source) { (Split-Path -Parent $existingOpenClawCmd.Source).TrimEnd('\') } else { '' }
-          if ($ownShimDir -and $cmdSrcDir -ieq $ownShimDir -and -not (Test-Path -LiteralPath $root)) {
-            Remove-Item -LiteralPath $existingOpenClawCmd.Source -Force -ErrorAction SilentlyContinue
+        if (Test-Path -LiteralPath (Join-Path $root 'openclaw.json') -PathType Leaf) {
+          $ocVerCheck = if (Get-Command Get-EmTroLyOpenClawVersionInfo -ErrorAction SilentlyContinue) {
+            Get-EmTroLyOpenClawVersionInfo -PayloadRoot $PayloadRoot -OpenClawRoot $root
+          } else { $null }
+          if ($ocVerCheck -and $ocVerCheck.NeedsUpgrade) {
+            $openClawUpgradeMode = $true
+          } elseif ($ocVerCheck -and $ocVerCheck.IsUpToDate -and $isModularRun) {
+            $openClawSkipUpToDate = $true
           } else {
-            throw 'cli-probe-conflict'
+            throw 'instance-exists'
+          }
+        } elseif (Test-Path -LiteralPath $root) {
+          throw 'instance-exists'
+        }
+      }
+      if (-not $openClawUpgradeMode -and -not $openClawSkipUpToDate) {
+        Test-MemberInstallerSettings $settings
+        Test-InstallDiskFreeSpace -TargetPath $env:USERPROFILE -SkipEditor ([bool]$settings.skip_editor -or ($isModularRun -and 'antigravity-ide' -notin $requestedComponents -and 'codex-extension' -notin $requestedComponents))
+        if ($env:OS -eq 'Windows_NT') {
+          $existingOpenClawCmd = Get-Command openclaw -ErrorAction SilentlyContinue
+          if ($existingOpenClawCmd) {
+            $ownShimDir = if ($env:LOCALAPPDATA) { (Join-Path $env:LOCALAPPDATA 'OpenClaw\bin').TrimEnd('\') } else { '' }
+            $cmdSrcDir = if ($existingOpenClawCmd.Source) { (Split-Path -Parent $existingOpenClawCmd.Source).TrimEnd('\') } else { '' }
+            if ($ownShimDir -and $cmdSrcDir -ieq $ownShimDir -and -not (Test-Path -LiteralPath $root)) {
+              Remove-Item -LiteralPath $existingOpenClawCmd.Source -Force -ErrorAction SilentlyContinue
+            } else {
+              throw 'cli-probe-conflict'
+            }
           }
         }
       }
@@ -435,7 +461,7 @@ requires_openai_auth = true
       try { Save-EmTroLyLicenseKey -ApiKey ([string]$settings.ai_api_key) } catch { }
     }
 
-    if ($wantOpenClaw) {
+    if ($wantOpenClaw -and -not $openClawUpgradeMode -and -not $openClawSkipUpToDate) {
       $stage = 'telegram'
       Write-SafeStatus 'Đang kiểm tra bot Telegram...'
       try {
@@ -445,20 +471,41 @@ requires_openai_auth = true
     }
 
     # =========================================================================
-    # MODULAR COMPONENT EXECUTION MODE (when user selects individual components)
+    # MODULAR COMPONENT EXECUTION MODE (Smart skip already-installed apps!)
     # =========================================================================
     if ($isModularRun) {
       $completedLabels = @()
+      $skippedLabels = @()
+      $modSnapNow = if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) { Get-EmTroLyModularStatus } else { $null }
+
       if ('codex-cli' -in $requestedComponents) {
-        $stage = 'codex-cli'
-        if (-not (Get-Command Install-EmTroLyCodexCliFirst -ErrorAction SilentlyContinue)) { throw 'editor-module-missing' }
-        $codexOnlyRes = Install-EmTroLyCodexCliFirst -Settings $settings -PayloadRoot $PayloadRoot -StatusFile $LogFile -EditorJobId $editorJobId -ForceConfigUpdate
-        if (-not $codexOnlyRes.Installed) { throw 'codex-cli-install-failed' }
-        $completedLabels += 'Codex CLI'
+        if (-not $forceReinstall -and $modSnapNow -and $modSnapNow.CodexCliInstalled) {
+          Write-SafeStatus '✓ Codex CLI đã cài đặt sẵn — bỏ qua không cài lại.'
+          $skippedLabels += 'Codex CLI'
+        } else {
+          $stage = 'codex-cli'
+          if (-not (Get-Command Install-EmTroLyCodexCliFirst -ErrorAction SilentlyContinue)) { throw 'editor-module-missing' }
+          $codexOnlyRes = Install-EmTroLyCodexCliFirst -Settings $settings -PayloadRoot $PayloadRoot -StatusFile $LogFile -EditorJobId $editorJobId -ForceConfigUpdate
+          if (-not $codexOnlyRes.Installed) { throw 'codex-cli-install-failed' }
+          $completedLabels += 'Codex CLI'
+        }
       }
 
       $wantIde = ('antigravity-ide' -in $requestedComponents)
       $wantExt = ('codex-extension' -in $requestedComponents)
+      if (-not $forceReinstall -and $modSnapNow) {
+        if ($wantIde -and $modSnapNow.AntigravityInstalled) {
+          Write-SafeStatus '✓ Antigravity IDE đã cài đặt sẵn — bỏ qua không cài lại.'
+          $wantIde = $false
+          $skippedLabels += 'Antigravity IDE'
+        }
+        if ($wantExt -and $modSnapNow.CodexExtensionInstalled) {
+          Write-SafeStatus '✓ Codex Extension đã cài đặt sẵn — bỏ qua không cài lại.'
+          $wantExt = $false
+          $skippedLabels += 'Codex Extension'
+        }
+      }
+
       if ($wantIde -or $wantExt) {
         $stage = 'editor'
         $modMutex = New-Object Threading.Mutex($false, ('EmTroLy-Codex-' + $editorJobId))
@@ -473,7 +520,7 @@ requires_openai_auth = true
             job_id     = $editorJobId
           }
           $compMode = if ($wantIde -and $wantExt) { 'all' } elseif ($wantIde) { 'ide-only' } else { 'extension-only' }
-          Invoke-EditorStepWithCodexAutoHeal -EditorSettingsObj $modEditorSettings -ComponentMode $compMode -AllowUpdateExisting
+          Invoke-EditorStepWithCodexAutoHeal -EditorSettingsObj $modEditorSettings -ComponentMode $compMode -AllowUpdateExisting:$forceReinstall
           if ($wantIde) { $completedLabels += 'Antigravity IDE' }
           if ($wantExt) { $completedLabels += 'Codex Extension' }
         } finally {
@@ -482,18 +529,46 @@ requires_openai_auth = true
         }
       }
 
+      if ($wantOpenClaw -and $openClawSkipUpToDate) {
+        Write-SafeStatus "✓ Trợ lý OpenClaw đã ở phiên bản mới nhất (v$expectedVersion) — bỏ qua không cài lại."
+        $skippedLabels += 'OpenClaw'
+        $wantOpenClaw = $false
+      }
+
       if (-not $wantOpenClaw) {
         if (Get-Command Install-EmTroLyAppShortcut -ErrorAction SilentlyContinue) {
           try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot) } catch { }
         }
-        $joinedDone = ($completedLabels -join ', ')
-        Write-SafeStatus "Hoàn tất: Đã cài đặt thành công phần đã chọn ($joinedDone)!"
+        if ($completedLabels.Count -gt 0 -and $skippedLabels.Count -gt 0) {
+          Write-SafeStatus ("Hoàn tất: Đã cài đặt ($($completedLabels -join ', ')) · Đã bỏ qua phần có sẵn ($($skippedLabels -join ', '))!")
+        } elseif ($completedLabels.Count -gt 0) {
+          Write-SafeStatus ("Hoàn tất: Đã cài đặt thành công phần đã chọn ($($completedLabels -join ', '))!")
+        } else {
+          Write-SafeStatus ("Hoàn tất: Tất cả ứng dụng đã chọn đều đã cài đặt sẵn ($($skippedLabels -join ', ')) — không cần cài lại!")
+        }
         exit 0
       }
 
       # If 'openclaw' IS also in $requestedComponents, skip re-running editor in the standard block below
       $settings | Add-Member -NotePropertyName skip_editor -NotePropertyValue $true -Force
-      $editorCompletedEarly = ($wantIde -or $wantExt)
+      $editorCompletedEarly = ($wantIde -or $wantExt -or ('antigravity-ide' -in $requestedComponents) -or ('codex-extension' -in $requestedComponents))
+    }
+
+    # In-place OpenClaw upgrade path when existing installed version < target version
+    if ($openClawUpgradeMode) {
+      $stage = 'install'
+      Write-SafeStatus "Phát hiện OpenClaw phiên bản cũ hơn v$expectedVersion — đang tự động nâng cấp giữ nguyên dữ liệu..."
+      $manageScriptPath = Join-Path $PayloadRoot 'windows-installer\manage-instance.ps1'
+      if (-not (Test-Path -LiteralPath $manageScriptPath -PathType Leaf)) { throw 'missing-payload' }
+      $upgReqPath = Join-Path $env:TEMP ('openclaw-upgrade-req-' + [guid]::NewGuid().ToString('N') + '.json')
+      [IO.File]::WriteAllText($upgReqPath, (@{ action = 'upgrade-openclaw' } | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
+      try {
+        & $manageScriptPath -RunManageWorker -WorkerRequestFile $upgReqPath -WorkerPayloadRoot $PayloadRoot -WorkerLogFile $LogFile
+        if ($LASTEXITCODE -ne 0) { throw 'openclaw-upgrade-install-failed' }
+      } finally {
+        Remove-Item -LiteralPath $upgReqPath -Force -ErrorAction SilentlyContinue
+      }
+      exit 0
     }
 
     # =========================================================================
@@ -510,25 +585,33 @@ requires_openai_auth = true
 
     if (-not $settings.skip_editor) {
       $stage = 'editor'
-      $earlyMutex = New-Object Threading.Mutex($false, ('EmTroLy-Codex-' + $editorJobId))
-      $earlyLocked = $false
-      try {
-        try { $earlyLocked = $earlyMutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $earlyLocked = $true }
-        if (-not $earlyLocked) { throw 'editor-busy' }
-        $editorSettings = [pscustomobject]@{
-          model      = [string]$settings.model
-          base_url   = 'https://codex.anhlaptrinh.vn/v1'
-          ai_api_key = [string]$settings.ai_api_key
-          job_id     = $editorJobId
-        }
-        Invoke-EditorStepWithCodexAutoHeal -EditorSettingsObj $editorSettings
+      $fullModSnap = if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) { Get-EmTroLyModularStatus } else { $null }
+      $skipFullEditor = ($fullModSnap -and $fullModSnap.AntigravityInstalled -and $fullModSnap.CodexExtensionInstalled)
+      $fullEditorMode = if ($fullModSnap -and $fullModSnap.AntigravityInstalled -and -not $fullModSnap.CodexExtensionInstalled) { 'extension-only' } else { 'all' }
+      if ($skipFullEditor) {
+        Write-SafeStatus '✓ Antigravity IDE & Codex Extension đã cài đặt sẵn — bỏ qua không cài lại.'
         $editorCompletedEarly = $true
-      } catch {
-        $deferredEditorError = [string]$_.Exception.Message
-        $deferredEditorTechDetail = $lastTechnicalDetail
-      } finally {
-        if ($earlyLocked) { try { $earlyMutex.ReleaseMutex() } catch { } }
-        if ($earlyMutex) { try { $earlyMutex.Dispose() } catch { } }
+      } else {
+        $earlyMutex = New-Object Threading.Mutex($false, ('EmTroLy-Codex-' + $editorJobId))
+        $earlyLocked = $false
+        try {
+          try { $earlyLocked = $earlyMutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $earlyLocked = $true }
+          if (-not $earlyLocked) { throw 'editor-busy' }
+          $editorSettings = [pscustomobject]@{
+            model      = [string]$settings.model
+            base_url   = 'https://codex.anhlaptrinh.vn/v1'
+            ai_api_key = [string]$settings.ai_api_key
+            job_id     = $editorJobId
+          }
+          Invoke-EditorStepWithCodexAutoHeal -EditorSettingsObj $editorSettings -ComponentMode $fullEditorMode
+          $editorCompletedEarly = $true
+        } catch {
+          $deferredEditorError = [string]$_.Exception.Message
+          $deferredEditorTechDetail = $lastTechnicalDetail
+        } finally {
+          if ($earlyLocked) { try { $earlyMutex.ReleaseMutex() } catch { } }
+          if ($earlyMutex) { try { $earlyMutex.Dispose() } catch { } }
+        }
       }
     }
 
