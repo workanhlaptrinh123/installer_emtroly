@@ -139,8 +139,9 @@ def main():
 
     window = tk.Tk()
     window.title(f"Em Trợ Lý v{app_ver} - Cài đặt, Zalo QR & Codex CLI")
-    window.minsize(840, 710)
-    window.configure(bg="#F3F6FB")
+    window.geometry("980x740")
+    window.minsize(900, 710)
+    window.configure(bg="#F1F5F9")
 
     family = pick_uniform_font_family(tkfont.families(window))
     font_title = (family, 15, "bold")
@@ -155,21 +156,28 @@ def main():
         style.theme_use("clam")
 
     style.configure(".", font=font_regular, foreground="#0F172A", background="#FFFFFF")
-    style.configure("App.TFrame", background="#F3F6FB")
+    style.configure("App.TFrame", background="#F1F5F9")
     style.configure("Card.TFrame", background="#FFFFFF")
     style.configure("Header.TFrame", background="#FFFFFF")
     style.configure("HeaderTitle.TLabel", font=font_title, foreground="#0F172A", background="#FFFFFF")
-    style.configure("HeaderSub.TLabel", font=font_hint, foreground="#475569", background="#FFFFFF")
+    style.configure("HeaderSub.TLabel", font=font_hint, foreground="#64748B", background="#FFFFFF")
     style.configure("Section.TLabel", font=font_section, foreground="#0F172A", background="#FFFFFF")
     style.configure("Hint.TLabel", font=font_hint, foreground="#475569", background="#F8FAFC")
     style.configure("BannerOk.TLabel", font=font_bold, foreground="#065F46", background="#ECFDF5")
     style.configure("StatusOk.TLabel", font=font_bold, foreground="#059669", background="#FFFFFF")
     style.configure("StatusWarn.TLabel", font=font_bold, foreground="#B45309", background="#FFFFFF")
-    style.configure("TNotebook", background="#F3F6FB", borderwidth=0)
-    style.configure("TNotebook.Tab", font=font_bold, padding=(14, 8))
-    style.configure("Primary.TButton", font=font_bold, foreground="#FFFFFF", background="#2563EB", padding=(14, 7))
+    style.configure("TEntry", padding=(8, 6), fieldbackground="#FFFFFF", bordercolor="#CBD5E1")
+    style.configure("TCombobox", padding=(8, 6), fieldbackground="#FFFFFF", bordercolor="#CBD5E1")
+    style.configure("TNotebook", background="#F1F5F9", borderwidth=0)
+    style.configure("TNotebook.Tab", font=font_bold, padding=(16, 9), background="#E2E8F0", foreground="#475569")
+    style.map(
+        "TNotebook.Tab",
+        background=[("selected", "#FFFFFF"), ("active", "#EFF6FF")],
+        foreground=[("selected", "#2563EB"), ("active", "#1D4ED8")],
+    )
+    style.configure("Primary.TButton", font=font_bold, foreground="#FFFFFF", background="#2563EB", padding=(16, 8))
     style.map("Primary.TButton", background=[("active", "#1D4ED8"), ("disabled", "#94A3B8")])
-    style.configure("Secondary.TButton", font=font_regular, foreground="#0F172A", background="#F8FAFC", padding=(12, 6))
+    style.configure("Secondary.TButton", font=font_regular, foreground="#1E293B", background="#F8FAFC", padding=(14, 7))
 
     window.columnconfigure(0, weight=1)
     window.rowconfigure(1, weight=1)
