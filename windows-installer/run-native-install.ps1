@@ -479,7 +479,11 @@ requires_openai_auth = true
       $modSnapNow = if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) { Get-EmTroLyModularStatus } else { $null }
 
       if ('codex-cli' -in $requestedComponents) {
-        if (-not $forceReinstall -and $modSnapNow -and $modSnapNow.CodexCliInstalled) {
+        $codexFullyConfigured = ($modSnapNow -and $modSnapNow.CodexCliInstalled -and $env:LOCALAPPDATA -and
+          (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex\config.toml') -PathType Leaf) -and
+          (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex\auth.json') -PathType Leaf) -and
+          (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'OpenClaw\bin\codex-emtroly.cmd') -PathType Leaf))
+        if (-not $forceReinstall -and $codexFullyConfigured) {
           Write-SafeStatus '✓ Codex CLI đã cài đặt sẵn — bỏ qua không cài lại.'
           $skippedLabels += 'Codex CLI'
         } else {
