@@ -1002,7 +1002,14 @@ function Get-EmTroLyModularStatus {
     $hasCfg = $emBase -and (Test-Path -LiteralPath (Join-Path $emBase 'Codex\config.toml') -PathType Leaf)
     if ($cInfo.Available -and ($cInfo.Source -eq 'emtroly' -or $hasCfg)) {
       $codexInstalled = $true
-      $codexDetail = "Đã sẵn sàng ($($cInfo.Executable))"
+      $shortExec = [string]$cInfo.Executable
+      if ($shortExec -match '\\EmTroLy\\Antigravity\\Extensions\\') {
+        $codexDetail = 'Đã sẵn sàng (Bản cô lập Em Trợ Lý · lệnh codex)'
+      } elseif ($shortExec -match '\\EmTroLy\\CodexCli\\') {
+        $codexDetail = 'Đã sẵn sàng (Bản độc lập Em Trợ Lý · lệnh codex)'
+      } else {
+        $codexDetail = "Đã sẵn sàng ($shortExec)"
+      }
     } elseif ($cInfo.Available) {
       $codexInstalled = $true
       $codexDetail = "Đã có trên máy ($($cInfo.Executable))"
@@ -1055,7 +1062,18 @@ function Get-EmTroLyModularStatus {
       } catch { }
     }
   }
-  $ideDetail = if ($ideInstalled) { "Đã cài đặt (v$ideVer · $idePath)" } else { 'Chưa cài đặt — tự tải và cài đặt Antigravity IDE chuẩn Google (~190 MB)' }
+  $ideDetail = if ($ideInstalled) {
+    if ($idePath -match '\\EmTroLy-Antigravity-IDE-') {
+      "Đã cài đặt sẵn sàng (v$ideVer · Bản riêng Em Trợ Lý)"
+    } elseif ($env:LOCALAPPDATA -and $idePath.StartsWith($env:LOCALAPPDATA, [StringComparison]::OrdinalIgnoreCase)) {
+      $relIde = '%LOCALAPPDATA%' + $idePath.Substring($env:LOCALAPPDATA.Length)
+      "Đã cài đặt (v$ideVer · $relIde)"
+    } else {
+      "Đã cài đặt (v$ideVer · $idePath)"
+    }
+  } else {
+    'Chưa cài đặt — tự tải và cài đặt Antigravity IDE chuẩn Google (~190 MB)'
+  }
 
   $extInstalled = $false
   $extVer = ''

@@ -674,9 +674,9 @@ $xamlText = @'
     <!-- RIGHT WORKSPACE -->
     <DockPanel Grid.Column="1" LastChildFill="True">
       <!-- Top Header -->
-      <Border DockPanel.Dock="Top" Height="68" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="0,0,0,1" Padding="24,0">
+      <Border DockPanel.Dock="Top" MinHeight="68" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="0,0,0,1" Padding="24,12">
         <DockPanel VerticalAlignment="Center">
-          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
             <Border x:Name="HeaderZaloBadge" Background="#ECFDF5" BorderBrush="#6EE7B7" BorderThickness="1" CornerRadius="18" Padding="12,6" Margin="0,0,10,0" VerticalAlignment="Center" Cursor="Hand" Visibility="Collapsed">
               <StackPanel Orientation="Horizontal">
                 <Border Width="16" Height="16" CornerRadius="8" Background="#10B981" VerticalAlignment="Center" Margin="0,0,6,0">
@@ -685,24 +685,24 @@ $xamlText = @'
                 <TextBlock Text="Đã kết nối Zalo" FontSize="12" FontWeight="Bold" Foreground="#065F46" VerticalAlignment="Center"/>
               </StackPanel>
             </Border>
-            <Button x:Name="HeaderQuickBtn" Style="{StaticResource SoftAccentBtn}" Content="Mở Codex CLI" VerticalAlignment="Center" MinWidth="140" Height="36"/>
+            <Button x:Name="HeaderQuickBtn" Style="{StaticResource SoftAccentBtn}" Content="Mở Codex CLI" VerticalAlignment="Center" MinWidth="146" Padding="14,0" Height="36"/>
           </StackPanel>
-          <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+          <StackPanel VerticalAlignment="Center">
             <TextBlock x:Name="HeaderTitle" Text="Cài đặt nhanh trọn gói A–Z" FontSize="18.5" FontWeight="Bold" Foreground="#0F172A"/>
-            <TextBlock x:Name="HeaderSubtitle" Text="Nhập 4 thông tin cơ bản bên dưới rồi bấm Cài đặt — mọi thứ còn lại hoàn toàn tự động" FontSize="12.5" Foreground="#64748B" Margin="0,2,0,0" TextTrimming="CharacterEllipsis"/>
+            <TextBlock x:Name="HeaderSubtitle" Text="Nhập 4 thông tin cơ bản bên dưới rồi bấm Cài đặt — mọi thứ còn lại hoàn toàn tự động" FontSize="12.5" Foreground="#64748B" Margin="0,2,0,0" TextWrapping="Wrap"/>
           </StackPanel>
         </DockPanel>
       </Border>
 
-      <!-- Bottom Sticky Action Bar (Uniform 38px Buttons) -->
-      <Border DockPanel.Dock="Bottom" Height="62" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="0,1,0,0" Padding="24,0">
+      <!-- Bottom Sticky Action Bar (Uniform 38px Buttons, Never Clips Hint Text) -->
+      <Border DockPanel.Dock="Bottom" MinHeight="62" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="0,1,0,0" Padding="24,10">
         <DockPanel VerticalAlignment="Center">
-          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-            <Button x:Name="StopTaskBtn" Style="{StaticResource SoftDangerBtn}" Content="Dừng lại" MinWidth="116" Margin="0,0,10,0" Visibility="Collapsed"/>
-            <Button x:Name="CancelBtn" Style="{StaticResource SecondaryBtn}" Content="Thoát" MinWidth="104" Margin="0,0,10,0"/>
-            <Button x:Name="PrimaryActionBtn" Style="{StaticResource PrimaryBtn}" Content="Cài đặt trọn gói A–Z" MinWidth="184"/>
+          <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
+            <Button x:Name="StopTaskBtn" Style="{StaticResource SoftDangerBtn}" Content="Dừng lại" MinWidth="118" Padding="16,0" Margin="0,0,10,0" Visibility="Collapsed"/>
+            <Button x:Name="CancelBtn" Style="{StaticResource SecondaryBtn}" Content="Thoát" MinWidth="104" Padding="16,0" Margin="0,0,10,0"/>
+            <Button x:Name="PrimaryActionBtn" Style="{StaticResource PrimaryBtn}" Content="Cài đặt trọn gói A–Z" MinWidth="190" Padding="18,0"/>
           </StackPanel>
-          <TextBlock x:Name="FooterHintText" Text="Mẹo: Dán Bot Token rồi bấm Lấy ID tự động để khỏi cần tìm tay." FontSize="12.5" Foreground="#64748B" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Margin="0,0,16,0"/>
+          <TextBlock x:Name="FooterHintText" Text="Mẹo: Dán Bot Token rồi bấm Lấy ID tự động để khỏi cần tìm tay." FontSize="12.5" Foreground="#64748B" VerticalAlignment="Center" TextWrapping="Wrap"/>
         </DockPanel>
       </Border>
 
@@ -715,13 +715,13 @@ $xamlText = @'
             <!-- Hero Summary Banner -->
             <Border Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="12" Padding="20,15" Margin="0,0,0,14">
               <DockPanel>
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                  <Button x:Name="DashOpenWebBtn" Style="{StaticResource SoftAccentBtn}" Content="Mở Dashboard Web" Height="36" Margin="0,0,8,0"/>
-                  <Button x:Name="DashRefreshBtn" Style="{StaticResource SecondaryBtn}" Content="Làm mới" Height="36"/>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                  <Button x:Name="DashOpenWebBtn" Style="{StaticResource SoftAccentBtn}" Content="Mở Dashboard Web" Height="36" Padding="14,0" Margin="0,0,8,0"/>
+                  <Button x:Name="DashRefreshBtn" Style="{StaticResource SecondaryBtn}" Content="Làm mới" Height="36" Padding="14,0"/>
                 </StackPanel>
-                <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
-                  <TextBlock x:Name="DashHeroTitle" Text="Trợ lý OpenClaw đang sẵn sàng trên máy" FontSize="15.5" FontWeight="Bold" Foreground="#1E3A8A"/>
-                  <TextBlock x:Name="DashHeroSub" Text="Model: gpt-6.2-sol · Owner IDs: —" FontSize="12.5" Foreground="#3B82F6" Margin="0,3,0,0"/>
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock x:Name="DashHeroTitle" Text="Trợ lý OpenClaw đang sẵn sàng trên máy" FontSize="15.5" FontWeight="Bold" Foreground="#1E3A8A" TextWrapping="Wrap"/>
+                  <TextBlock x:Name="DashHeroSub" Text="Model: gpt-6.2-sol · Owner IDs: —" FontSize="12.5" Foreground="#3B82F6" Margin="0,3,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
               </DockPanel>
             </Border>
@@ -733,15 +733,16 @@ $xamlText = @'
                 <DockPanel>
                   <Button x:Name="DashRestartBtn" DockPanel.Dock="Bottom" Style="{StaticResource SecondaryBtn}" Content="Kiểm tra &amp; Khởi động lại" Height="36" HorizontalAlignment="Stretch" Margin="0,14,0,0"/>
                   <StackPanel>
-                    <DockPanel Margin="0,0,0,8">
-                      <Border x:Name="CardGwBadge" DockPanel.Dock="Right" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="9,2" VerticalAlignment="Center">
+                    <Grid Margin="0,0,0,8">
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+                        <Ellipse x:Name="CardGwDot" Width="9" Height="9" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="OpenClaw Gateway" FontSize="14" FontWeight="Bold"/>
+                      </StackPanel>
+                      <Border x:Name="CardGwBadge" Grid.Column="1" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="9,2" VerticalAlignment="Center">
                         <TextBlock x:Name="CardGwBadgeText" Text="✓ Đang chạy" FontSize="11.5" FontWeight="Bold" Foreground="#065F46"/>
                       </Border>
-                      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Ellipse x:Name="CardGwDot" Width="9" Height="9" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBlock Text="OpenClaw Gateway" FontSize="14.5" FontWeight="Bold"/>
-                      </StackPanel>
-                    </DockPanel>
+                    </Grid>
                     <TextBlock x:Name="CardGwStatus" Text="Đang kiểm tra..." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
                   </StackPanel>
                 </DockPanel>
@@ -752,15 +753,16 @@ $xamlText = @'
                 <DockPanel>
                   <Button x:Name="DashEditConfigBtn" DockPanel.Dock="Bottom" Style="{StaticResource SoftAccentBtn}" Content="Đổi Owner ID / Bot Token" Height="36" HorizontalAlignment="Stretch" Margin="0,14,0,0"/>
                   <StackPanel>
-                    <DockPanel Margin="0,0,0,8">
-                      <Border x:Name="CardTgBadge" DockPanel.Dock="Right" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="9,2" VerticalAlignment="Center">
+                    <Grid Margin="0,0,0,8">
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+                        <Ellipse x:Name="CardTgDot" Width="9" Height="9" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="Kết nối Telegram Bot" FontSize="14" FontWeight="Bold"/>
+                      </StackPanel>
+                      <Border x:Name="CardTgBadge" Grid.Column="1" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="9,2" VerticalAlignment="Center">
                         <TextBlock x:Name="CardTgBadgeText" Text="✓ Đã kết nối" FontSize="11.5" FontWeight="Bold" Foreground="#065F46"/>
                       </Border>
-                      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Ellipse x:Name="CardTgDot" Width="9" Height="9" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBlock Text="Kết nối Telegram Bot" FontSize="14.5" FontWeight="Bold"/>
-                      </StackPanel>
-                    </DockPanel>
+                    </Grid>
                     <TextBlock x:Name="CardTgStatus" Text="Đang kiểm tra..." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
                   </StackPanel>
                 </DockPanel>
@@ -770,12 +772,17 @@ $xamlText = @'
               <Border x:Name="CardZaloBorder" Style="{StaticResource CardBorder}" Margin="0,0,7,0">
                 <DockPanel>
                   <UniformGrid DockPanel.Dock="Bottom" Columns="2" Margin="0,14,0,0">
-                    <Button x:Name="DashZaloQrBtn" Style="{StaticResource SoftAccentBtn}" Content="Quét QR Zalo" Height="36" Margin="0,0,4,0"/>
-                    <Button x:Name="DashZaloBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Đồng bộ lại" Height="36" Margin="4,0,0,0"/>
+                    <Button x:Name="DashZaloQrBtn" Style="{StaticResource SoftAccentBtn}" Content="Quét QR Zalo" Height="36" Padding="8,0" FontSize="12.5" Margin="0,0,4,0"/>
+                    <Button x:Name="DashZaloBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Đồng bộ lại" Height="36" Padding="8,0" FontSize="12.5" Margin="4,0,0,0"/>
                   </UniformGrid>
                   <StackPanel>
-                    <DockPanel Margin="0,0,0,8">
-                      <Border x:Name="CardZaloBadge" DockPanel.Dock="Right" Background="#ECFDF5" BorderBrush="#6EE7B7" BorderThickness="1" CornerRadius="11" Padding="9,2" VerticalAlignment="Center">
+                    <Grid Margin="0,0,0,8">
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+                        <Ellipse x:Name="CardZaloDot" Width="9" Height="9" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="Zalo cá nhân (/zaloqr)" FontSize="14" FontWeight="Bold"/>
+                      </StackPanel>
+                      <Border x:Name="CardZaloBadge" Grid.Column="1" Background="#ECFDF5" BorderBrush="#6EE7B7" BorderThickness="1" CornerRadius="11" Padding="9,2" VerticalAlignment="Center">
                         <StackPanel Orientation="Horizontal">
                           <Border x:Name="CardZaloBadgeIcon" Width="14" Height="14" CornerRadius="7" Background="#10B981" VerticalAlignment="Center" Margin="0,0,5,0">
                             <Path Data="M 3,7.2 L 5.8,9.8 L 11,4.4" Stroke="#FFFFFF" StrokeThickness="1.9" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
@@ -783,11 +790,7 @@ $xamlText = @'
                           <TextBlock x:Name="CardZaloBadgeText" Text="Đã kết nối" FontSize="11.5" FontWeight="Bold" Foreground="#065F46" VerticalAlignment="Center"/>
                         </StackPanel>
                       </Border>
-                      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Ellipse x:Name="CardZaloDot" Width="9" Height="9" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBlock Text="Zalo cá nhân (/zaloqr)" FontSize="14.5" FontWeight="Bold"/>
-                      </StackPanel>
-                    </DockPanel>
+                    </Grid>
                     <TextBlock x:Name="CardZaloStatus" Text="Đang kiểm tra..." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
                   </StackPanel>
                 </DockPanel>
@@ -797,19 +800,20 @@ $xamlText = @'
               <Border Style="{StaticResource CardBorder}" Margin="7,0,0,0">
                 <DockPanel>
                   <UniformGrid DockPanel.Dock="Bottom" Columns="2" Margin="0,14,0,0">
-                    <Button x:Name="DashCodexRepairBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Sửa Antigravity" Height="36" Padding="8,0" Margin="0,0,4,0"/>
-                    <Button x:Name="DashOpenCodexBtn" Style="{StaticResource SoftAccentBtn}" Content="Dùng Codex CLI" Height="36" Padding="8,0" Margin="4,0,0,0"/>
+                    <Button x:Name="DashCodexRepairBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Sửa Antigravity" Height="36" Padding="8,0" FontSize="12.5" Margin="0,0,4,0"/>
+                    <Button x:Name="DashOpenCodexBtn" Style="{StaticResource SoftAccentBtn}" Content="Dùng Codex CLI" Height="36" Padding="8,0" FontSize="12.5" Margin="4,0,0,0"/>
                   </UniformGrid>
                   <StackPanel>
-                    <DockPanel Margin="0,0,0,8">
-                      <Border x:Name="CardCodexBadge" DockPanel.Dock="Right" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="9,2" VerticalAlignment="Center">
+                    <Grid Margin="0,0,0,8">
+                      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                      <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+                        <Ellipse x:Name="CardCodexDot" Width="9" Height="9" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="Antigravity &amp; Codex CLI" FontSize="14" FontWeight="Bold"/>
+                      </StackPanel>
+                      <Border x:Name="CardCodexBadge" Grid.Column="1" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="9,2" VerticalAlignment="Center">
                         <TextBlock x:Name="CardCodexBadgeText" Text="✓ Sẵn sàng" FontSize="11.5" FontWeight="Bold" Foreground="#065F46"/>
                       </Border>
-                      <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Ellipse x:Name="CardCodexDot" Width="9" Height="9" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBlock Text="Antigravity IDE &amp; Codex CLI" FontSize="14.5" FontWeight="Bold"/>
-                      </StackPanel>
-                    </DockPanel>
+                    </Grid>
                     <TextBlock x:Name="CardCodexStatus" Text="Đang kiểm tra..." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
                   </StackPanel>
                 </DockPanel>
@@ -1027,61 +1031,61 @@ $xamlText = @'
               </StackPanel>
             </Border>
 
-            <!-- 5-Step Checklist Card (Uniform Divided Rows & Pill Badges) -->
+            <!-- 5-Step Checklist Card (Auto-Width Pill Badges — Never Clips Long Statuses) -->
             <Border x:Name="InstallChecklistCard" Style="{StaticResource CardBorder}" Margin="0,0,0,14">
               <StackPanel>
                 <TextBlock Text="Tiến trình tự động từ A–Z" FontSize="15" FontWeight="Bold" Margin="0,0,0,12"/>
 
                 <Border BorderBrush="#F1F5F9" BorderThickness="0,0,0,1" Padding="0,0,0,10" Margin="0,0,0,10">
                   <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <TextBlock x:Name="Step1Icon" Grid.Column="0" Text="○" FontSize="15" FontWeight="Bold" Foreground="#94A3B8" VerticalAlignment="Center"/>
-                    <TextBlock x:Name="Step1Text" Grid.Column="1" Text="Bước 1 · Kiểm tra kết nối API &amp; Bot Telegram" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
-                    <Border Grid.Column="2" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="10,3" HorizontalAlignment="Right" VerticalAlignment="Center">
-                      <TextBlock x:Name="Step1Badge" Text="Chờ thực hiện" FontSize="11.5" FontWeight="SemiBold" Foreground="#64748B"/>
+                    <TextBlock x:Name="Step1Text" Grid.Column="1" Text="Bước 1 · Kiểm tra kết nối API &amp; Bot Telegram" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                    <Border Grid.Column="2" MinWidth="112" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="10,3" Margin="12,0,0,0" HorizontalAlignment="Right" VerticalAlignment="Center">
+                      <TextBlock x:Name="Step1Badge" Text="Chờ thực hiện" FontSize="11.5" FontWeight="SemiBold" Foreground="#64748B" HorizontalAlignment="Center"/>
                     </Border>
                   </Grid>
                 </Border>
 
                 <Border BorderBrush="#F1F5F9" BorderThickness="0,0,0,1" Padding="0,0,0,10" Margin="0,0,0,10">
                   <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <TextBlock x:Name="Step2Icon" Grid.Column="0" Text="○" FontSize="15" FontWeight="Bold" Foreground="#94A3B8" VerticalAlignment="Center"/>
-                    <TextBlock x:Name="Step2Text" Grid.Column="1" Text="Bước 2 · Ưu tiên cài Codex CLI → Antigravity IDE → Codex Extension" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
-                    <Border Grid.Column="2" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="10,3" HorizontalAlignment="Right" VerticalAlignment="Center">
-                      <TextBlock x:Name="Step2Badge" Text="Chờ thực hiện" FontSize="11.5" FontWeight="SemiBold" Foreground="#64748B"/>
+                    <TextBlock x:Name="Step2Text" Grid.Column="1" Text="Bước 2 · Ưu tiên cài Codex CLI → Antigravity IDE → Codex Extension" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                    <Border Grid.Column="2" MinWidth="112" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="10,3" Margin="12,0,0,0" HorizontalAlignment="Right" VerticalAlignment="Center">
+                      <TextBlock x:Name="Step2Badge" Text="Chờ thực hiện" FontSize="11.5" FontWeight="SemiBold" Foreground="#64748B" HorizontalAlignment="Center"/>
                     </Border>
                   </Grid>
                 </Border>
 
                 <Border BorderBrush="#F1F5F9" BorderThickness="0,0,0,1" Padding="0,0,0,10" Margin="0,0,0,10">
                   <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <TextBlock x:Name="Step3Icon" Grid.Column="0" Text="○" FontSize="15" FontWeight="Bold" Foreground="#94A3B8" VerticalAlignment="Center"/>
-                    <TextBlock x:Name="Step3Text" Grid.Column="1" Text="Bước 3 · Chuẩn bị môi trường (Node.js, Python, FFmpeg)" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
-                    <Border Grid.Column="2" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="10,3" HorizontalAlignment="Right" VerticalAlignment="Center">
-                      <TextBlock x:Name="Step3Badge" Text="Chờ thực hiện" FontSize="11.5" FontWeight="SemiBold" Foreground="#64748B"/>
+                    <TextBlock x:Name="Step3Text" Grid.Column="1" Text="Bước 3 · Chuẩn bị môi trường (Node.js, Python, FFmpeg)" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                    <Border Grid.Column="2" MinWidth="112" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="10,3" Margin="12,0,0,0" HorizontalAlignment="Right" VerticalAlignment="Center">
+                      <TextBlock x:Name="Step3Badge" Text="Chờ thực hiện" FontSize="11.5" FontWeight="SemiBold" Foreground="#64748B" HorizontalAlignment="Center"/>
                     </Border>
                   </Grid>
                 </Border>
 
                 <Border BorderBrush="#F1F5F9" BorderThickness="0,0,0,1" Padding="0,0,0,10" Margin="0,0,0,10">
                   <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/></Grid.ColumnDefinitions>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <TextBlock x:Name="Step4Icon" Grid.Column="0" Text="○" FontSize="15" FontWeight="Bold" Foreground="#94A3B8" VerticalAlignment="Center"/>
-                    <TextBlock x:Name="Step4Text" Grid.Column="1" Text="Bước 4 · Cài OpenClaw, tạo ảnh, kỹ năng văn phòng &amp; Gateway" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
-                    <Border Grid.Column="2" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="10,3" HorizontalAlignment="Right" VerticalAlignment="Center">
-                      <TextBlock x:Name="Step4Badge" Text="Chờ thực hiện" FontSize="11.5" FontWeight="SemiBold" Foreground="#64748B"/>
+                    <TextBlock x:Name="Step4Text" Grid.Column="1" Text="Bước 4 · Cài OpenClaw, tạo ảnh, kỹ năng văn phòng &amp; Gateway" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                    <Border Grid.Column="2" MinWidth="112" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="10,3" Margin="12,0,0,0" HorizontalAlignment="Right" VerticalAlignment="Center">
+                      <TextBlock x:Name="Step4Badge" Text="Chờ thực hiện" FontSize="11.5" FontWeight="SemiBold" Foreground="#64748B" HorizontalAlignment="Center"/>
                     </Border>
                   </Grid>
                 </Border>
 
                 <Grid>
-                  <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="120"/></Grid.ColumnDefinitions>
+                  <Grid.ColumnDefinitions><ColumnDefinition Width="30"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                   <TextBlock x:Name="Step5Icon" Grid.Column="0" Text="○" FontSize="15" FontWeight="Bold" Foreground="#94A3B8" VerticalAlignment="Center"/>
-                  <TextBlock x:Name="Step5Text" Grid.Column="1" Text="Bước 5 · Cài đặt Zalo cá nhân &amp; lệnh /zaloqr, /zalostatus" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center"/>
-                  <Border Grid.Column="2" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="10,3" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <TextBlock x:Name="Step5Badge" Text="Chờ thực hiện" FontSize="11.5" FontWeight="SemiBold" Foreground="#64748B"/>
+                  <TextBlock x:Name="Step5Text" Grid.Column="1" Text="Bước 5 · Cài đặt Zalo cá nhân &amp; lệnh /zaloqr, /zalostatus" FontSize="13.5" Foreground="#334155" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                  <Border Grid.Column="2" MinWidth="112" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="10,3" Margin="12,0,0,0" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <TextBlock x:Name="Step5Badge" Text="Chờ thực hiện" FontSize="11.5" FontWeight="SemiBold" Foreground="#64748B" HorizontalAlignment="Center"/>
                   </Border>
                 </Grid>
               </StackPanel>
@@ -1125,9 +1129,9 @@ $xamlText = @'
                   <TextBox x:Name="ErrorDetailBox" FontFamily="Segoe UI" FontSize="12.5" Foreground="#1E293B" Background="Transparent" BorderThickness="0" TextWrapping="Wrap" MaxHeight="126" Padding="10,7"/>
                 </Border>
                 <UniformGrid Columns="3">
-                  <Button x:Name="BtnInstallAutoHeal" Style="{StaticResource PrimaryBtn}" Content="Tự sửa lỗi bằng Codex" Margin="0,0,6,0"/>
-                  <Button x:Name="BtnBackToSetup" Style="{StaticResource SecondaryBtn}" Content="Quay lại kiểm tra cấu hình" Margin="3,0,3,0"/>
-                  <Button x:Name="BtnProgressExport" Style="{StaticResource SecondaryBtn}" Content="Xuất báo cáo hỗ trợ (.txt)" Margin="6,0,0,0"/>
+                  <Button x:Name="BtnInstallAutoHeal" Style="{StaticResource PrimaryBtn}" Content="Tự sửa lỗi bằng Codex" Padding="8,0" Margin="0,0,6,0"/>
+                  <Button x:Name="BtnBackToSetup" Style="{StaticResource SecondaryBtn}" Content="Quay lại kiểm tra cấu hình" Padding="8,0" Margin="3,0,3,0"/>
+                  <Button x:Name="BtnProgressExport" Style="{StaticResource SecondaryBtn}" Content="Xuất báo cáo hỗ trợ (.txt)" Padding="8,0" Margin="6,0,0,0"/>
                 </UniformGrid>
               </StackPanel>
             </Border>
@@ -1228,12 +1232,12 @@ $xamlText = @'
                 <TextBlock Text="Tự động sửa lỗi &amp; Khôi phục từng phần" FontSize="15" FontWeight="Bold" Margin="0,0,0,4"/>
                 <TextBlock Text="An toàn tuyệt đối: giữ nguyên dữ liệu cấu hình và lịch sử trò chuyện cũ trên máy." FontSize="12.5" Foreground="#64748B" Margin="0,0,0,14"/>
                 <UniformGrid Columns="3">
-                  <Button x:Name="DiagAutoHealBtn" Style="{StaticResource PrimaryBtn}" Content="Tự sửa lỗi bằng Codex" Margin="0,0,6,10"/>
-                  <Button x:Name="DiagRestartBtn" Style="{StaticResource SecondaryBtn}" Content="Khởi động lại Gateway" Margin="5,0,5,10"/>
-                  <Button x:Name="DiagZaloQrBtn" Style="{StaticResource SoftAccentBtn}" Content="Lấy mã QR Zalo" Margin="6,0,0,10"/>
-                  <Button x:Name="DiagZaloBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Đồng bộ Zalo" Margin="0,0,6,0"/>
-                  <Button x:Name="DiagCodexBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Sửa Antigravity &amp; Codex" Padding="10,0" Margin="5,0,5,0"/>
-                  <Button x:Name="DiagUninstallBtn" Style="{StaticResource SoftDangerBtn}" Content="Gỡ trợ lý để cài lại" Margin="6,0,0,0"/>
+                  <Button x:Name="DiagAutoHealBtn" Style="{StaticResource PrimaryBtn}" Content="Tự sửa lỗi bằng Codex" Padding="8,0" Margin="0,0,6,10"/>
+                  <Button x:Name="DiagRestartBtn" Style="{StaticResource SecondaryBtn}" Content="Khởi động lại Gateway" Padding="8,0" Margin="5,0,5,10"/>
+                  <Button x:Name="DiagZaloQrBtn" Style="{StaticResource SoftAccentBtn}" Content="Lấy mã QR Zalo" Padding="8,0" Margin="6,0,0,10"/>
+                  <Button x:Name="DiagZaloBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Đồng bộ Zalo" Padding="8,0" Margin="0,0,6,0"/>
+                  <Button x:Name="DiagCodexBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Sửa Antigravity &amp; Codex" Padding="8,0" Margin="5,0,5,0"/>
+                  <Button x:Name="DiagUninstallBtn" Style="{StaticResource SoftDangerBtn}" Content="Gỡ trợ lý để cài lại" Padding="8,0" Margin="6,0,0,0"/>
                 </UniformGrid>
               </StackPanel>
             </Border>
@@ -1284,8 +1288,8 @@ $xamlText = @'
                   <ColumnDefinition Width="28"/>
                   <ColumnDefinition Width="44"/>
                   <ColumnDefinition Width="*"/>
-                  <ColumnDefinition Width="114"/>
-                  <ColumnDefinition Width="134"/>
+                  <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="172"/>
                 </Grid.ColumnDefinitions>
                 <CheckBox x:Name="ModCheck1" Grid.Column="0" IsChecked="True" VerticalAlignment="Center"/>
                 <Border Grid.Column="1" Width="32" Height="32" CornerRadius="8" Background="#EFF6FF" BorderBrush="#DBEAFE" BorderThickness="1" HorizontalAlignment="Left" VerticalAlignment="Center">
@@ -1295,10 +1299,10 @@ $xamlText = @'
                   <TextBlock Text="1. Codex CLI riêng (codex)" FontSize="14" FontWeight="Bold" Foreground="#0F172A"/>
                   <TextBlock x:Name="ModDetail1" Text="Giải nén &amp; cấu hình lệnh codex chuẩn codex.anhlaptrinh.vn/v1 (~20 giây, không cần Telegram)." FontSize="12" Foreground="#64748B" Margin="0,3,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
-                <Border x:Name="ModBadge1" Grid.Column="3" MinWidth="96" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12" Padding="10,4" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Border x:Name="ModBadge1" Grid.Column="3" MinWidth="102" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12" Padding="10,4" Margin="0,0,12,0" HorizontalAlignment="Right" VerticalAlignment="Center">
                   <TextBlock x:Name="ModBadgeText1" Text="○ Chưa cài" FontSize="11.5" FontWeight="Bold" Foreground="#475569" HorizontalAlignment="Center"/>
                 </Border>
-                <Button x:Name="ModInstall1Btn" Grid.Column="4" Style="{StaticResource SoftAccentBtn}" Content="Cài phần này" Width="126" Height="36" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                <Button x:Name="ModInstall1Btn" Grid.Column="4" Style="{StaticResource SoftAccentBtn}" Content="Cài phần này" MinWidth="164" Height="36" Padding="10,0" HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
               </Grid>
             </Border>
 
@@ -1309,8 +1313,8 @@ $xamlText = @'
                   <ColumnDefinition Width="28"/>
                   <ColumnDefinition Width="44"/>
                   <ColumnDefinition Width="*"/>
-                  <ColumnDefinition Width="114"/>
-                  <ColumnDefinition Width="134"/>
+                  <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="172"/>
                 </Grid.ColumnDefinitions>
                 <CheckBox x:Name="ModCheck2" Grid.Column="0" IsChecked="False" VerticalAlignment="Center"/>
                 <Border Grid.Column="1" Width="32" Height="32" CornerRadius="8" Background="#EFF6FF" BorderBrush="#DBEAFE" BorderThickness="1" HorizontalAlignment="Left" VerticalAlignment="Center">
@@ -1320,10 +1324,10 @@ $xamlText = @'
                   <TextBlock Text="2. Antigravity IDE riêng" FontSize="14" FontWeight="Bold" Foreground="#0F172A"/>
                   <TextBlock x:Name="ModDetail2" Text="Kiểm tra hoặc tải bộ cài chính thức Google Antigravity IDE (~190 MB, xác thực chữ ký số Google LLC)." FontSize="12" Foreground="#64748B" Margin="0,3,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
-                <Border x:Name="ModBadge2" Grid.Column="3" MinWidth="96" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12" Padding="10,4" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Border x:Name="ModBadge2" Grid.Column="3" MinWidth="102" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12" Padding="10,4" Margin="0,0,12,0" HorizontalAlignment="Right" VerticalAlignment="Center">
                   <TextBlock x:Name="ModBadgeText2" Text="○ Chưa cài" FontSize="11.5" FontWeight="Bold" Foreground="#475569" HorizontalAlignment="Center"/>
                 </Border>
-                <Button x:Name="ModInstall2Btn" Grid.Column="4" Style="{StaticResource SoftAccentBtn}" Content="Cài phần này" Width="126" Height="36" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                <Button x:Name="ModInstall2Btn" Grid.Column="4" Style="{StaticResource SoftAccentBtn}" Content="Cài phần này" MinWidth="164" Height="36" Padding="10,0" HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
               </Grid>
             </Border>
 
@@ -1334,8 +1338,8 @@ $xamlText = @'
                   <ColumnDefinition Width="28"/>
                   <ColumnDefinition Width="44"/>
                   <ColumnDefinition Width="*"/>
-                  <ColumnDefinition Width="114"/>
-                  <ColumnDefinition Width="134"/>
+                  <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="172"/>
                 </Grid.ColumnDefinitions>
                 <CheckBox x:Name="ModCheck3" Grid.Column="0" IsChecked="False" VerticalAlignment="Center"/>
                 <Border Grid.Column="1" Width="32" Height="32" CornerRadius="8" Background="#EFF6FF" BorderBrush="#DBEAFE" BorderThickness="1" HorizontalAlignment="Left" VerticalAlignment="Center">
@@ -1345,10 +1349,10 @@ $xamlText = @'
                   <TextBlock Text="3. Codex Extension trong Antigravity" FontSize="14" FontWeight="Bold" Foreground="#0F172A"/>
                   <TextBlock x:Name="ModDetail3" Text="Cài tiện ích openai.chatgpt vào Antigravity riêng, khóa auto-update và tạo lối tắt EmTroLy - Antigravity trên Desktop." FontSize="12" Foreground="#64748B" Margin="0,3,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
-                <Border x:Name="ModBadge3" Grid.Column="3" MinWidth="96" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12" Padding="10,4" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Border x:Name="ModBadge3" Grid.Column="3" MinWidth="102" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12" Padding="10,4" Margin="0,0,12,0" HorizontalAlignment="Right" VerticalAlignment="Center">
                   <TextBlock x:Name="ModBadgeText3" Text="○ Chưa cài" FontSize="11.5" FontWeight="Bold" Foreground="#475569" HorizontalAlignment="Center"/>
                 </Border>
-                <Button x:Name="ModInstall3Btn" Grid.Column="4" Style="{StaticResource SoftAccentBtn}" Content="Cài phần này" Width="126" Height="36" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                <Button x:Name="ModInstall3Btn" Grid.Column="4" Style="{StaticResource SoftAccentBtn}" Content="Cài phần này" MinWidth="164" Height="36" Padding="10,0" HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
               </Grid>
             </Border>
 
@@ -1360,8 +1364,8 @@ $xamlText = @'
                     <ColumnDefinition Width="28"/>
                     <ColumnDefinition Width="44"/>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="114"/>
-                    <ColumnDefinition Width="134"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="172"/>
                   </Grid.ColumnDefinitions>
                   <CheckBox x:Name="ModCheck4" Grid.Column="0" IsChecked="False" VerticalAlignment="Center"/>
                   <Border Grid.Column="1" Width="32" Height="32" CornerRadius="8" Background="#EFF6FF" BorderBrush="#DBEAFE" BorderThickness="1" HorizontalAlignment="Left" VerticalAlignment="Center">
@@ -1371,10 +1375,10 @@ $xamlText = @'
                     <TextBlock Text="4. Trợ lý OpenClaw riêng (Telegram &amp; Zalo)" FontSize="14" FontWeight="Bold" Foreground="#0F172A"/>
                     <TextBlock x:Name="ModDetail4" Text="Cài đặt Node.js, Python, FFmpeg, OpenClaw 2026.11.4 &amp; Gateway Watchdog độc lập." FontSize="12" Foreground="#64748B" Margin="0,3,0,0" TextWrapping="Wrap"/>
                   </StackPanel>
-                  <Border x:Name="ModBadge4" Grid.Column="3" MinWidth="96" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12" Padding="10,4" HorizontalAlignment="Center" VerticalAlignment="Center">
+                  <Border x:Name="ModBadge4" Grid.Column="3" MinWidth="102" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12" Padding="10,4" Margin="0,0,12,0" HorizontalAlignment="Right" VerticalAlignment="Center">
                     <TextBlock x:Name="ModBadgeText4" Text="○ Chưa cài" FontSize="11.5" FontWeight="Bold" Foreground="#475569" HorizontalAlignment="Center"/>
                   </Border>
-                  <Button x:Name="ModInstall4Btn" Grid.Column="4" Style="{StaticResource SoftAccentBtn}" Content="Cài phần này" Width="126" Height="36" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                  <Button x:Name="ModInstall4Btn" Grid.Column="4" Style="{StaticResource SoftAccentBtn}" Content="Cài phần này" MinWidth="164" Height="36" Padding="10,0" HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
                 </Grid>
 
                 <!-- Inline Telegram Fields for OpenClaw Modular Setup -->
@@ -1389,7 +1393,7 @@ $xamlText = @'
                       <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="10"/>
-                        <ColumnDefinition Width="126"/>
+                        <ColumnDefinition Width="144"/>
                       </Grid.ColumnDefinitions>
                       <PasswordBox x:Name="ModTokenPwdBox" Grid.Column="0" Style="{StaticResource ModernPassword}" Height="34"/>
                       <Button x:Name="ModAutoFetchBtn" Grid.Column="2" Style="{StaticResource SecondaryBtn}" Content="Lấy ID tự động" Height="34" Padding="10,0" FontSize="12"/>
@@ -1531,11 +1535,11 @@ $xamlText = @'
 
               <Grid Margin="0,2,0,0">
                 <Grid.ColumnDefinitions>
-                  <ColumnDefinition Width="108"/>
+                  <ColumnDefinition Width="Auto"/>
                   <ColumnDefinition Width="10"/>
                   <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <Button x:Name="LicenseExitBtn" Grid.Column="0" Style="{StaticResource SecondaryBtn}" Content="Thoát" Height="40"/>
+                <Button x:Name="LicenseExitBtn" Grid.Column="0" Style="{StaticResource SecondaryBtn}" Content="Thoát" MinWidth="108" Padding="16,0" Height="40"/>
                 <Button x:Name="LicenseActivateBtn" Grid.Column="2" Style="{StaticResource PrimaryBtn}" Content="Kích hoạt &amp; Mở khóa phần mềm" Height="40"/>
               </Grid>
               <Button x:Name="LicenseSignOutBtn" Style="{StaticResource SoftDangerBtn}" Content="Thoát bản quyền hiện tại (bắt buộc nhập lại Token)" Height="36" Margin="0,10,0,0" Visibility="Collapsed"/>
@@ -2307,7 +2311,7 @@ function Update-DashboardCards {
       $cardZaloBadgeIcon.Visibility = [System.Windows.Visibility]::Visible
       $cardZaloBadgeText.Foreground = New-Brush '#065F46'
       $cardZaloBadgeText.Text = 'Đã kết nối'
-      $dashZaloQrBtn.Content = 'Xem kết nối / Đổi Zalo'
+      $dashZaloQrBtn.Content = 'Xem / Đổi Zalo'
       $cardZaloStatus.Text = 'Tài khoản Zalo cá nhân đã kết nối trực tuyến và sẵn sàng nhận/gửi tin nhắn.'
     } else {
       $cardZaloDot.Fill = New-Brush '#D97706'
@@ -2539,7 +2543,7 @@ function Set-Buttons {
     $footerHintText.Text = if ($script:currentView -eq 'zaloqr') { 'Quét mã QR trên màn hình hoặc trong Telegram — tự báo hoàn tất ngay khi đăng nhập.' } else { 'Mẹo: Mọi mã bí mật đều được lưu cục bộ an toàn trên máy bạn.' }
     $primaryActionBtn.Visibility = [System.Windows.Visibility]::Collapsed
   } elseif ($script:currentView -eq 'modular') {
-    $footerHintText.Text = 'Tích chọn các phần muốn cài (hoặc bấm "Cài phần này" trên từng dòng) rồi bấm nút bên phải.'
+    $footerHintText.Text = 'Tích chọn các phần muốn cài rồi bấm "Cài các phần đã chọn", hoặc bấm lẻ trên từng dòng.'
     $primaryActionBtn.Visibility = [System.Windows.Visibility]::Visible
     $primaryActionBtn.Content = 'Cài các phần đã chọn'
     $primaryActionBtn.IsEnabled = $true
