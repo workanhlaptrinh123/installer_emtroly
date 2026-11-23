@@ -138,20 +138,30 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           OUTPUT: ${{ runner.temp }}/emtroly-build
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "installer_emtroly ${{ steps.version.outputs.version }}" \
-            --generate-notes 2>/dev/null || true
-          shopt -s nullglob
-          assets=(
-            "$OUTPUT"/emtroly-${{ matrix.target }}.zip
-            "$OUTPUT"/emtroly-${{ matrix.target }}.zip.sha256
-            "$OUTPUT"/emtroly-${{ matrix.target }}.tar.gz
-            "$OUTPUT"/emtroly-${{ matrix.target }}.tar.gz.sha256
-            "$OUTPUT"/emtroly-${{ matrix.target }}.deb
-            "$OUTPUT"/emtroly-${{ matrix.target }}.deb.sha256
-          )
+          assets=()
+          for candidate in \
+            "$OUTPUT/emtroly-${{ matrix.target }}.zip" \
+            "$OUTPUT/emtroly-${{ matrix.target }}.zip.sha256" \
+            "$OUTPUT/emtroly-${{ matrix.target }}.tar.gz" \
+            "$OUTPUT/emtroly-${{ matrix.target }}.tar.gz.sha256" \
+            "$OUTPUT/emtroly-${{ matrix.target }}.deb" \
+            "$OUTPUT/emtroly-${{ matrix.target }}.deb.sha256"; do
+            if [[ -f "$candidate" ]]; then
+              assets+=("$candidate")
+            fi
+          done
           if [[ "${#assets[@]}" -eq 0 ]]; then
             echo "No built assets found for ${{ matrix.target }}" >&2
             exit 1
           fi
-          gh release upload "$GITHUB_REF_NAME" --clobber "${assets[@]}"
+          for attempt in 1 2 3 4; do
+            gh release view "$GITHUB_REF_NAME" --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+              gh release create "$GITHUB_REF_NAME" --repo "${{ github.repository }}" \
+                --title "installer_emtroly ${{ steps.version.outputs.version }}" \
+                --generate-notes 2>/dev/null || true
+            if gh release upload "$GITHUB_REF_NAME" --repo "${{ github.repository }}" --clobber "${assets[@]}"; then
+              exit 0
+            fi
+            sleep $((attempt * 3))
+          done
+          exit 1
