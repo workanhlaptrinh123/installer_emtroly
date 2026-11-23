@@ -1,6 +1,6 @@
 release=member-vps-golden-20261116
 product=installer_emtroly
-installer_version=2026.11.23.6
+installer_version=2026.11.23.7
 image=member-vps-golden:20261116
 base_image=vps-user-env:latest
 openclaw=2026.11.4
