@@ -33,8 +33,8 @@ def main():
         runner.choose_port = lambda requested: 19789
         runner.service.check_linux_user_service = lambda: None
         runner.dependencies.install_node = lambda directory: (node, npm)
-        runner.python_runtime.install = lambda directory: Path(sys.executable)
-        runner.ffmpeg.install = lambda directory: Path(sys.executable)
+        runner.python_runtime.install = lambda directory: Path(sys.executable).resolve()
+        runner.ffmpeg.install = lambda directory: Path(sys.executable).resolve()
         def initialize(values, selected_home, port):
             root = selected_home / ".openclaw-member-member01"
             root.mkdir()
@@ -46,9 +46,9 @@ def main():
             return entry, {"OPENCLAW_PROFILE": "member-member01"}
         runner.instance.initialize = initialize
         runner.runtime.install = install_runtime
-        runner.payload.install = lambda *args: None
-        runner.zalo_setup.configure = lambda *args: None
-        runner.service.install_and_verify = lambda *args: None
+        runner.payload.install = lambda *args, **kwargs: None
+        runner.zalo_setup.configure = lambda *args, **kwargs: None
+        runner.service.install_and_verify = lambda *args, **kwargs: None
         runner.telegram.ensure_menu = lambda token: None
         settings = {"member": "member01", "assistant_name": "Assistant", "owner_ids": "12345",
                     "qr_owner_id": "12345", "group_id": "-12345", "telegram_token": "123456:" + "x" * 30,

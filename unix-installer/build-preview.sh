@@ -19,6 +19,14 @@ NAME="caidattroly-$PLATFORM-$ARCH-PREVIEW"
   --hidden-import shlex --hidden-import uuid --hidden-import argparse --hidden-import copy \
   --hidden-import datetime --hidden-import dataclasses --hidden-import stat --hidden-import typing \
   --hidden-import codex_setup --hidden-import license_gate --hidden-import runner \
+  --hidden-import net_utils --hidden-import uninstaller --hidden-import ssl --hidden-import http.client \
+  --hidden-import configuration --hidden-import secrets --hidden-import hmac --hidden-import base64 \
+  --hidden-import hashlib --hidden-import tarfile --hidden-import zipfile --hidden-import importlib.util \
+  --hidden-import urllib.request --hidden-import urllib.error --hidden-import urllib.parse \
+  --hidden-import dependencies --hidden-import ffmpeg --hidden-import instance \
+  --hidden-import payload --hidden-import provider --hidden-import python_exec \
+  --hidden-import python_runtime --hidden-import runtime --hidden-import service \
+  --hidden-import settings --hidden-import telegram --hidden-import zalo_setup \
   --add-data "$OUTPUT/payload/native:native" --add-data "$OUTPUT/payload/modules:modules" \
   --add-data "$OUTPUT/payload/profiles:profiles" --add-data "$OUTPUT/payload/zalo:zalo" \
   --add-data "$BASE/windows-installer/zalo-qr-session.mjs:windows-installer" \
