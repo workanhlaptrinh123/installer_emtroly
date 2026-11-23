@@ -999,6 +999,46 @@ function Invoke-EmTroLyLicenseSignOut {
   }
 }
 
+function Test-EmTroLyHasAnyFootprint {
+  if ($env:USERPROFILE) {
+    if (Test-Path -LiteralPath (Join-Path $env:USERPROFILE 'openclaw')) { return $true }
+  }
+  if ($env:LOCALAPPDATA) {
+    foreach ($rel in @(
+      'EmTroLy',
+      'MemberInstaller',
+      'EmTroLyUI\license.key',
+      'AnhLapTrinh\EmTroLy\activation.dat',
+      'AnhLapTrinh\EmTroLy\setup-draft.dat',
+      'AnhLapTrinh\EmTroLy\signed-out.flag'
+    )) {
+      if (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA $rel)) { return $true }
+    }
+    $ocBin = Join-Path $env:LOCALAPPDATA 'OpenClaw\bin'
+    if ((Test-Path -LiteralPath $ocBin -PathType Container) -and
+        @(Get-ChildItem -LiteralPath $ocBin -Filter '*.cmd' -File -ErrorAction SilentlyContinue).Count -gt 0) {
+      return $true
+    }
+    $progLocal = Join-Path $env:LOCALAPPDATA 'Programs'
+    if ((Test-Path -LiteralPath $progLocal -PathType Container) -and
+        @(Get-ChildItem -LiteralPath $progLocal -Directory -Filter 'EmTroLy-Antigravity-IDE-*' -ErrorAction SilentlyContinue).Count -gt 0) {
+      return $true
+    }
+  }
+  $deskDir = if ($env:EMTROLY_TEST_DESKTOP_DIR) { $env:EMTROLY_TEST_DESKTOP_DIR } else { [Environment]::GetFolderPath('Desktop') }
+  if ($deskDir -and (Test-Path -LiteralPath $deskDir -PathType Container)) {
+    foreach ($lnk in @('EmTroLy - Antigravity.lnk', 'Em Tro Ly - Anh Lap Trinh.lnk')) {
+      if (Test-Path -LiteralPath (Join-Path $deskDir $lnk) -PathType Leaf) { return $true }
+    }
+  }
+  $progMenu = if ($env:EMTROLY_TEST_PROGRAMS_DIR) { $env:EMTROLY_TEST_PROGRAMS_DIR } else { [Environment]::GetFolderPath('Programs') }
+  if ($progMenu -and (Test-Path -LiteralPath $progMenu -PathType Container)) {
+    if (Test-Path -LiteralPath (Join-Path $progMenu 'EmTroLy - Antigravity.lnk') -PathType Leaf) { return $true }
+    if (Test-Path -LiteralPath (Join-Path $progMenu 'Anh Lap Trinh\Em Tro Ly - Anh Lap Trinh.lnk') -PathType Leaf) { return $true }
+  }
+  return $false
+}
+
 function Get-EmTroLyModularStatus {
   $codexInstalled = $false
   $codexDetail = 'Chưa cài đặt — chỉ cần bấm Cài phần này (~20 giây, không cần Telegram)'

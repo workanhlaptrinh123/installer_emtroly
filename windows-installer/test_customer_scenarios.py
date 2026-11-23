@@ -735,6 +735,178 @@ class WindowsCustomerScenarioTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
+    def test_factory_reset_wipes_all_emtroly_state_and_returns_ui_to_brand_new_user(self):
+        with tempfile.TemporaryDirectory(prefix="emtroly-factory-reset-") as td:
+            temp = Path(td)
+            home = temp / "home"
+            local = temp / "local"
+            startup = temp / "startup"
+            desktop = temp / "Desktop"
+            programs_menu = temp / "ProgramsMenu"
+            for d in (home, local, startup, desktop, programs_menu):
+                d.mkdir(parents=True, exist_ok=True)
+
+            # 1. Seed full OpenClaw + Zalo + Startup + CLI shims + Codex + Antigravity + Dependencies + Shortcuts + License + Draft
+            oc = home / "openclaw"
+            (oc / "workspace/skills/telegram-zalo-owner-login").mkdir(parents=True)
+            (oc / "credentials/zalouser").mkdir(parents=True)
+            (oc / "openclaw.json").write_text('{"gateway":{"port":19789}}\n', encoding="utf-8")
+            (oc / "telegram.token").write_text("123456:SECRET_TG_TOKEN_ABCDEFGHIJKLMNOP\n", encoding="utf-8")
+            (oc / "member-provider.secret").write_text("sk-reset-secret-key-999\n", encoding="utf-8")
+            (oc / "workspace/CUSTOMER_PROFILE.md").write_text("Ten tro ly: Bot Cu\n", encoding="utf-8")
+            (oc / "workspace/skills/telegram-zalo-owner-login/SKILL.md").write_text("# Zalo\n", encoding="utf-8")
+            (oc / "credentials/zalouser/session.json").write_text('{"uid":"123"}\n', encoding="utf-8")
+            (oc / "openclaw-instance.ps1").write_text("exit 0\n", encoding="utf-8-sig")
+
+            vbs = startup / "OpenClaw-member-emtroly.vbs"
+            vbs.write_text(f'CreateObject("WScript.Shell").Run "{oc}\\openclaw-instance.ps1", 0, False', encoding="utf-16")
+
+            em_base = local / "EmTroLy"
+            (em_base / "Codex/bin").mkdir(parents=True)
+            (em_base / "Antigravity/UserData/User").mkdir(parents=True)
+            (em_base / "Antigravity/Extensions/openai.chatgpt-26.51111.21308").mkdir(parents=True)
+            (em_base / "Codex/config.toml").write_text('model = "gpt-6.2-sol"\n', encoding="utf-8")
+            (em_base / "Codex/auth.json").write_text('{"OPENAI_API_KEY":"sk-reset-secret-key-999"}\n', encoding="utf-8")
+            (em_base / "Codex/bin/codex.exe").write_text("bin", encoding="utf-8")
+            (em_base / "installer-job.txt").write_text("a" * 32, encoding="utf-8")
+
+            failed_em = local / "EmTroLy.failed-20261124-000000"
+            failed_em.mkdir(parents=True)
+            (failed_em / "partial.txt").write_text("x", encoding="utf-8")
+
+            priv_ide = local / ("Programs/EmTroLy-Antigravity-IDE-" + ("a" * 32))
+            priv_ide.mkdir(parents=True)
+            (priv_ide / "Antigravity IDE.exe").write_text("priv-ide", encoding="utf-8")
+
+            # Standalone user-owned Antigravity IDE outside EmTroLy-* MUST NOT be deleted!
+            user_ide = local / "Programs/Antigravity IDE"
+            user_ide.mkdir(parents=True)
+            (user_ide / "Antigravity IDE.exe").write_text("user-personal-ide", encoding="utf-8")
+
+            dep_dir = local / "MemberInstaller/dependencies/node-v24.21.0-win-x64"
+            dep_dir.mkdir(parents=True)
+            (dep_dir / "node.exe").write_text("node", encoding="utf-8")
+
+            oc_bin = local / "OpenClaw/bin"
+            oc_bin.mkdir(parents=True)
+            (oc_bin / "openclaw.cmd").write_text(f'@echo off\r\nset "OPENCLAW_STATE_DIR={oc}"\r\n', encoding="utf-8")
+            (oc_bin / "codex-emtroly.cmd").write_text('@echo off\r\nset "CODEX_HOME=..."\r\n', encoding="utf-8")
+            (oc_bin / "codex.cmd").write_text('@echo off\r\nset "CODEX_HOME=..."\r\n', encoding="utf-8")
+            (oc_bin / "emtroly-ui.cmd").write_text("@echo off\r\n", encoding="utf-8")
+
+            (desktop / "EmTroLy - Antigravity.lnk").write_text("lnk1", encoding="utf-8")
+            (desktop / "Em Tro Ly - Anh Lap Trinh.lnk").write_text("lnk2", encoding="utf-8")
+            (programs_menu / "EmTroLy - Antigravity.lnk").write_text("lnk3", encoding="utf-8")
+            (programs_menu / "Anh Lap Trinh").mkdir(parents=True)
+            (programs_menu / "Anh Lap Trinh/Em Tro Ly - Anh Lap Trinh.lnk").write_text("lnk4", encoding="utf-8")
+
+            env = {
+                **os.environ,
+                "USERPROFILE": str(home),
+                "LOCALAPPDATA": str(local),
+                "EMTROLY_TEST_STARTUP_DIR": str(startup),
+                "EMTROLY_TEST_DESKTOP_DIR": str(desktop),
+                "EMTROLY_TEST_PROGRAMS_DIR": str(programs_menu),
+                "EMTROLY_SKIP_PROCESS_SWEEP": "1",
+                "EMTROLY_SKIP_REGISTRY_CLEANUP": "1",
+                "EMTROLY_SKIP_UNINSTALLER_EXEC": "1",
+                "EMTROLY_ALLOW_MULTI_INSTANCE": "1",
+            }
+
+            # Seed DPAPI activation.dat, setup-draft.dat, and EmTroLyUI via wizard-helpers.ps1
+            seed_res = run_ps(
+                f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{ROOT / "windows-installer/wizard-helpers.ps1"}", [Text.Encoding]::UTF8)))\n'
+                "$ErrorActionPreference = 'Stop'\n"
+                f"[void](Install-EmTroLyAppShortcut -PayloadRoot '{ROOT}')\n"
+                "Save-EmTroLyLicenseKey -ApiKey 'sk-reset-secret-key-999'\n"
+                "[void](Save-EmTroLySetupDraft -Draft @{ telegram_token = '123456:SECRET_TG_TOKEN_ABCDEFGHIJKLMNOP'; ai_api_key = 'sk-reset-secret-key-999'; owner_ids = '8764883034'; group_id = '-100123456'; assistant_name = 'Bot Cu' })\n"
+                "if (-not (Test-EmTroLyHasAnyFootprint)) { throw 'expected-footprint-before-reset' }\n"
+                "if ((Get-EmTroLySavedLicenseKey) -cne 'sk-reset-secret-key-999') { throw 'license-not-seeded' }\n"
+                "if ($null -eq (Get-EmTroLySavedSetupDraft)) { throw 'draft-not-seeded' }\n"
+                "Write-Output 'SEED_OK'\n",
+                env=env,
+            )
+            self.assertEqual(seed_res.returncode, 0, seed_res.stdout + seed_res.stderr)
+            self.assertIn("SEED_OK", seed_res.stdout)
+
+            # 2. Execute factory-reset via manage-instance.ps1 worker
+            req_file = temp / "factory-reset-req.json"
+            status_file = temp / "factory-reset-status.txt"
+            req_file.write_text(json.dumps({"action": "factory-reset"}), encoding="utf-8")
+            reset_proc = subprocess.run(
+                [
+                    SHELL, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-File", str(ROOT / "windows-installer/manage-instance.ps1"),
+                    "-RunManageWorker",
+                    "-WorkerRequestFile", str(req_file),
+                    "-WorkerPayloadRoot", str(ROOT),
+                    "-WorkerLogFile", str(status_file),
+                ],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=35,
+            )
+            status_txt = status_file.read_text(encoding="utf-8") if status_file.exists() else ""
+            self.assertEqual(reset_proc.returncode, 0, status_txt + reset_proc.stdout + reset_proc.stderr)
+            self.assertTrue(status_txt.startswith("Hoàn tất:"), status_txt)
+
+            # 3. Verify 100% clean slate like a brand-new machine while preserving non-EmTroLy software
+            self.assertFalse(oc.exists())
+            self.assertFalse(vbs.exists())
+            self.assertFalse(em_base.exists())
+            self.assertFalse(failed_em.exists())
+            self.assertFalse(priv_ide.exists())
+            self.assertFalse((local / "MemberInstaller").exists())
+            self.assertFalse((local / "EmTroLyUI").exists())
+            self.assertFalse((local / "OpenClaw").exists())
+            self.assertFalse((local / "AnhLapTrinh").exists())
+            self.assertFalse((desktop / "EmTroLy - Antigravity.lnk").exists())
+            self.assertFalse((desktop / "Em Tro Ly - Anh Lap Trinh.lnk").exists())
+            self.assertFalse((programs_menu / "EmTroLy - Antigravity.lnk").exists())
+            self.assertFalse((programs_menu / "Anh Lap Trinh").exists())
+            self.assertTrue((user_ide / "Antigravity IDE.exe").is_file(), "Must preserve user's standalone Antigravity IDE")
+
+            verify_clean = run_ps(
+                f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{ROOT / "windows-installer/wizard-helpers.ps1"}", [Text.Encoding]::UTF8)))\n'
+                "$ErrorActionPreference = 'Stop'\n"
+                "if (Test-EmTroLyHasAnyFootprint) { throw 'footprint-still-detected-after-reset' }\n"
+                "if ((Get-EmTroLySavedLicenseKey) -ne '') { throw 'license-key-survived-reset' }\n"
+                "if ($null -ne (Get-EmTroLySavedSetupDraft)) { throw 'setup-draft-survived-reset' }\n"
+                "Write-Output 'CLEAN_SLATE_VERIFIED'\n",
+                env=env,
+            )
+            self.assertEqual(verify_clean.returncode, 0, verify_clean.stdout + verify_clean.stderr)
+            self.assertIn("CLEAN_SLATE_VERIFIED", verify_clean.stdout)
+
+            # 4. Verify fresh launch of wizard.ps1 after factory-reset starts at locked LicenseGateOverlay & blank SetupForm
+            wiz_src = (ROOT / "windows-installer/wizard.ps1").read_text(encoding="utf-8-sig")
+            probe_fresh = """
+if ($script:isManageMode) { throw 'expected-fresh-mode-not-manage' }
+if ($script:licenseVerified) { throw 'expected-license-unverified-like-new-user' }
+if ($licenseGateOverlay.Visibility -ne [System.Windows.Visibility]::Visible) { throw 'license-gate-not-shown' }
+if ($licenseResetAllBtn.Visibility -ne [System.Windows.Visibility]::Collapsed) { throw 'reset-btn-on-gate-should-hide-when-clean' }
+if ($savedDraftBanner.Visibility -ne [System.Windows.Visibility]::Collapsed) { throw 'saved-draft-banner-should-be-hidden' }
+if ($tokenBox.Text -ne '' -or $apiKeyBox.Text -ne '' -or $ownersBox.Text -ne '' -or $groupBox.Text -ne '') { throw 'inputs-not-blank' }
+if ($sidebarStatusText.Text -cne 'Chưa cài đặt') { throw ('unexpected-sidebar-status:' + $sidebarStatusText.Text) }
+$window.Close()
+Write-Output 'WIZARD_BRAND_NEW_USER_UI_OK'
+"""
+            staged_wiz = temp / "wiz-fresh-check.ps1"
+            staged_wiz.write_text(wiz_src.replace("[void]$window.ShowDialog()", probe_fresh), encoding="utf-8-sig")
+            ui_res = subprocess.run(
+                [SHELL, "-STA", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(staged_wiz), "-PayloadRoot", str(ROOT)],
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=35,
+            )
+            # Closing a brand-new uninstalled wizard window exits with code 2 (not-yet-installed)
+            self.assertEqual(ui_res.returncode, 2, ui_res.stdout + ui_res.stderr)
+            self.assertIn("WIZARD_BRAND_NEW_USER_UI_OK", ui_res.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

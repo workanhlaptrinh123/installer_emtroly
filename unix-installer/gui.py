@@ -1357,6 +1357,64 @@ def main():
         except Exception as exc:
             messagebox.showerror("Không thể gỡ cài đặt", str(exc))
 
+    def do_factory_reset():
+        if busy or codex_busy:
+            messagebox.showwarning("Đang bận", "Hãy đợi tác vụ đang chạy hoàn tất trước khi Reset cài lại từ đầu.")
+            return
+        if not messagebox.askyesno(
+            "Xác nhận Reset cài lại từ đầu (Như máy mới)",
+            "Bạn có chắc chắn muốn RESET CÀI LẠI TỪ ĐẦU toàn bộ ứng dụng Em Trợ Lý không?\n\n"
+            "Thao tác này sẽ đưa máy về trạng thái trắng tinh 100% như người mới chưa từng cài đặt:\n"
+            "• Dừng dịch vụ nền và xóa toàn bộ Trợ lý OpenClaw, Telegram & Zalo\n"
+            "• Xóa sạch Codex CLI, cấu hình Antigravity & Extension riêng, gói môi trường tải riêng và lối tắt\n"
+            "• Xóa toàn bộ thông số lưu nháp và khóa kích hoạt bản quyền trên máy",
+        ):
+            return
+        stop_qr_session()
+        try:
+            uninstaller.factory_reset_emtroly()
+            defaults = {
+                "member": "emtroly",
+                "assistant_name": "Trợ lý OpenClaw",
+                "telegram_token": "",
+                "ai_api_key": "",
+                "owner_ids": "",
+                "qr_owner_id": "",
+                "group_id": "",
+                "base_url": "https://codex.anhlaptrinh.vn/v1",
+                "model": "gpt-6.2-sol",
+                "gateway_port": "0",
+                "audience": "",
+                "addressing": "",
+                "style": "",
+            }
+            for k, v in defaults.items():
+                if k in variables:
+                    variables[k].set(v)
+            zalo_var.set(True)
+            skip_editor_var.set(False)
+            consent.set(False)
+            live_banner_var.set("")
+            codex_dir_var.set(str(Path.home()))
+            clear_codex_output(guide_message)
+            status.set("Sẵn sàng cài đặt trọn gói từ A–Z (Codex CLI → Antigravity → OpenClaw & Zalo). Không cần quét QR trong lúc cài.")
+            refresh_modular_status()
+            refresh_store_view()
+            refresh_codex_state()
+            notebook.select(tab_connect)
+            messagebox.showinfo(
+                "Đã reset cài lại từ đầu",
+                "Đã xóa sạch toàn bộ dữ liệu, môi trường riêng và bản quyền — máy đã trở về trạng thái ban đầu như người mới lần đầu mở Em Trợ Lý!",
+            )
+            lic_var.set("")
+            lic_msg.set("")
+            signout_lic_btn.pack_forget()
+            license_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
+            license_overlay.lift()
+            lic_entry.focus_set()
+        except Exception as exc:
+            messagebox.showerror("Không thể reset", str(exc))
+
     install_actions = ttk.Frame(tab_profile, style="Card.TFrame")
     install_actions.grid(row=p_row + 5, column=0, columnspan=3, sticky="ew")
     ttk.Button(
@@ -1369,9 +1427,15 @@ def main():
     exit_btn.pack(side="left", padx=(8, 0))
     ttk.Button(
         install_actions,
-        text="Gỡ trợ lý cũ để cài lại",
+        text="Gỡ trợ lý cũ",
         style="Secondary.TButton",
         command=do_uninstall,
+    ).pack(side="left", padx=(8, 0))
+    ttk.Button(
+        install_actions,
+        text="↺ Reset cài lại từ đầu",
+        style="Secondary.TButton",
+        command=do_factory_reset,
     ).pack(side="left", padx=(8, 0))
     button = ttk.Button(install_actions, text="Cài đặt trọn gói A–Z", style="Primary.TButton", command=start)
     button.pack(side="right")
@@ -1445,6 +1509,14 @@ def main():
         license_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
         license_overlay.lift()
         lic_entry.focus_set()
+
+    reset_hdr_btn = ttk.Button(
+        header_actions,
+        text="↺ Reset cài lại từ đầu",
+        style="Secondary.TButton",
+        command=do_factory_reset,
+    )
+    reset_hdr_btn.pack(side="left", padx=(0, 8))
 
     signout_lic_btn = ttk.Button(
         header_actions,

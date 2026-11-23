@@ -352,6 +352,78 @@ class UnixCustomerScenarioTests(unittest.TestCase):
                 self.assertTrue(st["codex_extension"]["installed"])
                 self.assertFalse(st["openclaw"]["installed"])
 
+    def test_factory_reset_wipes_all_unix_state_and_preserves_non_emtroly_files(self):
+        import codex_setup
+        import license_gate
+
+        with tempfile.TemporaryDirectory() as td:
+            home = Path(td).resolve()
+            cfg_dir = home / ".config"
+
+            # Seed OpenClaw instance, Codex CLI, Antigravity profile/launcher, shims, .bashrc block, license & draft
+            oc_root = home / ".openclaw-member-emtroly"
+            (oc_root / "workspace").mkdir(parents=True)
+            (oc_root / "openclaw.json").write_text('{"gateway":{"port":19789}}\n', encoding="utf-8")
+
+            em_share = codex_setup.data_root(home)
+            (em_share / "codex-home").mkdir(parents=True)
+            (em_share / "codex-cli/node_modules/.bin").mkdir(parents=True)
+            (em_share / "antigravity/Extensions/openai.chatgpt-26.51111.21308").mkdir(parents=True)
+            (em_share / "dependencies/node-v24.21.0").mkdir(parents=True)
+            (em_share / "codex-home/config.toml").write_text('model = "gpt-6.2-sol"\n', encoding="utf-8")
+            (em_share / "codex-home/auth.json").write_text('{"OPENAI_API_KEY":"sk-unix-reset"}\n', encoding="utf-8")
+
+            bin_dir = home / ".local/bin"
+            bin_dir.mkdir(parents=True)
+            (bin_dir / "openclaw-member-emtroly").write_text(f"#!/bin/sh\n# {oc_root}\n", encoding="utf-8")
+            (bin_dir / "openclaw").write_text(f"#!/bin/sh\nexport OPENCLAW_STATE_DIR={oc_root}\n", encoding="utf-8")
+            (bin_dir / "codex-emtroly").write_text("#!/bin/sh\nexport CODEX_HOME=...\n", encoding="utf-8")
+            (bin_dir / "codex").write_text("#!/bin/sh\nexport CODEX_HOME=...\n", encoding="utf-8")
+            (bin_dir / "my-personal-script").write_text("#!/bin/sh\necho keep\n", encoding="utf-8")
+
+            bashrc = home / ".bashrc"
+            bashrc.write_text(
+                'export EDITOR=vim\n\n'
+                '# >>> installer_emtroly PATH >>>\n'
+                'case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$PATH:$HOME/.local/bin" ;; esac\n'
+                '# <<< installer_emtroly PATH <<<\n',
+                encoding="utf-8",
+            )
+
+            mac_launcher = home / "Applications/EmTroLy - Antigravity.command"
+            mac_launcher.parent.mkdir(parents=True)
+            mac_launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+            linux_desktop = home / ".local/share/applications/emtroly-antigravity.desktop"
+            linux_desktop.parent.mkdir(parents=True)
+            linux_desktop.write_text("[Desktop Entry]\n", encoding="utf-8")
+
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(cfg_dir), "EMTROLY_TEST_MACHINE_ID": "unix-reset-1"}):
+                license_gate.save_license_key("sk-unix-reset-key-123")
+                license_gate.save_setup_draft({"member": "emtroly", "owner_ids": "8764883034", "ai_api_key": "sk-unix-reset-key-123"})
+                self.assertTrue(uninstaller.has_any_emtroly_footprint(home=home, config_home=cfg_dir))
+
+                with patch.object(cli.os, "geteuid", return_value=1000, create=True), \
+                        patch.object(uninstaller.Path, "home", return_value=home), \
+                        patch.object(uninstaller.platform, "system", return_value="Linux"), \
+                        patch.object(uninstaller.shutil, "which", return_value=None):
+                    rc = cli.main(["--reset-all"])
+
+                self.assertEqual(rc, 0)
+                self.assertFalse(uninstaller.has_any_emtroly_footprint(home=home, config_home=cfg_dir))
+                self.assertEqual(license_gate.get_saved_license_key(), "")
+                self.assertIsNone(license_gate.get_saved_setup_draft())
+                self.assertFalse(oc_root.exists())
+                self.assertFalse(em_share.exists())
+                self.assertFalse(mac_launcher.exists())
+                self.assertFalse(linux_desktop.exists())
+                self.assertFalse((bin_dir / "openclaw").exists())
+                self.assertFalse((bin_dir / "codex-emtroly").exists())
+                self.assertFalse((bin_dir / "codex").exists())
+                self.assertTrue((bin_dir / "my-personal-script").is_file())
+                rc_after = bashrc.read_text(encoding="utf-8")
+                self.assertIn("export EDITOR=vim", rc_after)
+                self.assertNotIn("installer_emtroly PATH", rc_after)
+
 
 if __name__ == "__main__":
     unittest.main()

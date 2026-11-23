@@ -677,6 +677,8 @@ $xamlText = @'
           <TextBlock Style="{StaticResource SidebarGroupHeader}" Text="CÔNG CỤ &amp; HỆ THỐNG"/>
           <Button x:Name="NavCodexBtn" Style="{StaticResource NavBtn}" Content="  Công cụ Codex CLI" Margin="0,0,0,3"/>
           <Button x:Name="NavDiagBtn" Style="{StaticResource NavBtn}" Content="  Chẩn đoán &amp; Hỗ trợ" Margin="0,0,0,3"/>
+          <Border Height="1" Background="#F1F5F9" Margin="6,8,6,8"/>
+          <Button x:Name="SidebarResetAllBtn" Style="{StaticResource SoftDangerBtn}" Content="↺  Reset cài lại từ đầu" Height="36" Padding="10,0" ToolTip="Xóa sạch toàn bộ dữ liệu, công cụ riêng &amp; bản quyền để cài lại từ con số 0 như máy mới"/>
         </StackPanel>
       </DockPanel>
     </Border>
@@ -840,6 +842,17 @@ $xamlText = @'
                 <StackPanel VerticalAlignment="Center" Margin="0,0,14,0">
                   <TextBlock Text="Sửa lỗi tự động &amp; Hỗ trợ nhanh" FontSize="14.5" FontWeight="Bold"/>
                   <TextBlock Text="Trợ lý gặp trục trặc? Để Codex CLI tự kiểm tra log và khắc phục ngay, không mất dữ liệu cũ." FontSize="12.5" Foreground="#64748B" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                </StackPanel>
+              </DockPanel>
+            </Border>
+
+            <!-- Factory Reset Strip -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,14,0,0">
+              <DockPanel>
+                <Button x:Name="DashResetAllBtn" DockPanel.Dock="Right" Style="{StaticResource SoftDangerBtn}" Content="Reset cài lại từ đầu" MinWidth="176" VerticalAlignment="Center"/>
+                <StackPanel VerticalAlignment="Center" Margin="0,0,14,0">
+                  <TextBlock Text="Reset cài lại từ đầu (Như người mới chưa từng cài)" FontSize="14.5" FontWeight="Bold" Foreground="#991B1B"/>
+                  <TextBlock Text="Xóa sạch toàn bộ OpenClaw, Zalo, Codex CLI, Antigravity riêng, lối tắt và bản quyền để cài mới từ con số 0." FontSize="12.5" Foreground="#64748B" Margin="0,3,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
               </DockPanel>
             </Border>
@@ -1296,6 +1309,17 @@ $xamlText = @'
                 </UniformGrid>
               </StackPanel>
             </Border>
+
+            <!-- Full Clean-Slate Factory Reset Card -->
+            <Border Background="#FEF2F2" BorderBrush="#FECACA" BorderThickness="1" CornerRadius="12" Padding="20,15" Margin="0,14,0,0">
+              <DockPanel>
+                <Button x:Name="DiagResetAllBtn" DockPanel.Dock="Right" Style="{StaticResource DangerBtn}" Content="Reset cài lại từ đầu" MinWidth="180" VerticalAlignment="Center"/>
+                <StackPanel VerticalAlignment="Center" Margin="0,0,14,0">
+                  <TextBlock Text="Reset cài lại từ đầu (Trắng tinh như máy mới)" FontSize="14.5" FontWeight="Bold" Foreground="#991B1B"/>
+                  <TextBlock Text="Khác với nút 'Gỡ trợ lý để cài lại' (giữ lại Codex &amp; Antigravity), nút này xóa sạch 100% dữ liệu, môi trường riêng, thông số lưu nháp và khóa bản quyền như người mới lần đầu cài Em Trợ Lý." FontSize="12.5" Foreground="#B91C1C" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                </StackPanel>
+              </DockPanel>
+            </Border>
           </StackPanel>
         </ScrollViewer>
 
@@ -1639,6 +1663,7 @@ $xamlText = @'
                 <Button x:Name="LicenseActivateBtn" Grid.Column="2" Style="{StaticResource PrimaryBtn}" Content="Kích hoạt &amp; Mở khóa phần mềm" Height="40"/>
               </Grid>
               <Button x:Name="LicenseSignOutBtn" Style="{StaticResource SoftDangerBtn}" Content="Thoát bản quyền hiện tại (bắt buộc nhập lại Token)" Height="36" Margin="0,10,0,0" Visibility="Collapsed"/>
+              <Button x:Name="LicenseResetAllBtn" Style="{StaticResource SoftDangerBtn}" Content="↺  Reset cài lại từ đầu (xóa sạch dữ liệu cũ trên máy)" Height="36" Margin="0,8,0,0" Visibility="Collapsed"/>
             </StackPanel>
 
             <TextBlock Text="Chỉ khóa API hợp lệ do Anh Lập Trình cấp trên codex.anhlaptrinh.vn mới sử dụng được ứng dụng." FontSize="11.5" Foreground="#94A3B8" TextAlignment="Center" TextWrapping="Wrap" Margin="0,16,0,0"/>
@@ -1731,6 +1756,7 @@ $licenseMsgText     = Get-Ui 'LicenseMsgText'
 $licenseActivateBtn = Get-Ui 'LicenseActivateBtn'
 $licenseExitBtn     = Get-Ui 'LicenseExitBtn'
 $licenseSignOutBtn  = Get-Ui 'LicenseSignOutBtn'
+$licenseResetAllBtn = Get-Ui 'LicenseResetAllBtn'
 $sidebarLicensePill = Get-Ui 'SidebarLicensePill'
 $sidebarSignOutLicenseBtn = Get-Ui 'SidebarSignOutLicenseBtn'
 $sidebarZaloPill    = Get-Ui 'SidebarZaloPill'
@@ -1748,6 +1774,7 @@ $navStoreBtn        = Get-Ui 'NavStoreBtn'
 $navConfigBtn       = Get-Ui 'NavConfigBtn'
 $navCodexBtn        = Get-Ui 'NavCodexBtn'
 $navDiagBtn         = Get-Ui 'NavDiagBtn'
+$sidebarResetAllBtn = Get-Ui 'SidebarResetAllBtn'
 $headerZaloBadge    = Get-Ui 'HeaderZaloBadge'
 $headerQuickBtn     = Get-Ui 'HeaderQuickBtn'
 $headerTitle        = Get-Ui 'HeaderTitle'
@@ -1808,6 +1835,7 @@ $dashCodexRepairBtn = Get-Ui 'DashCodexRepairBtn'
 $dashOpenCodexBtn   = Get-Ui 'DashOpenCodexBtn'
 $dashAutoHealBtn    = Get-Ui 'DashAutoHealBtn'
 $dashExportBtn      = Get-Ui 'DashExportBtn'
+$dashResetAllBtn    = Get-Ui 'DashResetAllBtn'
 
 $manageEditBanner   = Get-Ui 'ManageEditBanner'
 $savedDraftBanner   = Get-Ui 'SavedDraftBanner'
@@ -1920,6 +1948,7 @@ $diagExportBtn      = Get-Ui 'DiagExportBtn'
 $diagShortcutBtn    = Get-Ui 'DiagShortcutBtn'
 $diagChangeLicenseBtn = Get-Ui 'DiagChangeLicenseBtn'
 $diagSignOutLicenseBtn = Get-Ui 'DiagSignOutLicenseBtn'
+$diagResetAllBtn    = Get-Ui 'DiagResetAllBtn'
 
 $modModelBox        = Get-Ui 'ModModelBox'
 $modSelectAllBtn    = Get-Ui 'ModSelectAllBtn'
@@ -2066,6 +2095,7 @@ $script:setupMode = 'full'
 $script:storeCategory = 'all'
 $script:storeCatalogCache = $null
 $script:activeStoreCombo = $null
+$script:detachedPayloadDir = $null
 
 $codexGuideText = "Hướng dẫn nhanh:`r`n1. Chọn thư mục cần chỉnh sửa (mặc định là thư mục trợ lý OpenClaw).`r`n2. Nhập yêu cầu bằng tiếng Việt vào ô phía trên (hoặc bấm 1 mẫu gợi ý).`r`n3. Bấm `"Thực hiện bằng Codex`" để Codex CLI tự đọc và sửa tệp giúp bạn."
 $codexDirBox.Text = Get-CodexDefaultWorkspace
@@ -2630,6 +2660,9 @@ function Set-Buttons {
     if (-not $nb) { continue }
     $nb.IsEnabled = (-not $script:installRunning -and -not $script:retryEditor)
   }
+  if ($sidebarResetAllBtn) {
+    $sidebarResetAllBtn.IsEnabled = (-not $script:installRunning)
+  }
 
   $onCodex = ($script:currentView -eq 'codex')
   $headerQuickBtn.Content = if ($onCodex) {
@@ -2738,6 +2771,9 @@ function Stop-ActiveRunner([string]$ReasonMessage = 'Đã dừng tiến trình t
     $script:resultCode = 2
   }
   Set-Buttons
+  if (-not $script:licenseVerified -and -not $SmokeTest) {
+    Show-LicenseGate $ReasonMessage
+  }
 }
 
 function Save-CurrentFormDraft {
@@ -2991,6 +3027,10 @@ function Show-LicenseGate([string]$ErrorMessage = '', [switch]$AllowCancel) {
   if ($licenseSignOutBtn) {
     $licenseSignOutBtn.Visibility = if ($script:licenseCanDismiss) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
   }
+  if ($licenseResetAllBtn) {
+    $hasFootprint = (-not $SmokeTest) -and (Get-Command Test-EmTroLyHasAnyFootprint -ErrorAction SilentlyContinue) -and (Test-EmTroLyHasAnyFootprint)
+    $licenseResetAllBtn.Visibility = if ($hasFootprint) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
+  }
   if (-not [string]::IsNullOrWhiteSpace($ErrorMessage)) {
     $licenseMsgBanner.Visibility = [System.Windows.Visibility]::Visible
     $licenseMsgText.Text = $ErrorMessage
@@ -3029,6 +3069,7 @@ function Unlock-LicenseGate([string]$VerifiedKey, [switch]$SkipSave) {
   }
   $licenseKeyBox.Clear()
   if ($licenseSignOutBtn) { $licenseSignOutBtn.Visibility = [System.Windows.Visibility]::Collapsed }
+  if ($licenseResetAllBtn) { $licenseResetAllBtn.Visibility = [System.Windows.Visibility]::Collapsed }
   $licenseGateOverlay.Visibility = [System.Windows.Visibility]::Collapsed
   $sidebarLicensePill.Visibility = [System.Windows.Visibility]::Visible
   if ($sidebarSignOutLicenseBtn) { $sidebarSignOutLicenseBtn.Visibility = [System.Windows.Visibility]::Visible }
@@ -3073,6 +3114,58 @@ function Invoke-UiLicenseSignOut {
   }
   Show-LicenseGate 'Đã thoát bản quyền ứng dụng. Vui lòng nhập lại Khóa kích hoạt (Provider API Key trên codex.anhlaptrinh.vn) để mở khóa.'
   [void]$licensePwdBox.Focus()
+}
+
+function Ensure-DetachedSessionPayloadForReset {
+  if ($env:TEMP -and (Test-Path -LiteralPath $env:TEMP -PathType Container)) {
+    try { Set-Location -LiteralPath $env:TEMP -ErrorAction SilentlyContinue } catch { }
+    try { [Environment]::CurrentDirectory = $env:TEMP } catch { }
+  }
+  if (-not $env:LOCALAPPDATA -or -not $PayloadRoot -or -not (Test-Path -LiteralPath $PayloadRoot -PathType Container)) { return }
+  $curRootFull = ''
+  try { $curRootFull = [IO.Path]::GetFullPath($PayloadRoot).TrimEnd('\') } catch { return }
+  $uiRootFull = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'EmTroLyUI')).TrimEnd('\')
+  $emRootFull = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'EmTroLy')).TrimEnd('\')
+  if ($curRootFull.StartsWith($uiRootFull, [StringComparison]::OrdinalIgnoreCase) -or
+      $curRootFull.StartsWith($emRootFull, [StringComparison]::OrdinalIgnoreCase)) {
+    $stageDir = Join-Path $env:TEMP ('emtroly-reset-payload-' + [guid]::NewGuid().ToString('N'))
+    [void][IO.Directory]::CreateDirectory($stageDir)
+    Copy-Item -Path (Join-Path $PayloadRoot '*') -Destination $stageDir -Recurse -Force -ErrorAction SilentlyContinue
+    $script:detachedPayloadDir = $stageDir
+    $script:PayloadRoot = $stageDir
+    $script:codexHelperPath = Join-Path $stageDir 'windows-installer\codex-cli.ps1'
+    $script:manageHelperPath = Join-Path $stageDir 'windows-installer\manage-instance.ps1'
+    $script:autoHealHelperPath = Join-Path $stageDir 'windows-installer\auto-heal-codex.ps1'
+    $script:wizardHelperPath = Join-Path $stageDir 'windows-installer\wizard-helpers.ps1'
+  }
+}
+
+function Invoke-FactoryResetPrompt {
+  if ($script:installRunning -or $script:codexRunning -or $script:licenseCheckRunning) {
+    Show-Error 'Hãy đợi tiến trình đang chạy hoàn tất trước khi thực hiện Reset cài lại từ đầu.'
+    return
+  }
+  $confirmReset = [System.Windows.MessageBox]::Show(
+    $window,
+    "Bạn có chắc chắn muốn RESET CÀI LẠI TỪ ĐẦU toàn bộ ứng dụng Em Trợ Lý không?`n`nThao tác này sẽ đưa máy trở về trạng thái trắng tinh 100% giống hệt một người mới chưa từng cài đặt:`n• Dừng Gateway và xóa sạch Trợ lý OpenClaw, kết nối Telegram & phiên Zalo`n• Gỡ sạch Codex CLI, cấu hình Antigravity & Codex Extension riêng, gói môi trường tải riêng và các lối tắt trên Desktop`n• Xóa toàn bộ thông số lưu nháp và khóa kích hoạt bản quyền trên máy`n`n(Các phần mềm và dữ liệu cá nhân khác ngoài Em Trợ Lý không bị ảnh hưởng.)",
+    'Xác nhận Reset cài lại từ đầu (Như máy mới)',
+    [System.Windows.MessageBoxButton]::YesNo,
+    [System.Windows.MessageBoxImage]::Warning
+  )
+  if ($confirmReset -ne [System.Windows.MessageBoxResult]::Yes) { return }
+
+  Stop-ZaloQrSession
+  if ($liveSyncTimer) { $liveSyncTimer.Stop() }
+  if ($script:zaloSyncProc) {
+    try { if (-not $script:zaloSyncProc.HasExited) { $script:zaloSyncProc.Kill() } } catch { }
+    try { $script:zaloSyncProc.Dispose() } catch { }
+    $script:zaloSyncProc = $null
+  }
+  Ensure-DetachedSessionPayloadForReset
+  if ($licenseGateOverlay.Visibility -eq [System.Windows.Visibility]::Visible) {
+    $licenseGateOverlay.Visibility = [System.Windows.Visibility]::Collapsed
+  }
+  Start-ManageAction 'factory-reset'
 }
 
 function Set-ModularBadgeVisual($BadgeBorder, $BadgeTextCtrl, [bool]$Installed) {
@@ -3361,6 +3454,8 @@ function Show-RichFailureDiagnostics([string]$SummaryMessage, [object]$DiagPaylo
     'install-zalo' = 'Cài / Đồng bộ Zalo cá nhân'
     'health-restart' = 'Khởi động lại & kiểm tra Gateway'
     'update-config' = 'Cập nhật cấu hình nhanh'
+    'uninstall-instance' = 'Gỡ trợ lý OpenClaw để cài lại'
+    'factory-reset' = 'Reset cài lại từ đầu (như máy mới)'
   }
 
   $stageRaw = if ($DiagPayload -and $DiagPayload.stage) { [string]$DiagPayload.stage } elseif ($IsManageFailure) { 'auto-heal' } else { "Bước $stepIdx" }
@@ -3424,7 +3519,7 @@ function Show-RichFailureDiagnostics([string]$SummaryMessage, [object]$DiagPaylo
 }
 
 function Start-ManageAction([string]$ActionName, [string]$ErrorDetail = '') {
-  if (-not $script:licenseVerified -and -not $SmokeTest) {
+  if (-not $script:licenseVerified -and -not $SmokeTest -and $ActionName -ne 'factory-reset') {
     Show-LicenseGate 'Vui lòng kích hoạt bản quyền trước khi thực hiện thao tác.'
     return
   }
@@ -4015,6 +4110,55 @@ $installTimer.Add_Tick({
         Reset-ProgressVisualState
         $installProgressBar.Value = 100
         $progressPercentText.Text = '100%'
+        if ($wasManage -eq 'factory-reset') {
+          $script:isManageMode = $false
+          $script:installCompleted = $false
+          $script:retryEditor = $false
+          $script:zaloConnectedState = $false
+          $script:zaloInstalledState = $false
+          $script:licenseVerified = $false
+          $script:licenseCanDismiss = $false
+          $script:sessionApiKeyFallback = ''
+          $script:storeCatalogCache = $null
+          $script:gatewayDashboardUrl = ''
+          Clear-SavedDraftAction
+          $apiKeyBox.Clear()
+          $retryKeyPwdBox.Clear()
+          $licenseKeyBox.Clear()
+          if ($modTokenPwdBox) { $modTokenPwdBox.Clear() }
+          if ($modOwnersBox) { $modOwnersBox.Text = '' }
+          if ($modGroupBox) { $modGroupBox.Text = '' }
+          if ($modTgStatusNote) { $modTgStatusNote.Visibility = [System.Windows.Visibility]::Collapsed; $modTgStatusNote.Text = '' }
+          $manageEditBanner.Visibility = [System.Windows.Visibility]::Collapsed
+          $savedDraftBanner.Visibility = [System.Windows.Visibility]::Collapsed
+          $liveCheckBanner.Visibility = [System.Windows.Visibility]::Collapsed
+          $coreReadyText.Visibility = [System.Windows.Visibility]::Collapsed
+          $coreReadyText.Text = ''
+          $retryEditorPanel.Visibility = [System.Windows.Visibility]::Collapsed
+          if ($setupComboCard) { $setupComboCard.Visibility = [System.Windows.Visibility]::Visible }
+          if ($setupZaloBox) { $setupZaloBox.Visibility = [System.Windows.Visibility]::Visible }
+          if ($setupExtraExpander) { $setupExtraExpander.IsExpanded = $false }
+          $installOptionsCard.Visibility = [System.Windows.Visibility]::Visible
+          $tokenFieldLabel.Text = 'Telegram Bot Token (tạo qua @BotFather)'
+          $apiKeyFieldLabel.Text = 'Provider API Key (dùng chung cho OpenClaw & Codex CLI)'
+          for ($sIdx = 1; $sIdx -le 5; $sIdx++) { Set-ChecklistStep $sIdx 'pending' }
+          $installProgressBar.Value = 0
+          $progressPercentText.Text = '0%'
+          $statusText.Text = 'Mọi thứ đã sẵn sàng. Bấm Cài đặt trọn gói A–Z để bắt đầu.'
+          $codexDirBox.Text = Get-CodexDefaultWorkspace
+          $codexOutputBox.Text = $codexGuideText
+          $codexPromptBox.Clear()
+          Set-SetupComboMode 'full'
+          [void](Update-CodexAvailability)
+          [void](Update-ModularCards)
+          Set-NavActive 'home'
+          if (-not $SmokeTest) {
+            Show-Info $detail 'Đã reset cài lại từ đầu'
+            Show-LicenseGate ''
+            [void]$licensePwdBox.Focus()
+          }
+          return
+        }
         if ($wasManage -eq 'uninstall-instance') {
           $script:isManageMode = $false
           $script:installCompleted = $false
@@ -4047,6 +4191,10 @@ $installTimer.Add_Tick({
         Set-NavActive 'home'
       } else {
         $script:openZaloQrAfterManage = $false
+        if (-not $script:licenseVerified -and -not $SmokeTest) {
+          Show-LicenseGate $detail
+          return
+        }
         $statusText.Text = "Chưa hoàn tất: $detail"
         Show-RichFailureDiagnostics -SummaryMessage $detail -DiagPayload $diagPayload -IsManageFailure $true
         $viewDashboard.Visibility   = [System.Windows.Visibility]::Collapsed
@@ -4766,6 +4914,10 @@ $diagChangeLicenseBtn.Add_Click($openChangeLicensePrompt)
 $sidebarSignOutLicenseBtn.Add_Click({ Invoke-UiLicenseSignOut })
 $diagSignOutLicenseBtn.Add_Click({ Invoke-UiLicenseSignOut })
 $licenseSignOutBtn.Add_Click({ Invoke-UiLicenseSignOut })
+if ($sidebarResetAllBtn) { $sidebarResetAllBtn.Add_Click({ Invoke-FactoryResetPrompt }) }
+if ($dashResetAllBtn) { $dashResetAllBtn.Add_Click({ Invoke-FactoryResetPrompt }) }
+if ($diagResetAllBtn) { $diagResetAllBtn.Add_Click({ Invoke-FactoryResetPrompt }) }
+if ($licenseResetAllBtn) { $licenseResetAllBtn.Add_Click({ Invoke-FactoryResetPrompt }) }
 
 $modRefreshBtn.Add_Click({ [void](Update-ModularCards) })
 $modSelectAllBtn.Add_Click({
@@ -5011,6 +5163,10 @@ try {
   Stop-CodexRun
   Cleanup-CodexRun
   Cleanup-Secret
+  if ($script:detachedPayloadDir -and (Test-Path -LiteralPath $script:detachedPayloadDir)) {
+    Remove-Item -LiteralPath $script:detachedPayloadDir -Recurse -Force -ErrorAction SilentlyContinue
+    $script:detachedPayloadDir = $null
+  }
   if ($script:singleInstanceMutex) {
     try { $script:singleInstanceMutex.ReleaseMutex() } catch { }
     try { $script:singleInstanceMutex.Dispose() } catch { }
