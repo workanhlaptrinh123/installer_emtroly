@@ -298,10 +298,6 @@ $xamlText = @'
                 <Setter TargetName="bd" Property="BorderBrush" Value="#2563EB"/>
                 <Setter TargetName="bd" Property="BorderThickness" Value="1.5"/>
               </Trigger>
-              <Trigger Property="IsReadOnly" Value="True">
-                <Setter TargetName="bd" Property="Background" Value="#F8FAFC"/>
-                <Setter Property="Foreground" Value="#475569"/>
-              </Trigger>
             </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
@@ -691,7 +687,7 @@ $xamlText = @'
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0">
                       <TextBlock Style="{StaticResource FieldLabel}" Text="Địa chỉ máy chủ AI (HTTPS)"/>
-                      <TextBox x:Name="BaseUrlBox" Style="{StaticResource ModernInput}" Text="https://codex.anhlaptrinh.vn/v1" IsReadOnly="True"/>
+                      <TextBox x:Name="BaseUrlBox" Style="{StaticResource ModernInput}" Text="https://codex.anhlaptrinh.vn/v1"/>
                     </StackPanel>
                     <StackPanel Grid.Column="2">
                       <TextBlock Style="{StaticResource FieldLabel}" Text="Cổng Gateway (0 = tự động)"/>
@@ -822,7 +818,7 @@ $xamlText = @'
 
                 <!-- Scrollable Technical & Codex Log Viewer -->
                 <Border Background="#FFF8F8" BorderBrush="#FECACA" BorderThickness="1" CornerRadius="8" Padding="2" Margin="0,0,0,11">
-                  <TextBox x:Name="ErrorDetailBox" FontFamily="Segoe UI" FontSize="12.5" Foreground="#1E293B" Background="Transparent" BorderThickness="0" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MaxHeight="126" Padding="10,7"/>
+                  <TextBox x:Name="ErrorDetailBox" FontFamily="Segoe UI" FontSize="12.5" Foreground="#1E293B" Background="Transparent" BorderThickness="0" TextWrapping="Wrap" MaxHeight="126" Padding="10,7"/>
                 </Border>
 
                 <!-- Action Buttons -->
@@ -877,7 +873,7 @@ $xamlText = @'
                 </StackPanel>
                 <TextBlock Text="Yêu cầu tiếng Việt cho Codex CLI" FontSize="13.5" FontWeight="Bold" VerticalAlignment="Center"/>
               </DockPanel>
-              <TextBox x:Name="CodexPromptBox" FontFamily="Segoe UI" FontSize="13.5" Height="74" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" Padding="10,8" BorderBrush="#CBD5E1" BorderThickness="1"/>
+              <TextBox x:Name="CodexPromptBox" FontFamily="Segoe UI" FontSize="13.5" Height="74" TextWrapping="Wrap" Padding="10,8" BorderBrush="#CBD5E1" BorderThickness="1"/>
               <DockPanel Margin="0,10,0,0">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                   <Button x:Name="CodexClearBtn" Style="{StaticResource SecondaryBtn}" Content="Xóa kết quả" Margin="0,0,8,0"/>
@@ -896,7 +892,7 @@ $xamlText = @'
                 <Button x:Name="CodexRefreshBtn" DockPanel.Dock="Right" Style="{StaticResource SecondaryBtn}" Content="Làm mới" Height="28" Padding="10,2" FontSize="12"/>
                 <TextBlock Text="Kết quả thực hiện" FontSize="13" FontWeight="Bold" VerticalAlignment="Center"/>
               </DockPanel>
-              <TextBox x:Name="CodexOutputBox" FontFamily="Segoe UI" FontSize="13" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Padding="10,8"/>
+              <TextBox x:Name="CodexOutputBox" FontFamily="Segoe UI" FontSize="13" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" TextWrapping="Wrap" Padding="10,8"/>
             </DockPanel>
           </Border>
         </Grid>
@@ -1218,7 +1214,20 @@ $xamlText = @'
 
 $xmlDoc = [xml]$xamlText
 $reader = New-Object System.Xml.XmlNodeReader($xmlDoc)
-$window = [System.Windows.Markup.XamlReader]::Load($reader)
+try {
+  $window = [System.Windows.Markup.XamlReader]::Load($reader)
+} catch {
+  $errMsg = if ($_.Exception.InnerException) { $_.Exception.InnerException.Message } else { $_.Exception.Message }
+  if (-not $SmokeTest) {
+    [void][System.Windows.Forms.MessageBox]::Show(
+      "Không khởi tạo được giao diện Em Trợ Lý trên phiên bản Windows này:`r`n$errMsg",
+      'Em Trợ Lý - Lỗi khởi động',
+      [System.Windows.Forms.MessageBoxButtons]::OK,
+      [System.Windows.Forms.MessageBoxIcon]::Error
+    )
+  }
+  throw
+}
 
 function Get-Ui([string]$Name) {
   return $window.FindName($Name)
@@ -1417,6 +1426,25 @@ $codexStopBtn       = Get-Ui 'CodexStopBtn'
 $codexClearBtn      = Get-Ui 'CodexClearBtn'
 $codexRefreshBtn    = Get-Ui 'CodexRefreshBtn'
 $codexOutputBox     = Get-Ui 'CodexOutputBox'
+
+# Apply TextBoxBase-inherited properties in code-behind for full Windows 10 (.NET 4.8.0) XamlReader compatibility
+if ($baseUrlBox) {
+  $baseUrlBox.IsReadOnly = $true
+  $baseUrlBox.Background = (New-Object System.Windows.Media.BrushConverter).ConvertFromString('#F8FAFC')
+  $baseUrlBox.Foreground = (New-Object System.Windows.Media.BrushConverter).ConvertFromString('#475569')
+}
+if ($errorDetailBox) {
+  $errorDetailBox.IsReadOnly = $true
+  $errorDetailBox.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+}
+if ($codexPromptBox) {
+  $codexPromptBox.AcceptsReturn = $true
+  $codexPromptBox.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+}
+if ($codexOutputBox) {
+  $codexOutputBox.IsReadOnly = $true
+  $codexOutputBox.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+}
 
 $runPreflightBtn    = Get-Ui 'RunPreflightBtn'
 $preflightListPanel = Get-Ui 'PreflightListPanel'

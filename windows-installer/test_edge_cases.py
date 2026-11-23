@@ -1049,6 +1049,25 @@ class StaticIntegrityTests(unittest.TestCase):
         self.assertEqual(iex_res.returncode, 0, iex_res.stdout + iex_res.stderr)
         self.assertIn("IRM_IEX_PARSE_OK", iex_res.stdout)
 
+        # Windows 10 (.NET 4.8.0 build 19041) XamlReader.Load throws XamlParseException on TextBoxBase-inherited
+        # attributes inside dynamic XAML strings (IsReadOnly, AcceptsReturn, VerticalScrollBarVisibility).
+        wizard_txt = (ROOT / "windows-installer/wizard.ps1").read_text(encoding="utf-8-sig")
+        xaml_match = re.search(r"\$xamlText\s*=\s*@'\r?\n(.*?)\r?\n'@", wizard_txt, re.S)
+        self.assertIsNotNone(xaml_match, "Could not locate $xamlText in wizard.ps1")
+        xaml_body = xaml_match.group(1)
+        self.assertNotIn(
+            'Property="IsReadOnly"',
+            xaml_body,
+            'wizard.ps1 XAML contains Property="IsReadOnly" which crashes WPF XamlReader on Windows 10 .NET 4.8.0',
+        )
+        for bad_tb in re.findall(r"<TextBox\b[^>]*>", xaml_body):
+            for forbidden_attr in ('IsReadOnly="', 'AcceptsReturn="', 'VerticalScrollBarVisibility="'):
+                self.assertNotIn(
+                    forbidden_attr,
+                    bad_tb,
+                    f"wizard.ps1 TextBox XAML contains {forbidden_attr} which crashes WPF XamlReader on Windows 10 .NET 4.8.0",
+                )
+
     @unittest.skipUnless(os.name == "nt", "Requires Windows x64")
     def test_immutable_bootstrap_stub_integrity_and_mock_download(self):
         from http.server import BaseHTTPRequestHandler, HTTPServer
