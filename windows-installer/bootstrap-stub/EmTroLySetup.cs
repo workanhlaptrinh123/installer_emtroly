@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Diagnostics;
-using System.Drawing;
 using System.IO;
 using System.Net;
 using System.Reflection;
@@ -8,7 +7,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using System.Windows.Forms;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Markup;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 
 [assembly: AssemblyTitle("Anh Lap Trinh - Em Tro Ly Setup")]
 [assembly: AssemblyDescription("Official SmartScreen-Safe Online Setup Launcher for Anh Lap Trinh - Em Tro Ly")]
@@ -18,8 +22,8 @@ using System.Windows.Forms;
 [assembly: AssemblyCopyright("Copyright (c) Anh Lap Trinh")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.1.0.0")]
 
 namespace AnhLapTrinh.EmTroLy.Setup
 {
@@ -30,12 +34,13 @@ namespace AnhLapTrinh.EmTroLy.Setup
         public string OutFile = string.Empty;
         public string VersionTag = string.Empty;
         public int TestLoopbackPort;
+        public string RenderPreviewFile = string.Empty;
     }
 
     internal static class Program
     {
         private const string OfficialReleaseRoot = "https://github.com/workanhlaptrinh123/installer_emtroly/releases";
-        private const string UserAgentValue = "AnhLapTrinh-EmTroLy-Setup/1.0";
+        private const string UserAgentValue = "AnhLapTrinh-EmTroLy-Setup/1.1";
 
         [STAThread]
         private static int Main(string[] args)
@@ -57,9 +62,9 @@ namespace AnhLapTrinh.EmTroLy.Setup
                 {
                     MessageBox.Show(
                         "Bộ cài Em Trợ Lý yêu cầu Windows 10/11 64-bit (x64).",
-                        "Em Trợ Lý - Anh Lập Trình",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error);
+                        "Em Trợ Lý — Anh Lập Trình",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Error);
                 }
                 return 1;
             }
@@ -84,6 +89,14 @@ namespace AnhLapTrinh.EmTroLy.Setup
                 }
             }
 
+            if (!string.IsNullOrWhiteSpace(options.RenderPreviewFile))
+            {
+                Application previewApp = new Application();
+                SetupWindow previewWin = new SetupWindow(options);
+                previewApp.Run(previewWin);
+                return previewWin.ExitCode;
+            }
+
             bool createdNew = false;
             using (Mutex singleMutex = new Mutex(true, @"Local\EmTroLy-Bootstrap-Setup-SingleInstance", out createdNew))
             {
@@ -92,13 +105,10 @@ namespace AnhLapTrinh.EmTroLy.Setup
                     return 0;
                 }
 
-                Application.EnableVisualStyles();
-                Application.SetCompatibleTextRenderingDefault(false);
-                using (SetupForm form = new SetupForm(options))
-                {
-                    Application.Run(form);
-                    return form.ExitCode;
-                }
+                Application app = new Application();
+                SetupWindow window = new SetupWindow(options);
+                app.Run(window);
+                return window.ExitCode;
             }
         }
 
@@ -106,7 +116,6 @@ namespace AnhLapTrinh.EmTroLy.Setup
         {
             try
             {
-                // Enable TLS 1.2 (3072) + TLS 1.3 (12288) when supported by OS
                 ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | (SecurityProtocolType)12288;
             }
             catch
@@ -136,6 +145,10 @@ namespace AnhLapTrinh.EmTroLy.Setup
                 else if (string.Equals(a, "--out", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
                 {
                     opt.OutFile = args[++i];
+                }
+                else if (string.Equals(a, "--render-preview", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+                {
+                    opt.RenderPreviewFile = args[++i];
                 }
                 else if (string.Equals(a, "--version", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
                 {
@@ -172,6 +185,46 @@ namespace AnhLapTrinh.EmTroLy.Setup
             return OfficialReleaseRoot + "/latest/download";
         }
 
+        internal static string FormatFriendlyErrorMessage(Exception ex)
+        {
+            string raw = ex != null ? (ex.Message ?? string.Empty) : string.Empty;
+            WebException webEx = ex as WebException;
+            if (webEx != null)
+            {
+                HttpWebResponse httpResp = webEx.Response as HttpWebResponse;
+                if (httpResp != null)
+                {
+                    int code = (int)httpResp.StatusCode;
+                    if (code == 404)
+                    {
+                        return "Phiên bản mới vừa được tạo trên GitHub và đang hoàn tất đóng gói (404). Bạn vui lòng đợi khoảng 1 phút rồi bấm \"Thử lại ngay\".";
+                    }
+                    if (code == 403 || code == 429)
+                    {
+                        return "Máy chủ GitHub đang tạm giới hạn lượt tải đồng thời (" + code.ToString() + "). Bạn hãy đợi vài giây rồi bấm \"Thử lại ngay\".";
+                    }
+                    if (code >= 500)
+                    {
+                        return "Máy chủ GitHub đang bận tạm thời (" + code.ToString() + "). Vui lòng bấm \"Thử lại ngay\" sau ít giây.";
+                    }
+                }
+                if (webEx.Status == WebExceptionStatus.NameResolutionFailure ||
+                    webEx.Status == WebExceptionStatus.ConnectFailure)
+                {
+                    return "Không kết nối được mạng tới GitHub. Bạn hãy kiểm tra Wi-Fi / Internet hoặc tường lửa rồi bấm \"Thử lại ngay\".";
+                }
+                if (webEx.Status == WebExceptionStatus.Timeout)
+                {
+                    return "Kết nối mạng bị quá thời gian chờ. Bạn hãy kiểm tra đường truyền rồi bấm \"Thử lại ngay\".";
+                }
+            }
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return "Không tải được bộ cài mới nhất. Bạn hãy kiểm tra kết nối mạng rồi bấm \"Thử lại ngay\".";
+            }
+            return "Không tải được bộ cài mới nhất: " + raw;
+        }
+
         internal static string DownloadAndVerifyInstaller(
             BootstrapOptions options,
             Action<string, int> reportProgress,
@@ -180,7 +233,7 @@ namespace AnhLapTrinh.EmTroLy.Setup
             string baseUrl = BuildDownloadBaseUrl(options);
             if (reportProgress != null)
             {
-                reportProgress("Đang kiểm tra phiên bản bộ cài mới nhất trên GitHub...", 5);
+                reportProgress("Đang kiểm tra phiên bản bộ cài mới nhất trên GitHub...", 8);
             }
 
             string versionLabel = ReadLatestVersionLabel(baseUrl);
@@ -219,9 +272,10 @@ namespace AnhLapTrinh.EmTroLy.Setup
                 string cachedHash = ComputeSha256Hex(targetExe);
                 if (string.Equals(cachedHash, expectedHash, StringComparison.OrdinalIgnoreCase))
                 {
+                    string verDisplay = !string.IsNullOrEmpty(versionLabel) ? (" v" + versionLabel) : string.Empty;
                     if (reportProgress != null)
                     {
-                        reportProgress("Đã xác minh bộ cài mới nhất sẵn sàng, đang khởi động...", 100);
+                        reportProgress("Đã xác minh an toàn bộ cài" + verDisplay + "! Đang mở giao diện Em Trợ Lý...", 100);
                     }
                     CleanupOldCachedInstallers(workDir, targetExe, options.OutFile);
                     return targetExe;
@@ -259,13 +313,13 @@ namespace AnhLapTrinh.EmTroLy.Setup
                             readTotal += n;
 
                             int now = Environment.TickCount;
-                            if (reportProgress != null && (now - lastTick >= 120 || readTotal == totalBytes))
+                            if (reportProgress != null && (now - lastTick >= 100 || readTotal == totalBytes))
                             {
                                 lastTick = now;
                                 string verTag = !string.IsNullOrEmpty(versionLabel) ? (" v" + versionLabel) : string.Empty;
                                 if (totalBytes > 0)
                                 {
-                                    int pct = (int)Math.Min(95L, Math.Max(8L, (readTotal * 95L) / totalBytes));
+                                    int pct = (int)Math.Min(96L, Math.Max(10L, (readTotal * 96L) / totalBytes));
                                     double mbDone = readTotal / (1024.0 * 1024.0);
                                     double mbTotal = totalBytes / (1024.0 * 1024.0);
                                     reportProgress(
@@ -286,7 +340,7 @@ namespace AnhLapTrinh.EmTroLy.Setup
 
                 if (reportProgress != null)
                 {
-                    reportProgress("Đang đối chiếu mã toàn vẹn SHA-256...", 98);
+                    reportProgress("Đang đối chiếu mã kiểm tra toàn vẹn SHA-256...", 98);
                 }
 
                 string actualHash = ComputeSha256Hex(tmpExe);
@@ -304,7 +358,7 @@ namespace AnhLapTrinh.EmTroLy.Setup
 
                 if (reportProgress != null)
                 {
-                    reportProgress("Đã tải xong và xác minh an toàn! Đang mở giao diện cài đặt...", 100);
+                    reportProgress("Đã tải xong và xác minh an toàn! Đang mở giao diện Em Trợ Lý...", 100);
                 }
                 return targetExe;
             }
@@ -397,9 +451,10 @@ namespace AnhLapTrinh.EmTroLy.Setup
             }
             try
             {
+                string keepName = Path.GetFileName(keepExe);
                 foreach (string f in Directory.GetFiles(workDir, "emtroly-*.exe"))
                 {
-                    if (!string.Equals(Path.GetFullPath(f), Path.GetFullPath(keepExe), StringComparison.OrdinalIgnoreCase))
+                    if (!string.Equals(Path.GetFileName(f), keepName, StringComparison.OrdinalIgnoreCase))
                     {
                         try { File.Delete(f); } catch { }
                     }
@@ -424,97 +479,474 @@ namespace AnhLapTrinh.EmTroLy.Setup
         }
     }
 
-    internal sealed class SetupForm : Form
+    internal sealed class SetupWindow : Window
     {
+        private const string WindowContentXaml = @"
+<Border xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'
+        xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'
+        Margin='16'
+        Background='#FFFFFF'
+        BorderBrush='#E2E8F0'
+        BorderThickness='1'
+        CornerRadius='14'
+        Padding='24,20'>
+  <Border.Resources>
+    <Style x:Key='PrimaryActionBtn' TargetType='Button'>
+      <Setter Property='Background' Value='#2563EB'/>
+      <Setter Property='Foreground' Value='#FFFFFF'/>
+      <Setter Property='FontFamily' Value='Segoe UI'/>
+      <Setter Property='FontSize' Value='13'/>
+      <Setter Property='FontWeight' Value='SemiBold'/>
+      <Setter Property='Height' Value='36'/>
+      <Setter Property='Padding' Value='18,0'/>
+      <Setter Property='Cursor' Value='Hand'/>
+      <Setter Property='BorderThickness' Value='0'/>
+      <Setter Property='Template'>
+        <Setter.Value>
+          <ControlTemplate TargetType='Button'>
+            <Border x:Name='bd' Background='{TemplateBinding Background}' CornerRadius='8' Padding='{TemplateBinding Padding}'>
+              <ContentPresenter HorizontalAlignment='Center' VerticalAlignment='Center'/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property='IsMouseOver' Value='True'>
+                <Setter TargetName='bd' Property='Background' Value='#1D4ED8'/>
+              </Trigger>
+              <Trigger Property='IsEnabled' Value='False'>
+                <Setter TargetName='bd' Property='Opacity' Value='0.5'/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key='SecondaryActionBtn' TargetType='Button'>
+      <Setter Property='Background' Value='#FFFFFF'/>
+      <Setter Property='Foreground' Value='#334155'/>
+      <Setter Property='BorderBrush' Value='#CBD5E1'/>
+      <Setter Property='BorderThickness' Value='1'/>
+      <Setter Property='FontFamily' Value='Segoe UI'/>
+      <Setter Property='FontSize' Value='13'/>
+      <Setter Property='FontWeight' Value='SemiBold'/>
+      <Setter Property='Height' Value='36'/>
+      <Setter Property='MinWidth' Value='92'/>
+      <Setter Property='Padding' Value='16,0'/>
+      <Setter Property='Cursor' Value='Hand'/>
+      <Setter Property='Template'>
+        <Setter.Value>
+          <ControlTemplate TargetType='Button'>
+            <Border x:Name='bd' Background='{TemplateBinding Background}' BorderBrush='{TemplateBinding BorderBrush}' BorderThickness='{TemplateBinding BorderThickness}' CornerRadius='8' Padding='{TemplateBinding Padding}'>
+              <ContentPresenter HorizontalAlignment='Center' VerticalAlignment='Center'/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property='IsMouseOver' Value='True'>
+                <Setter TargetName='bd' Property='Background' Value='#F8FAFC'/>
+                <Setter TargetName='bd' Property='BorderBrush' Value='#94A3B8'/>
+              </Trigger>
+              <Trigger Property='IsEnabled' Value='False'>
+                <Setter TargetName='bd' Property='Opacity' Value='0.45'/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Border.Resources>
+
+  <StackPanel>
+    <!-- Top Brand Logo & Official Security Pill -->
+    <DockPanel Margin='0,0,0,14'>
+      <Border DockPanel.Dock='Right'
+              Background='#ECFDF5'
+              BorderBrush='#A7F3D0'
+              BorderThickness='1'
+              CornerRadius='12'
+              Padding='10,4'
+              VerticalAlignment='Center'>
+        <StackPanel Orientation='Horizontal' VerticalAlignment='Center'>
+          <Ellipse Width='7' Height='7' Fill='#10B981' VerticalAlignment='Center' Margin='0,0,6,0'/>
+          <TextBlock Text='Xác thực SHA-256' FontSize='11.5' FontWeight='Bold' Foreground='#065F46' VerticalAlignment='Center'/>
+        </StackPanel>
+      </Border>
+      <Border x:Name='BrandLogoHost'
+              Background='#F8FAFC'
+              BorderBrush='#E2E8F0'
+              BorderThickness='1'
+              CornerRadius='8'
+              Padding='10,5'
+              HorizontalAlignment='Left'
+              VerticalAlignment='Center'>
+        <Image x:Name='BrandLogoImage' Height='28' Stretch='Uniform' RenderOptions.BitmapScalingMode='HighQuality'/>
+      </Border>
+    </DockPanel>
+
+    <!-- Title & Clear Subtitle (Full Wrapping, Never Clips) -->
+    <TextBlock Text='Em Trợ Lý — Bộ Cài Đặt Chính Thức'
+               FontSize='17.5'
+               FontWeight='Bold'
+               Foreground='#0F172A'
+               TextWrapping='Wrap'/>
+    <TextBlock Text='Tự động kiểm tra, tải phiên bản mới nhất và mở giao diện quản lý trọn gói'
+               FontSize='12.5'
+               Foreground='#64748B'
+               Margin='0,4,0,0'
+               TextWrapping='Wrap'/>
+
+    <Border Height='1' Background='#F1F5F9' Margin='0,14,0,14'/>
+
+    <!-- Live Status Message + Percentage Pill -->
+    <Grid Margin='0,0,0,10'>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width='*'/>
+        <ColumnDefinition Width='Auto'/>
+      </Grid.ColumnDefinitions>
+      <TextBlock x:Name='StatusText'
+                 Grid.Column='0'
+                 Text='Đang kết nối máy chủ phát hành chính thức...'
+                 FontSize='13'
+                 FontWeight='SemiBold'
+                 Foreground='#1E293B'
+                 LineHeight='19'
+                 TextWrapping='Wrap'
+                 VerticalAlignment='Center'/>
+      <Border x:Name='PercentPill'
+              Grid.Column='1'
+              Background='#EFF6FF'
+              BorderBrush='#BFDBFE'
+              BorderThickness='1'
+              CornerRadius='8'
+              Padding='10,3'
+              Margin='12,0,0,0'
+              VerticalAlignment='Top'>
+        <TextBlock x:Name='PercentText'
+                   Text='5%'
+                   FontSize='12'
+                   FontWeight='Bold'
+                   Foreground='#1D4ED8'/>
+      </Border>
+    </Grid>
+
+    <!-- Smooth Rounded Progress Track & Indicator -->
+    <Border x:Name='ProgressTrack'
+            Height='10'
+            Background='#DBEAFE'
+            CornerRadius='5'
+            ClipToBounds='True'>
+      <Border x:Name='ProgressFill'
+              HorizontalAlignment='Left'
+              Height='10'
+              Width='24'
+              Background='#2563EB'
+              CornerRadius='5'/>
+    </Border>
+
+    <!-- Friendly Inline Error Banner (Replaces raw system popup) -->
+    <Border x:Name='ErrorBanner'
+            Background='#FEF2F2'
+            BorderBrush='#FECACA'
+            BorderThickness='1'
+            CornerRadius='10'
+            Padding='13,10'
+            Margin='0,12,0,0'
+            Visibility='Collapsed'>
+      <TextBlock x:Name='ErrorText'
+                 Text=''
+                 FontSize='12.5'
+                 Foreground='#B91C1C'
+                 LineHeight='18'
+                 TextWrapping='Wrap'/>
+    </Border>
+
+    <!-- Footer Hint & Action Buttons -->
+    <DockPanel Margin='0,16,0,0'>
+      <StackPanel DockPanel.Dock='Right' Orientation='Horizontal' VerticalAlignment='Center'>
+        <Button x:Name='RetryButton'
+                Style='{StaticResource PrimaryActionBtn}'
+                Content='Thử lại ngay'
+                Margin='0,0,8,0'
+                Visibility='Collapsed'/>
+        <Button x:Name='CancelButton'
+                Style='{StaticResource SecondaryActionBtn}'
+                Content='Hủy'/>
+      </StackPanel>
+      <TextBlock x:Name='FooterHint'
+                 Text='An toàn tuyệt đối · Giữ nguyên dữ liệu trên máy'
+                 FontSize='11.5'
+                 Foreground='#94A3B8'
+                 VerticalAlignment='Center'
+                 Margin='0,0,12,0'
+                 TextWrapping='Wrap'/>
+    </DockPanel>
+  </StackPanel>
+</Border>";
+
         private readonly BootstrapOptions _options;
-        private readonly Label _titleLabel;
-        private readonly Label _statusLabel;
-        private readonly ProgressBar _progressBar;
+        private readonly TextBlock _statusText;
+        private readonly Border _percentPill;
+        private readonly TextBlock _percentText;
+        private readonly Border _progressTrack;
+        private readonly Border _progressFill;
+        private readonly Border _errorBanner;
+        private readonly TextBlock _errorText;
+        private readonly Button _retryButton;
         private readonly Button _cancelButton;
+        private readonly ManualResetEvent _retrySignal = new ManualResetEvent(false);
         private volatile bool _cancelled;
         private volatile bool _finished;
+        private volatile bool _waitingForRetry;
+        private int _currentPercent = 5;
         public int ExitCode = 1;
 
-        public SetupForm(BootstrapOptions options)
+        public SetupWindow(BootstrapOptions options)
         {
             _options = options;
-            Text = "Em Trợ Lý - Anh Lập Trình";
-            StartPosition = FormStartPosition.CenterScreen;
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false;
-            MinimizeBox = true;
-            ClientSize = new Size(460, 165);
-            BackColor = Color.FromArgb(248, 250, 252);
-            Font = new Font("Segoe UI", 9.5F, FontStyle.Regular, GraphicsUnit.Point);
+            Title = "Em Trợ Lý — Anh Lập Trình";
+            Width = 520;
+            SizeToContent = SizeToContent.Height;
+            ResizeMode = ResizeMode.CanMinimize;
+            WindowStartupLocation = WindowStartupLocation.CenterScreen;
+            Background = BrushFromHex("#F1F5F9");
+            FontFamily = new FontFamily("Segoe UI");
+            UseLayoutRounding = true;
+            SnapsToDevicePixels = true;
+            TextOptions.SetTextFormattingMode(this, TextFormattingMode.Display);
+            TextOptions.SetTextRenderingMode(this, TextRenderingMode.ClearType);
 
+            TryLoadWindowIcon();
+
+            Border rootCard = (Border)XamlReader.Parse(WindowContentXaml);
+            Content = rootCard;
+
+            Border brandHost = (Border)rootCard.FindName("BrandLogoHost");
+            Image brandImage = (Image)rootCard.FindName("BrandLogoImage");
+            _statusText = (TextBlock)rootCard.FindName("StatusText");
+            _percentPill = (Border)rootCard.FindName("PercentPill");
+            _percentText = (TextBlock)rootCard.FindName("PercentText");
+            _progressTrack = (Border)rootCard.FindName("ProgressTrack");
+            _progressFill = (Border)rootCard.FindName("ProgressFill");
+            _errorBanner = (Border)rootCard.FindName("ErrorBanner");
+            _errorText = (TextBlock)rootCard.FindName("ErrorText");
+            _retryButton = (Button)rootCard.FindName("RetryButton");
+            _cancelButton = (Button)rootCard.FindName("CancelButton");
+
+            if (!TryLoadEmbeddedBrandLogo(brandImage) && brandHost != null)
+            {
+                brandHost.Visibility = Visibility.Collapsed;
+            }
+
+            _progressTrack.SizeChanged += delegate { RefreshProgressBarWidth(); };
+
+            _retryButton.Click += delegate
+            {
+                if (_waitingForRetry && !_cancelled)
+                {
+                    _waitingForRetry = false;
+                    _errorBanner.Visibility = Visibility.Collapsed;
+                    _retryButton.Visibility = Visibility.Collapsed;
+                    _cancelButton.Content = "Hủy";
+                    ApplyProgressVisual("Đang thử kết nối lại máy chủ GitHub...", 8, false);
+                    _retrySignal.Set();
+                }
+            };
+
+            _cancelButton.Click += delegate
+            {
+                _cancelled = true;
+                _cancelButton.IsEnabled = false;
+                _retryButton.IsEnabled = false;
+                _statusText.Text = "Đang đóng...";
+                _retrySignal.Set();
+                if (_waitingForRetry)
+                {
+                    Close();
+                }
+            };
+
+            ContentRendered += delegate
+            {
+                RefreshProgressBarWidth();
+                if (!string.IsNullOrWhiteSpace(_options.RenderPreviewFile))
+                {
+                    RunPreviewCapture(_options.RenderPreviewFile);
+                }
+                else
+                {
+                    StartWorker();
+                }
+            };
+
+            Closing += delegate
+            {
+                if (!_finished && !_cancelled)
+                {
+                    _cancelled = true;
+                    _retrySignal.Set();
+                }
+            };
+        }
+
+        private void TryLoadWindowIcon()
+        {
             try
             {
-                Icon selfIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-                if (selfIcon != null)
+                string selfExe = Assembly.GetExecutingAssembly().Location;
+                if (!string.IsNullOrEmpty(selfExe) && File.Exists(selfExe))
                 {
-                    Icon = selfIcon;
+                    Icon = ImagingCreateIconFromExe(selfExe);
                 }
             }
             catch
             {
             }
+        }
 
-            _titleLabel = new Label
+        private static ImageSource ImagingCreateIconFromExe(string exePath)
+        {
+            Uri uri = new Uri(exePath, UriKind.Absolute);
+            IconBitmapDecoder decoder = new IconBitmapDecoder(
+                uri,
+                BitmapCreateOptions.PreservePixelFormat,
+                BitmapCacheOption.OnLoad);
+            if (decoder.Frames != null && decoder.Frames.Count > 0)
             {
-                Text = "Em Trợ Lý — Anh Lập Trình",
-                Font = new Font("Segoe UI", 12F, FontStyle.Bold, GraphicsUnit.Point),
-                ForeColor = Color.FromArgb(15, 23, 42),
-                Location = new Point(22, 18),
-                Size = new Size(416, 26),
-                AutoEllipsis = true
-            };
+                return decoder.Frames[0];
+            }
+            return null;
+        }
 
-            _statusLabel = new Label
+        private static bool TryLoadEmbeddedBrandLogo(Image target)
+        {
+            if (target == null)
             {
-                Text = "Đang kết nối máy chủ phát hành chính thức...",
-                ForeColor = Color.FromArgb(71, 85, 105),
-                Location = new Point(22, 50),
-                Size = new Size(416, 22),
-                AutoEllipsis = true
-            };
-
-            _progressBar = new ProgressBar
+                return false;
+            }
+            try
             {
-                Location = new Point(22, 80),
-                Size = new Size(416, 22),
-                Minimum = 0,
-                Maximum = 100,
-                Value = 4,
-                Style = ProgressBarStyle.Continuous
-            };
-
-            _cancelButton = new Button
-            {
-                Text = "Hủy",
-                Location = new Point(348, 118),
-                Size = new Size(90, 30),
-                FlatStyle = FlatStyle.System
-            };
-            _cancelButton.Click += delegate
-            {
-                _cancelled = true;
-                _cancelButton.Enabled = false;
-                _statusLabel.Text = "Đang hủy...";
-            };
-
-            Controls.Add(_titleLabel);
-            Controls.Add(_statusLabel);
-            Controls.Add(_progressBar);
-            Controls.Add(_cancelButton);
-
-            Shown += delegate { StartWorker(); };
-            FormClosing += delegate(object sender, FormClosingEventArgs e)
-            {
-                if (!_finished && !_cancelled)
+                using (Stream s = Assembly.GetExecutingAssembly().GetManifestResourceStream("EmTroLyLogo.png"))
                 {
-                    _cancelled = true;
+                    if (s == null)
+                    {
+                        return false;
+                    }
+                    MemoryStream ms = new MemoryStream();
+                    s.CopyTo(ms);
+                    ms.Position = 0;
+                    BitmapImage bmp = new BitmapImage();
+                    bmp.BeginInit();
+                    bmp.CacheOption = BitmapCacheOption.OnLoad;
+                    bmp.StreamSource = ms;
+                    bmp.EndInit();
+                    bmp.Freeze();
+                    ms.Dispose();
+                    target.Source = bmp;
+                    return true;
                 }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static SolidColorBrush BrushFromHex(string hex)
+        {
+            SolidColorBrush b = (SolidColorBrush)new BrushConverter().ConvertFromString(hex);
+            if (b != null && b.CanFreeze)
+            {
+                b.Freeze();
+            }
+            return b;
+        }
+
+        private void RefreshProgressBarWidth()
+        {
+            double trackW = _progressTrack.ActualWidth;
+            if (trackW <= 0)
+            {
+                return;
+            }
+            int clamped = Math.Max(0, Math.Min(100, _currentPercent));
+            if (clamped <= 0)
+            {
+                _progressFill.Width = 0;
+            }
+            else
+            {
+                _progressFill.Width = Math.Max(12.0, (trackW * clamped) / 100.0);
+            }
+        }
+
+        private void ApplyProgressVisual(string message, int percent, bool isSuccess)
+        {
+            _currentPercent = Math.Max(0, Math.Min(100, percent));
+            _statusText.Text = message;
+            _percentText.Text = _currentPercent.ToString() + "%";
+
+            if (isSuccess || _currentPercent >= 100)
+            {
+                _progressFill.Background = BrushFromHex("#10B981");
+                _percentPill.Background = BrushFromHex("#ECFDF5");
+                _percentPill.BorderBrush = BrushFromHex("#A7F3D0");
+                _percentText.Foreground = BrushFromHex("#065F46");
+            }
+            else
+            {
+                _progressFill.Background = BrushFromHex("#2563EB");
+                _percentPill.Background = BrushFromHex("#EFF6FF");
+                _percentPill.BorderBrush = BrushFromHex("#BFDBFE");
+                _percentText.Foreground = BrushFromHex("#1D4ED8");
+            }
+            RefreshProgressBarWidth();
+        }
+
+        private void RunPreviewCapture(string outputPath)
+        {
+            ApplyProgressVisual("Đang tải bộ cài Em Trợ Lý v2026.11.24.5 (1.5 / 2.2 MB)...", 68, false);
+            DispatcherTimer timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(220) };
+            timer.Tick += delegate
+            {
+                timer.Stop();
+                try
+                {
+                    UpdateLayout();
+                    FrameworkElement root = (FrameworkElement)Content;
+                    DpiScale dpi = VisualTreeHelper.GetDpi(this);
+                    int pxW = Math.Max(1, (int)Math.Round((root.ActualWidth + 32) * dpi.DpiScaleX));
+                    int pxH = Math.Max(1, (int)Math.Round((root.ActualHeight + 32) * dpi.DpiScaleY));
+
+                    DrawingVisual dv = new DrawingVisual();
+                    using (DrawingContext dc = dv.RenderOpen())
+                    {
+                        dc.DrawRectangle(Background, null, new Rect(0, 0, root.ActualWidth + 32, root.ActualHeight + 32));
+                        VisualBrush vb = new VisualBrush(root) { Stretch = Stretch.None };
+                        dc.DrawRectangle(vb, null, new Rect(16, 16, root.ActualWidth, root.ActualHeight));
+                    }
+                    RenderTargetBitmap rtb = new RenderTargetBitmap(pxW, pxH, dpi.PixelsPerInchX, dpi.PixelsPerInchY, PixelFormats.Pbgra32);
+                    rtb.Render(dv);
+
+                    string fullOut = Path.GetFullPath(outputPath);
+                    string dir = Path.GetDirectoryName(fullOut);
+                    if (!string.IsNullOrEmpty(dir))
+                    {
+                        Directory.CreateDirectory(dir);
+                    }
+                    PngBitmapEncoder encoder = new PngBitmapEncoder();
+                    encoder.Frames.Add(BitmapFrame.Create(rtb));
+                    using (FileStream fs = new FileStream(fullOut, FileMode.Create, FileAccess.Write))
+                    {
+                        encoder.Save(fs);
+                    }
+                    ExitCode = 0;
+                }
+                catch (Exception ex)
+                {
+                    Console.Error.WriteLine(ex.Message);
+                    ExitCode = 1;
+                }
+                _finished = true;
+                Close();
             };
+            timer.Start();
         }
 
         private void StartWorker()
@@ -538,6 +970,8 @@ namespace AnhLapTrinh.EmTroLy.Setup
                         UpdateProgressSafe,
                         delegate { return _cancelled; });
 
+                    Thread.Sleep(280);
+
                     if (!_options.DownloadOnly)
                     {
                         Program.LaunchInstaller(targetExe);
@@ -545,14 +979,14 @@ namespace AnhLapTrinh.EmTroLy.Setup
 
                     ExitCode = 0;
                     _finished = true;
-                    BeginInvoke((MethodInvoker)delegate { Close(); });
+                    Dispatcher.BeginInvoke((Action)delegate { Close(); });
                     return;
                 }
                 catch (OperationCanceledException)
                 {
                     ExitCode = 1;
                     _finished = true;
-                    BeginInvoke((MethodInvoker)delegate { Close(); });
+                    Dispatcher.BeginInvoke((Action)delegate { Close(); });
                     return;
                 }
                 catch (Exception ex)
@@ -561,31 +995,37 @@ namespace AnhLapTrinh.EmTroLy.Setup
                     {
                         ExitCode = 1;
                         _finished = true;
-                        BeginInvoke((MethodInvoker)delegate { Close(); });
+                        Dispatcher.BeginInvoke((Action)delegate { Close(); });
                         return;
                     }
 
-                    DialogResult choice = DialogResult.Cancel;
-                    Invoke((MethodInvoker)delegate
+                    string friendly = Program.FormatFriendlyErrorMessage(ex);
+                    _retrySignal.Reset();
+                    _waitingForRetry = true;
+
+                    Dispatcher.Invoke((Action)delegate
                     {
-                        choice = MessageBox.Show(
-                            this,
-                            "Không tải được bộ cài mới nhất:\r\n" + ex.Message + "\r\n\r\nBạn hãy kiểm tra kết nối mạng rồi bấm Thử lại.",
-                            "Em Trợ Lý - Anh Lập Trình",
-                            MessageBoxButtons.RetryCancel,
-                            MessageBoxIcon.Warning);
-                        if (choice == DialogResult.Retry)
-                        {
-                            _statusLabel.Text = "Đang thử kết nối lại...";
-                            _progressBar.Value = 5;
-                        }
+                        _statusText.Text = "Chưa tải được bộ cài tự động";
+                        _progressFill.Background = BrushFromHex("#EF4444");
+                        _percentPill.Background = BrushFromHex("#FEF2F2");
+                        _percentPill.BorderBrush = BrushFromHex("#FECACA");
+                        _percentText.Foreground = BrushFromHex("#B91C1C");
+                        _percentText.Text = "Tạm dừng";
+                        _errorText.Text = friendly;
+                        _errorBanner.Visibility = Visibility.Visible;
+                        _retryButton.Visibility = Visibility.Visible;
+                        _retryButton.IsEnabled = true;
+                        _cancelButton.Content = "Đóng";
+                        _cancelButton.IsEnabled = true;
                     });
 
-                    if (choice != DialogResult.Retry)
+                    _retrySignal.WaitOne();
+                    _waitingForRetry = false;
+                    if (_cancelled)
                     {
                         ExitCode = 1;
                         _finished = true;
-                        BeginInvoke((MethodInvoker)delegate { Close(); });
+                        Dispatcher.BeginInvoke((Action)delegate { Close(); });
                         return;
                     }
                 }
@@ -594,19 +1034,13 @@ namespace AnhLapTrinh.EmTroLy.Setup
 
         private void UpdateProgressSafe(string text, int percent)
         {
-            if (IsDisposed || !IsHandleCreated)
-            {
-                return;
-            }
             try
             {
-                BeginInvoke((MethodInvoker)delegate
+                Dispatcher.BeginInvoke((Action)delegate
                 {
-                    if (!IsDisposed)
+                    if (!_finished)
                     {
-                        _statusLabel.Text = text;
-                        int clamped = Math.Max(0, Math.Min(100, percent));
-                        _progressBar.Value = clamped;
+                        ApplyProgressVisual(text, percent, percent >= 100);
                     }
                 });
             }
