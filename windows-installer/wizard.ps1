@@ -598,505 +598,524 @@ $xamlText = @'
 
   <Grid>
     <Grid.ColumnDefinitions>
-      <ColumnDefinition Width="252"/>
+      <ColumnDefinition Width="238"/>
       <ColumnDefinition Width="*"/>
     </Grid.ColumnDefinitions>
 
-    <!-- LEFT SIDEBAR -->
+    <!-- LEFT SIDEBAR (Clean, Vector-Icon Equipped, Executive Brand Header) -->
     <Border Grid.Column="0" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="0,0,1,0">
-      <DockPanel LastChildFill="True" Margin="14,16,14,14">
-        <!-- Brand Header (Balanced & Cohesive) -->
-        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,6">
-          <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="12,10">
-            <StackPanel>
-              <Border Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="10,6" Margin="0,0,0,8">
-                <Image x:Name="LogoImage" Height="34" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
-              </Border>
-              <TextBlock Text="Em Trợ Lý" FontSize="17" FontWeight="Bold" Foreground="#0F172A"/>
-              <TextBlock Text="Trọn gói AI · Telegram · Zalo · Codex" FontSize="11.5" Foreground="#64748B" Margin="0,2,0,0"/>
-            </StackPanel>
-          </Border>
-        </StackPanel>
-
-        <!-- Compact Unified Bottom Status & License Card -->
-        <Border DockPanel.Dock="Bottom" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="11,10" Margin="0,12,0,0">
+      <DockPanel LastChildFill="True" Margin="13,14,13,13">
+        <!-- Executive Brand Header -->
+        <Border DockPanel.Dock="Top" Background="#FFFFFF" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="12" Margin="0,0,0,10" SnapsToDevicePixels="True">
+          <Border.Effect>
+            <DropShadowEffect Color="#0F172A" BlurRadius="10" ShadowDepth="2" Direction="270" Opacity="0.05"/>
+          </Border.Effect>
           <StackPanel>
-            <!-- Compact License + Sign-out Row -->
-            <Grid Margin="0,0,0,5">
+            <Border Background="#FFFFFF" CornerRadius="11,11,0,0" Padding="11,13,11,12">
+              <Image x:Name="LogoImage" MaxHeight="27" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="HighQuality"/>
+            </Border>
+            <Border Height="1" Background="#E2E8F0"/>
+            <Border Background="#F8FAFC" CornerRadius="0,0,11,11" Padding="11,8,11,9">
+              <StackPanel>
+                <DockPanel>
+                  <Border DockPanel.Dock="Right" Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="6" Padding="6,1.5" VerticalAlignment="Center">
+                    <TextBlock Text="AI SUITE" FontSize="9.5" FontWeight="Bold" Foreground="#1D4ED8"/>
+                  </Border>
+                  <TextBlock Text="Em Trợ Lý" FontSize="15" FontWeight="Bold" Foreground="#0F172A" VerticalAlignment="Center"/>
+                </DockPanel>
+                <TextBlock Text="Telegram · Zalo · Codex CLI" FontSize="11" Foreground="#64748B" Margin="0,2,0,0"/>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </Border>
+
+        <!-- Compact Unified Bottom Status & License Card (No Red Reset Clutter) -->
+        <Border DockPanel.Dock="Bottom" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="11" Padding="11,9" Margin="0,10,0,0">
+          <StackPanel>
+            <Grid Margin="0,0,0,4">
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
               </Grid.ColumnDefinitions>
               <Border x:Name="SidebarLicensePill" Grid.Column="0" Background="Transparent" BorderBrush="Transparent" BorderThickness="0" Padding="0" Cursor="Hand" ToolTip="Bấm để đổi khóa kích hoạt bản quyền" Visibility="Collapsed">
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                  <Ellipse Width="8" Height="8" Fill="#10B981" VerticalAlignment="Center" Margin="0,0,7,0"/>
+                  <Ellipse Width="7.5" Height="7.5" Fill="#10B981" VerticalAlignment="Center" Margin="0,0,6,0"/>
                   <TextBlock Text="Bản quyền: Đã kích hoạt" FontSize="11.5" FontWeight="SemiBold" Foreground="#0F172A" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
                 </StackPanel>
               </Border>
-              <Button x:Name="SidebarSignOutLicenseBtn" Grid.Column="1" Background="Transparent" BorderThickness="0" Cursor="Hand" Content="Thoát" FontSize="11.5" FontWeight="SemiBold" Foreground="#DC2626" Padding="6,0,0,0" VerticalAlignment="Center" Visibility="Collapsed" ToolTip="Thoát bản quyền giao diện (bắt buộc nhập lại Token codex.anhlaptrinh.vn, không dừng bot đang chạy)"/>
+              <Button x:Name="SidebarSignOutLicenseBtn" Grid.Column="1" Background="Transparent" BorderThickness="0" Cursor="Hand" Content="Thoát" FontSize="11" FontWeight="SemiBold" Foreground="#DC2626" Padding="6,0,0,0" VerticalAlignment="Center" Visibility="Collapsed" ToolTip="Thoát bản quyền giao diện (bắt buộc nhập lại Token codex.anhlaptrinh.vn, không dừng bot đang chạy)"/>
             </Grid>
 
-            <!-- Compact System Status Row -->
-            <Border x:Name="SidebarStatusPill" Background="Transparent" BorderBrush="Transparent" BorderThickness="0" CornerRadius="6" Padding="0,2" Margin="0,0,0,2">
+            <Border x:Name="SidebarStatusPill" Background="Transparent" BorderBrush="Transparent" BorderThickness="0" CornerRadius="6" Padding="0,1" Margin="0,0,0,2">
               <StackPanel Orientation="Horizontal">
-                <Ellipse x:Name="SidebarStatusDot" Width="7" Height="7" Fill="#94A3B8" VerticalAlignment="Center" Margin="1,0,7,0"/>
-                <TextBlock x:Name="SidebarStatusText" Text="Chưa cài đặt" FontSize="11.5" FontWeight="Medium" Foreground="#475569" VerticalAlignment="Center"/>
+                <Ellipse x:Name="SidebarStatusDot" Width="7" Height="7" Fill="#94A3B8" VerticalAlignment="Center" Margin="0.5,0,6.5,0"/>
+                <TextBlock x:Name="SidebarStatusText" Text="Chưa cài đặt" FontSize="11" FontWeight="Medium" Foreground="#475569" VerticalAlignment="Center"/>
               </StackPanel>
             </Border>
 
-            <!-- Compact Zalo Row (Visible only when installed & Zalo enabled) -->
-            <Border x:Name="SidebarZaloPill" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="6" Padding="8,4" Margin="0,4,0,4" Cursor="Hand" Visibility="Collapsed">
+            <Border x:Name="SidebarZaloPill" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="6" Padding="8,3" Margin="0,3,0,4" Cursor="Hand" Visibility="Collapsed">
               <StackPanel Orientation="Horizontal">
-                <Border x:Name="SidebarZaloIconCircle" Width="14" Height="14" CornerRadius="7" Background="#10B981" VerticalAlignment="Center" Margin="0,0,6,0">
+                <Border x:Name="SidebarZaloIconCircle" Width="13" Height="13" CornerRadius="6.5" Background="#10B981" VerticalAlignment="Center" Margin="0,0,6,0">
                   <Grid>
-                    <Path x:Name="SidebarZaloCheckIcon" Data="M 3,7.2 L 5.8,9.8 L 11,4.4" Stroke="#FFFFFF" StrokeThickness="1.9" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
-                    <Ellipse x:Name="SidebarZaloPendingDot" Width="5" Height="5" Fill="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+                    <Path x:Name="SidebarZaloCheckIcon" Data="M 2.8,6.8 L 5.4,9.2 L 10.2,4" Stroke="#FFFFFF" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                    <Ellipse x:Name="SidebarZaloPendingDot" Width="4.5" Height="4.5" Fill="#FFFFFF" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
                   </Grid>
                 </Border>
                 <TextBlock x:Name="SidebarZaloText" Text="Zalo: Đã kết nối" FontSize="11" FontWeight="Bold" Foreground="#065F46" VerticalAlignment="Center"/>
               </StackPanel>
             </Border>
 
-            <Grid Margin="15,2,0,0">
+            <Border Height="1" Background="#E2E8F0" Margin="0,3,0,5"/>
+            <Grid>
               <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
               </Grid.ColumnDefinitions>
-              <TextBlock x:Name="VersionText" Grid.Column="0" Text="v2026.11.23 · Anh Lập Trình" FontSize="11" Foreground="#94A3B8" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-              <Button x:Name="SidebarUpdateLinkBtn" Grid.Column="1" Background="Transparent" BorderThickness="0" Cursor="Hand" Content="Cập nhật" FontSize="11" FontWeight="SemiBold" Foreground="#2563EB" Padding="6,0,0,0" VerticalAlignment="Center" ToolTip="Kiểm tra phiên bản mới trên GitHub và cập nhật tự động"/>
+              <TextBlock x:Name="VersionText" Grid.Column="0" Text="v2026.11.24" FontSize="10.5" Foreground="#64748B" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+              <Button x:Name="SidebarUpdateLinkBtn" Grid.Column="1" Background="Transparent" BorderThickness="0" Cursor="Hand" Content="Kiểm tra bản mới" FontSize="10.5" FontWeight="SemiBold" Foreground="#2563EB" Padding="6,0,0,0" VerticalAlignment="Center" ToolTip="Kiểm tra phiên bản mới trên GitHub và cập nhật tự động"/>
             </Grid>
           </StackPanel>
         </Border>
 
-        <!-- Grouped Navigation Menu (Original + 1 New "Kho ứng dụng" Tab) -->
+        <!-- Grouped Vector-Icon Navigation Menu -->
         <StackPanel>
-          <TextBlock Style="{StaticResource SidebarGroupHeader}" Text="TRIỂN KHAI &amp; CÀI ĐẶT"/>
-          <Button x:Name="NavHomeBtn" Style="{StaticResource NavBtn}" Content="  Cài đặt nhanh" Margin="0,0,0,3"/>
-          <Button x:Name="NavModularBtn" Style="{StaticResource NavBtn}" Content="  Cài từng phần (Lõi)" Margin="0,0,0,3"/>
-          <Button x:Name="NavStoreBtn" Style="{StaticResource NavBtn}" HorizontalContentAlignment="Stretch" Margin="0,0,0,3">
+          <TextBlock Style="{StaticResource SidebarGroupHeader}" Text="TRIỂN KHAI &amp; QUẢN LÝ" Margin="8,4,0,4"/>
+          <Button x:Name="NavHomeBtn" Style="{StaticResource NavBtn}" Height="38" Margin="0,0,0,2">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+              <Path Data="M 2.5,8.5 L 8,3.5 L 13.5,8.5 M 4.2,7.2 L 4.2,13.5 L 11.8,13.5 L 11.8,7.2" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center" Margin="2,0,9,0"/>
+              <TextBlock x:Name="NavHomeLabel" Text="Cài đặt nhanh" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Button>
+          <Button x:Name="NavModularBtn" Style="{StaticResource NavBtn}" Height="38" Margin="0,0,0,2">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+              <Path Data="M 2.5,4.5 L 13.5,4.5 M 2.5,8.5 L 13.5,8.5 M 2.5,12.5 L 13.5,12.5" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center" Margin="2,0,9,0"/>
+              <TextBlock Text="Cài từng phần (Lõi)" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Button>
+          <Button x:Name="NavStoreBtn" Style="{StaticResource NavBtn}" Height="38" HorizontalContentAlignment="Stretch" Margin="0,0,0,2">
             <DockPanel LastChildFill="True">
-              <Border DockPanel.Dock="Right" Background="#DBEAFE" CornerRadius="7" Padding="6,1" Margin="6,0,0,0" VerticalAlignment="Center">
-                <TextBlock Text="MỚI" FontSize="9.5" FontWeight="Bold" Foreground="#1D4ED8"/>
+              <Border DockPanel.Dock="Right" Background="#DBEAFE" CornerRadius="6" Padding="5.5,1" Margin="6,0,0,0" VerticalAlignment="Center">
+                <TextBlock Text="MỚI" FontSize="9" FontWeight="Bold" Foreground="#1D4ED8"/>
               </Border>
-              <TextBlock Text="  Kho ứng dụng" VerticalAlignment="Center"/>
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Path Data="M 2.5,2.5 L 7,2.5 L 7,7 L 2.5,7 Z M 9,2.5 L 13.5,2.5 L 13.5,7 L 9,7 Z M 2.5,9 L 7,9 L 7,13.5 L 2.5,13.5 Z M 9,9 L 13.5,9 L 13.5,13.5 L 9,13.5 Z" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.4" StrokeLineJoin="Round" Width="14.5" Height="14.5" Stretch="Uniform" VerticalAlignment="Center" Margin="2,0,9,0"/>
+                <TextBlock Text="Kho ứng dụng" VerticalAlignment="Center"/>
+              </StackPanel>
             </DockPanel>
           </Button>
-          <Button x:Name="NavConfigBtn" Style="{StaticResource NavBtn}" Content="  Tiến trình cài đặt" Margin="0,0,0,4"/>
+          <Button x:Name="NavConfigBtn" Style="{StaticResource NavBtn}" Height="38" Margin="0,0,0,3">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+              <Path Data="M 8,2 A 6,6 0 1,1 7.99,2 M 5.3,8.1 L 7.2,10 L 10.8,6.2" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.5" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center" Margin="2,0,9,0"/>
+              <TextBlock x:Name="NavConfigLabel" Text="Tiến trình cài đặt" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Button>
 
           <Border Height="1" Background="#F1F5F9" Margin="6,6,6,2"/>
-          <TextBlock Style="{StaticResource SidebarGroupHeader}" Text="CÔNG CỤ &amp; HỆ THỐNG"/>
-          <Button x:Name="NavCodexBtn" Style="{StaticResource NavBtn}" Content="  Công cụ Codex CLI" Margin="0,0,0,3"/>
-          <Button x:Name="NavDiagBtn" Style="{StaticResource NavBtn}" Content="  Chẩn đoán &amp; Hỗ trợ" Margin="0,0,0,3"/>
-          <Border Height="1" Background="#F1F5F9" Margin="6,8,6,8"/>
-          <Button x:Name="SidebarResetAllBtn" Style="{StaticResource SoftDangerBtn}" Content="↺  Reset cài lại từ đầu" Height="36" Padding="10,0" ToolTip="Xóa sạch toàn bộ dữ liệu, công cụ riêng &amp; bản quyền để cài lại từ con số 0 như máy mới"/>
+          <TextBlock Style="{StaticResource SidebarGroupHeader}" Text="CÔNG CỤ &amp; HỆ THỐNG" Margin="8,8,0,4"/>
+          <Button x:Name="NavCodexBtn" Style="{StaticResource NavBtn}" Height="38" Margin="0,0,0,2">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+              <Path Data="M 2.5,3.5 L 13.5,3.5 L 13.5,12.5 L 2.5,12.5 Z M 5,6.2 L 7.4,8 L 5,9.8 M 8.4,10 L 11,10" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.45" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center" Margin="2,0,9,0"/>
+              <TextBlock Text="Công cụ Codex CLI" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Button>
+          <Button x:Name="NavDiagBtn" Style="{StaticResource NavBtn}" Height="38">
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+              <Path Data="M 3,4.5 L 13,4.5 M 3,8 L 13,8 M 3,11.5 L 13,11.5 M 6,3 L 6,6 M 10.5,6.5 L 10.5,9.5 M 7,10 L 7,13" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.45" StrokeStartLineCap="Round" Width="15" Height="15" Stretch="Uniform" VerticalAlignment="Center" Margin="2,0,9,0"/>
+              <TextBlock Text="Hệ thống &amp; Hỗ trợ" VerticalAlignment="Center"/>
+            </StackPanel>
+          </Button>
         </StackPanel>
       </DockPanel>
     </Border>
 
     <!-- RIGHT WORKSPACE -->
     <DockPanel Grid.Column="1" LastChildFill="True">
-      <!-- Top Header -->
-      <Border DockPanel.Dock="Top" MinHeight="68" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="0,0,0,1" Padding="24,12">
+      <!-- Slim 54px Top Header (Clean, Focused, No Duplicate Codex Button) -->
+      <Border DockPanel.Dock="Top" MinHeight="54" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="0,0,0,1" Padding="24,8">
         <DockPanel VerticalAlignment="Center">
           <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
-            <Border x:Name="HeaderZaloBadge" Background="#ECFDF5" BorderBrush="#6EE7B7" BorderThickness="1" CornerRadius="18" Padding="12,6" Margin="0,0,10,0" VerticalAlignment="Center" Cursor="Hand" Visibility="Collapsed">
+            <Border x:Name="HeaderZaloBadge" Background="#ECFDF5" BorderBrush="#6EE7B7" BorderThickness="1" CornerRadius="16" Padding="11,4.5" Margin="0,0,8,0" VerticalAlignment="Center" Cursor="Hand" Visibility="Collapsed">
               <StackPanel Orientation="Horizontal">
-                <Border Width="16" Height="16" CornerRadius="8" Background="#10B981" VerticalAlignment="Center" Margin="0,0,6,0">
-                  <Path Data="M 3.5,8.2 L 6.6,11.2 L 12.6,5" Stroke="#FFFFFF" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                <Border Width="14" Height="14" CornerRadius="7" Background="#10B981" VerticalAlignment="Center" Margin="0,0,6,0">
+                  <Path Data="M 3,7.2 L 5.8,9.8 L 11,4.4" Stroke="#FFFFFF" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
                 </Border>
-                <TextBlock Text="Đã kết nối Zalo" FontSize="12" FontWeight="Bold" Foreground="#065F46" VerticalAlignment="Center"/>
+                <TextBlock Text="Đã kết nối Zalo" FontSize="11.5" FontWeight="Bold" Foreground="#065F46" VerticalAlignment="Center"/>
               </StackPanel>
             </Border>
-            <Button x:Name="HeaderUpdateBtn" Style="{StaticResource SecondaryBtn}" Content="↻ Kiểm tra cập nhật" VerticalAlignment="Center" Padding="13,0" Height="36" Margin="0,0,8,0" ToolTip="Kiểm tra phiên bản mới trên GitHub và cập nhật ứng dụng"/>
-            <Button x:Name="HeaderQuickBtn" Style="{StaticResource SoftAccentBtn}" Content="Mở Codex CLI" VerticalAlignment="Center" MinWidth="146" Padding="14,0" Height="36"/>
+            <Button x:Name="HeaderUpdateBtn" Style="{StaticResource SecondaryBtn}" Content="↻ Kiểm tra cập nhật" VerticalAlignment="Center" Padding="13,0" Height="34" FontSize="12.5" ToolTip="Kiểm tra phiên bản mới trên GitHub và cập nhật ứng dụng"/>
           </StackPanel>
           <StackPanel VerticalAlignment="Center">
-            <TextBlock x:Name="HeaderTitle" Text="Cài đặt nhanh trọn gói A–Z" FontSize="18.5" FontWeight="Bold" Foreground="#0F172A"/>
-            <TextBlock x:Name="HeaderSubtitle" Text="Nhập 4 thông tin cơ bản bên dưới rồi bấm Cài đặt — mọi thứ còn lại hoàn toàn tự động" FontSize="12.5" Foreground="#64748B" Margin="0,2,0,0" TextWrapping="Wrap"/>
+            <TextBlock x:Name="HeaderTitle" Text="Cài đặt nhanh trọn gói A–Z" FontSize="17" FontWeight="Bold" Foreground="#0F172A"/>
+            <TextBlock x:Name="HeaderSubtitle" Text="Chọn gói 1 chạm — gọn trọn trên 1 khung hình, tự động cấu hình từ A–Z" FontSize="12" Foreground="#64748B" Margin="0,1,0,0" TextTrimming="CharacterEllipsis"/>
           </StackPanel>
         </DockPanel>
       </Border>
 
-      <!-- GitHub New Version Notification & Live Self-Update Banner -->
-      <Border x:Name="AppUpdateBanner" DockPanel.Dock="Top" Background="#EFF6FF" BorderBrush="#93C5FD" BorderThickness="0,0,0,1" Padding="24,10" Visibility="Collapsed">
+      <!-- Compact GitHub New Version Notification Banner -->
+      <Border x:Name="AppUpdateBanner" DockPanel.Dock="Top" Background="#EFF6FF" BorderBrush="#93C5FD" BorderThickness="0,0,0,1" Padding="24,8" Visibility="Collapsed">
         <StackPanel>
           <DockPanel>
-            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
-              <Button x:Name="AppUpdateNotesBtn" Style="{StaticResource SecondaryBtn}" Content="Xem trên GitHub" Height="32" Padding="12,0" FontSize="12" Margin="0,0,8,0"/>
-              <Button x:Name="AppUpdateNowBtn" Style="{StaticResource PrimaryBtn}" Content="↑ Cập nhật ngay" Height="32" Padding="14,0" FontSize="12" Margin="0,0,8,0"/>
-              <Button x:Name="AppUpdateDismissBtn" Style="{StaticResource SecondaryBtn}" Content="Để sau" Height="32" Padding="10,0" FontSize="12"/>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+              <Button x:Name="AppUpdateNotesBtn" Style="{StaticResource SecondaryBtn}" Content="Xem GitHub" Height="29" Padding="11,0" FontSize="11.5" Margin="0,0,6,0"/>
+              <Button x:Name="AppUpdateNowBtn" Style="{StaticResource PrimaryBtn}" Content="↑ Cập nhật ngay" Height="29" Padding="13,0" FontSize="11.5" Margin="0,0,6,0"/>
+              <Button x:Name="AppUpdateDismissBtn" Style="{StaticResource SecondaryBtn}" Content="Để sau" Height="29" Padding="10,0" FontSize="11.5"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-              <Border Background="#2563EB" CornerRadius="6" Padding="7,2" Margin="0,0,10,0" VerticalAlignment="Center">
-                <TextBlock x:Name="AppUpdateBadgeText" Text="BẢN MỚI" FontSize="10.5" FontWeight="Bold" Foreground="#FFFFFF"/>
+              <Border Background="#2563EB" CornerRadius="5" Padding="6.5,1.5" Margin="0,0,9,0" VerticalAlignment="Center">
+                <TextBlock x:Name="AppUpdateBadgeText" Text="BẢN MỚI" FontSize="10" FontWeight="Bold" Foreground="#FFFFFF"/>
               </Border>
-              <TextBlock x:Name="AppUpdateTitleText" Text="Đã có phiên bản mới trên GitHub!" FontSize="13" FontWeight="SemiBold" Foreground="#1E3A8A" VerticalAlignment="Center" TextWrapping="Wrap"/>
+              <TextBlock x:Name="AppUpdateTitleText" Text="Đã có phiên bản mới trên GitHub!" FontSize="12.5" FontWeight="SemiBold" Foreground="#1E3A8A" VerticalAlignment="Center" TextWrapping="Wrap"/>
             </StackPanel>
           </DockPanel>
-          <ProgressBar x:Name="AppUpdateProgressBar" Style="{StaticResource ModernProgressBar}" Height="7" Minimum="0" Maximum="100" Value="0" Margin="0,8,0,0" Visibility="Collapsed"/>
+          <ProgressBar x:Name="AppUpdateProgressBar" Style="{StaticResource ModernProgressBar}" Height="6" Minimum="0" Maximum="100" Value="0" Margin="0,6,0,0" Visibility="Collapsed"/>
         </StackPanel>
       </Border>
 
-      <!-- Bottom Sticky Action Bar (Uniform 38px Buttons, Never Clips Hint Text) -->
-      <Border DockPanel.Dock="Bottom" MinHeight="62" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="0,1,0,0" Padding="24,10">
+      <!-- Slim 56px Bottom Sticky Action Bar -->
+      <Border DockPanel.Dock="Bottom" MinHeight="56" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="0,1,0,0" Padding="24,8">
         <DockPanel VerticalAlignment="Center">
           <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
-            <Button x:Name="StopTaskBtn" Style="{StaticResource SoftDangerBtn}" Content="Dừng lại" MinWidth="118" Padding="16,0" Margin="0,0,10,0" Visibility="Collapsed"/>
-            <Button x:Name="CancelBtn" Style="{StaticResource SecondaryBtn}" Content="Thoát" MinWidth="104" Padding="16,0" Margin="0,0,10,0"/>
-            <Button x:Name="PrimaryActionBtn" Style="{StaticResource PrimaryBtn}" Content="Cài đặt trọn gói A–Z" MinWidth="190" Padding="18,0"/>
+            <Button x:Name="StopTaskBtn" Style="{StaticResource SoftDangerBtn}" Content="Dừng lại" MinWidth="112" Height="36" Padding="14,0" Margin="0,0,8,0" Visibility="Collapsed"/>
+            <Button x:Name="CancelBtn" Style="{StaticResource SecondaryBtn}" Content="Thoát" MinWidth="96" Height="36" Padding="14,0" Margin="0,0,8,0"/>
+            <Button x:Name="PrimaryActionBtn" Style="{StaticResource PrimaryBtn}" Content="Cài đặt trọn gói A–Z" MinWidth="184" Height="36" Padding="18,0"/>
           </StackPanel>
-          <TextBlock x:Name="FooterHintText" Text="Mẹo: Dán Bot Token rồi bấm Lấy ID tự động để khỏi cần tìm tay." FontSize="12.5" Foreground="#64748B" VerticalAlignment="Center" TextWrapping="Wrap"/>
+          <TextBlock x:Name="FooterHintText" Text="Mẹo: Dán Bot Token rồi bấm Lấy ID tự động để khỏi cần tìm tay." FontSize="12" Foreground="#64748B" VerticalAlignment="Center" TextWrapping="Wrap"/>
         </DockPanel>
       </Border>
 
       <!-- CENTER CONTENT VIEWS -->
-      <Grid Margin="24,18,18,18">
+      <Grid Margin="22,14,16,14">
 
-        <!-- VIEW A: LIVE 4-CARD DASHBOARD (Manage Mode Overview) -->
+        <!-- VIEW A: LIVE 4-CARD BENTO DASHBOARD (Zero-Scroll Overview) -->
         <ScrollViewer x:Name="ViewDashboard" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0" Visibility="Collapsed">
           <StackPanel>
-            <!-- Hero Summary Banner -->
-            <Border Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="12" Padding="20,15" Margin="0,0,0,14">
+            <!-- Compact Hero Summary Strip -->
+            <Border Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="12" Padding="18,12" Margin="0,0,0,12">
               <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
-                  <Button x:Name="DashOpenWebBtn" Style="{StaticResource SoftAccentBtn}" Content="Mở Dashboard Web" Height="36" Padding="14,0" Margin="0,0,8,0"/>
-                  <Button x:Name="DashRefreshBtn" Style="{StaticResource SecondaryBtn}" Content="Làm mới" Height="36" Padding="14,0"/>
+                  <Button x:Name="DashOpenWebBtn" Style="{StaticResource SoftAccentBtn}" Content="Mở Dashboard Web" Height="34" Padding="13,0" FontSize="12.5" Margin="0,0,8,0"/>
+                  <Button x:Name="DashRefreshBtn" Style="{StaticResource SecondaryBtn}" Content="Làm mới" Height="34" Padding="13,0" FontSize="12.5"/>
                 </StackPanel>
                 <StackPanel VerticalAlignment="Center">
-                  <TextBlock x:Name="DashHeroTitle" Text="Trợ lý OpenClaw đang sẵn sàng trên máy" FontSize="15.5" FontWeight="Bold" Foreground="#1E3A8A" TextWrapping="Wrap"/>
-                  <TextBlock x:Name="DashHeroSub" Text="Model: gpt-6.2-sol · Owner IDs: —" FontSize="12.5" Foreground="#3B82F6" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                  <TextBlock x:Name="DashHeroTitle" Text="Trợ lý OpenClaw đang sẵn sàng trên máy" FontSize="15" FontWeight="Bold" Foreground="#1E3A8A" TextWrapping="Wrap"/>
+                  <TextBlock x:Name="DashHeroSub" Text="Model: gpt-6.2-sol · Owner IDs: —" FontSize="12" Foreground="#3B82F6" Margin="0,2,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
               </DockPanel>
             </Border>
 
-            <!-- 2x2 Symmetrical Status Cards -->
-            <UniformGrid Columns="2" Margin="0,0,0,14">
+            <!-- 2x2 Symmetrical Bento Status Cards -->
+            <UniformGrid Columns="2" Margin="0,0,0,12">
               <!-- Card 1: Gateway -->
-              <Border Style="{StaticResource CardBorder}" Margin="0,0,7,14">
+              <Border Style="{StaticResource CardBorder}" Padding="18,14" Margin="0,0,6,12">
                 <DockPanel>
-                  <Button x:Name="DashRestartBtn" DockPanel.Dock="Bottom" Style="{StaticResource SecondaryBtn}" Content="Kiểm tra &amp; Khởi động lại" Height="36" HorizontalAlignment="Stretch" Margin="0,14,0,0"/>
+                  <Button x:Name="DashRestartBtn" DockPanel.Dock="Bottom" Style="{StaticResource SecondaryBtn}" Content="Kiểm tra &amp; Khởi động lại" Height="34" FontSize="12.5" HorizontalAlignment="Stretch" Margin="0,12,0,0"/>
                   <StackPanel>
-                    <Grid Margin="0,0,0,8">
+                    <Grid Margin="0,0,0,6">
                       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                       <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
-                        <Ellipse x:Name="CardGwDot" Width="9" Height="9" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBlock Text="OpenClaw Gateway" FontSize="14" FontWeight="Bold"/>
+                        <Ellipse x:Name="CardGwDot" Width="8.5" Height="8.5" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="OpenClaw Gateway" FontSize="13.5" FontWeight="Bold"/>
                       </StackPanel>
-                      <Border x:Name="CardGwBadge" Grid.Column="1" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="9,2" VerticalAlignment="Center">
-                        <TextBlock x:Name="CardGwBadgeText" Text="✓ Đang chạy" FontSize="11.5" FontWeight="Bold" Foreground="#065F46"/>
+                      <Border x:Name="CardGwBadge" Grid.Column="1" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="8.5,2" VerticalAlignment="Center">
+                        <TextBlock x:Name="CardGwBadgeText" Text="✓ Đang chạy" FontSize="11" FontWeight="Bold" Foreground="#065F46"/>
                       </Border>
                     </Grid>
-                    <TextBlock x:Name="CardGwStatus" Text="Đang kiểm tra..." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="CardGwStatus" Text="Đang kiểm tra..." FontSize="12" Foreground="#475569" TextWrapping="Wrap"/>
                   </StackPanel>
                 </DockPanel>
               </Border>
 
               <!-- Card 2: Telegram -->
-              <Border Style="{StaticResource CardBorder}" Margin="7,0,0,14">
+              <Border Style="{StaticResource CardBorder}" Padding="18,14" Margin="6,0,0,12">
                 <DockPanel>
-                  <Button x:Name="DashEditConfigBtn" DockPanel.Dock="Bottom" Style="{StaticResource SoftAccentBtn}" Content="Đổi Owner ID / Bot Token" Height="36" HorizontalAlignment="Stretch" Margin="0,14,0,0"/>
+                  <Button x:Name="DashEditConfigBtn" DockPanel.Dock="Bottom" Style="{StaticResource SoftAccentBtn}" Content="Đổi Owner ID / Bot Token" Height="34" FontSize="12.5" HorizontalAlignment="Stretch" Margin="0,12,0,0"/>
                   <StackPanel>
-                    <Grid Margin="0,0,0,8">
+                    <Grid Margin="0,0,0,6">
                       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                       <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
-                        <Ellipse x:Name="CardTgDot" Width="9" Height="9" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBlock Text="Kết nối Telegram Bot" FontSize="14" FontWeight="Bold"/>
+                        <Ellipse x:Name="CardTgDot" Width="8.5" Height="8.5" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="Kết nối Telegram Bot" FontSize="13.5" FontWeight="Bold"/>
                       </StackPanel>
-                      <Border x:Name="CardTgBadge" Grid.Column="1" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="9,2" VerticalAlignment="Center">
-                        <TextBlock x:Name="CardTgBadgeText" Text="✓ Đã kết nối" FontSize="11.5" FontWeight="Bold" Foreground="#065F46"/>
+                      <Border x:Name="CardTgBadge" Grid.Column="1" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="8.5,2" VerticalAlignment="Center">
+                        <TextBlock x:Name="CardTgBadgeText" Text="✓ Đã kết nối" FontSize="11" FontWeight="Bold" Foreground="#065F46"/>
                       </Border>
                     </Grid>
-                    <TextBlock x:Name="CardTgStatus" Text="Đang kiểm tra..." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="CardTgStatus" Text="Đang kiểm tra..." FontSize="12" Foreground="#475569" TextWrapping="Wrap"/>
                   </StackPanel>
                 </DockPanel>
               </Border>
 
               <!-- Card 3: Zalo -->
-              <Border x:Name="CardZaloBorder" Style="{StaticResource CardBorder}" Margin="0,0,7,0">
+              <Border x:Name="CardZaloBorder" Style="{StaticResource CardBorder}" Padding="18,14" Margin="0,0,6,0">
                 <DockPanel>
-                  <UniformGrid DockPanel.Dock="Bottom" Columns="2" Margin="0,14,0,0">
-                    <Button x:Name="DashZaloQrBtn" Style="{StaticResource SoftAccentBtn}" Content="Quét QR Zalo" Height="36" Padding="8,0" FontSize="12.5" Margin="0,0,4,0"/>
-                    <Button x:Name="DashZaloBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Đồng bộ lại" Height="36" Padding="8,0" FontSize="12.5" Margin="4,0,0,0"/>
+                  <UniformGrid DockPanel.Dock="Bottom" Columns="2" Margin="0,12,0,0">
+                    <Button x:Name="DashZaloQrBtn" Style="{StaticResource SoftAccentBtn}" Content="Quét QR Zalo" Height="34" Padding="8,0" FontSize="12" Margin="0,0,4,0"/>
+                    <Button x:Name="DashZaloBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Đồng bộ lại" Height="34" Padding="8,0" FontSize="12" Margin="4,0,0,0"/>
                   </UniformGrid>
                   <StackPanel>
-                    <Grid Margin="0,0,0,8">
+                    <Grid Margin="0,0,0,6">
                       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                       <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
-                        <Ellipse x:Name="CardZaloDot" Width="9" Height="9" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBlock Text="Zalo cá nhân (/zaloqr)" FontSize="14" FontWeight="Bold"/>
+                        <Ellipse x:Name="CardZaloDot" Width="8.5" Height="8.5" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="Zalo cá nhân (/zaloqr)" FontSize="13.5" FontWeight="Bold"/>
                       </StackPanel>
-                      <Border x:Name="CardZaloBadge" Grid.Column="1" Background="#ECFDF5" BorderBrush="#6EE7B7" BorderThickness="1" CornerRadius="11" Padding="9,2" VerticalAlignment="Center">
+                      <Border x:Name="CardZaloBadge" Grid.Column="1" Background="#ECFDF5" BorderBrush="#6EE7B7" BorderThickness="1" CornerRadius="10" Padding="8.5,2" VerticalAlignment="Center">
                         <StackPanel Orientation="Horizontal">
-                          <Border x:Name="CardZaloBadgeIcon" Width="14" Height="14" CornerRadius="7" Background="#10B981" VerticalAlignment="Center" Margin="0,0,5,0">
-                            <Path Data="M 3,7.2 L 5.8,9.8 L 11,4.4" Stroke="#FFFFFF" StrokeThickness="1.9" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
+                          <Border x:Name="CardZaloBadgeIcon" Width="13" Height="13" CornerRadius="6.5" Background="#10B981" VerticalAlignment="Center" Margin="0,0,5,0">
+                            <Path Data="M 2.8,6.8 L 5.4,9.2 L 10.2,4" Stroke="#FFFFFF" StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round"/>
                           </Border>
-                          <TextBlock x:Name="CardZaloBadgeText" Text="Đã kết nối" FontSize="11.5" FontWeight="Bold" Foreground="#065F46" VerticalAlignment="Center"/>
+                          <TextBlock x:Name="CardZaloBadgeText" Text="Đã kết nối" FontSize="11" FontWeight="Bold" Foreground="#065F46" VerticalAlignment="Center"/>
                         </StackPanel>
                       </Border>
                     </Grid>
-                    <TextBlock x:Name="CardZaloStatus" Text="Đang kiểm tra..." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="CardZaloStatus" Text="Đang kiểm tra..." FontSize="12" Foreground="#475569" TextWrapping="Wrap"/>
                   </StackPanel>
                 </DockPanel>
               </Border>
 
               <!-- Card 4: Antigravity & Codex -->
-              <Border Style="{StaticResource CardBorder}" Margin="7,0,0,0">
+              <Border Style="{StaticResource CardBorder}" Padding="18,14" Margin="6,0,0,0">
                 <DockPanel>
-                  <UniformGrid DockPanel.Dock="Bottom" Columns="2" Margin="0,14,0,0">
-                    <Button x:Name="DashCodexRepairBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Sửa Antigravity" Height="36" Padding="8,0" FontSize="12.5" Margin="0,0,4,0"/>
-                    <Button x:Name="DashOpenCodexBtn" Style="{StaticResource SoftAccentBtn}" Content="Dùng Codex CLI" Height="36" Padding="8,0" FontSize="12.5" Margin="4,0,0,0"/>
+                  <UniformGrid DockPanel.Dock="Bottom" Columns="2" Margin="0,12,0,0">
+                    <Button x:Name="DashCodexRepairBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Sửa Antigravity" Height="34" Padding="8,0" FontSize="12" Margin="0,0,4,0"/>
+                    <Button x:Name="DashOpenCodexBtn" Style="{StaticResource SoftAccentBtn}" Content="Dùng Codex CLI" Height="34" Padding="8,0" FontSize="12" Margin="4,0,0,0"/>
                   </UniformGrid>
                   <StackPanel>
-                    <Grid Margin="0,0,0,8">
+                    <Grid Margin="0,0,0,6">
                       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                       <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
-                        <Ellipse x:Name="CardCodexDot" Width="9" Height="9" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBlock Text="Antigravity &amp; Codex CLI" FontSize="14" FontWeight="Bold"/>
+                        <Ellipse x:Name="CardCodexDot" Width="8.5" Height="8.5" Fill="#059669" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBlock Text="Antigravity &amp; Codex CLI" FontSize="13.5" FontWeight="Bold"/>
                       </StackPanel>
-                      <Border x:Name="CardCodexBadge" Grid.Column="1" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="9,2" VerticalAlignment="Center">
-                        <TextBlock x:Name="CardCodexBadgeText" Text="✓ Sẵn sàng" FontSize="11.5" FontWeight="Bold" Foreground="#065F46"/>
+                      <Border x:Name="CardCodexBadge" Grid.Column="1" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="8.5,2" VerticalAlignment="Center">
+                        <TextBlock x:Name="CardCodexBadgeText" Text="✓ Sẵn sàng" FontSize="11" FontWeight="Bold" Foreground="#065F46"/>
                       </Border>
                     </Grid>
-                    <TextBlock x:Name="CardCodexStatus" Text="Đang kiểm tra..." FontSize="12.5" Foreground="#475569" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="CardCodexStatus" Text="Đang kiểm tra..." FontSize="12" Foreground="#475569" TextWrapping="Wrap"/>
                   </StackPanel>
                 </DockPanel>
               </Border>
             </UniformGrid>
 
-            <!-- Quick Maintenance Strip -->
-            <Border Style="{StaticResource CardBorder}">
+            <!-- Single Clean Quick-Maintenance Strip (Redundant Reset Card Moved to Hệ thống & Hỗ trợ) -->
+            <Border Style="{StaticResource CardBorder}" Padding="18,13">
               <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                  <Button x:Name="DashAutoHealBtn" Style="{StaticResource PrimaryBtn}" Content="Tự sửa lỗi bằng Codex" Margin="0,0,8,0"/>
-                  <Button x:Name="DashExportBtn" Style="{StaticResource SecondaryBtn}" Content="Xuất báo cáo hỗ trợ"/>
+                  <Button x:Name="DashAutoHealBtn" Style="{StaticResource PrimaryBtn}" Content="✨ Tự sửa lỗi bằng Codex" Height="35" Padding="15,0" FontSize="12.5" Margin="0,0,8,0"/>
+                  <Button x:Name="DashExportBtn" Style="{StaticResource SecondaryBtn}" Content="Xuất báo cáo hỗ trợ" Height="35" Padding="13,0" FontSize="12.5"/>
                 </StackPanel>
                 <StackPanel VerticalAlignment="Center" Margin="0,0,14,0">
-                  <TextBlock Text="Sửa lỗi tự động &amp; Hỗ trợ nhanh" FontSize="14.5" FontWeight="Bold"/>
-                  <TextBlock Text="Trợ lý gặp trục trặc? Để Codex CLI tự kiểm tra log và khắc phục ngay, không mất dữ liệu cũ." FontSize="12.5" Foreground="#64748B" Margin="0,3,0,0" TextWrapping="Wrap"/>
-                </StackPanel>
-              </DockPanel>
-            </Border>
-
-            <!-- Factory Reset Strip -->
-            <Border Style="{StaticResource CardBorder}" Margin="0,14,0,0">
-              <DockPanel>
-                <Button x:Name="DashResetAllBtn" DockPanel.Dock="Right" Style="{StaticResource SoftDangerBtn}" Content="Reset cài lại từ đầu" MinWidth="176" VerticalAlignment="Center"/>
-                <StackPanel VerticalAlignment="Center" Margin="0,0,14,0">
-                  <TextBlock Text="Reset cài lại từ đầu (Như người mới chưa từng cài)" FontSize="14.5" FontWeight="Bold" Foreground="#991B1B"/>
-                  <TextBlock Text="Xóa sạch toàn bộ OpenClaw, Zalo, Codex CLI, Antigravity riêng, lối tắt và bản quyền để cài mới từ con số 0." FontSize="12.5" Foreground="#64748B" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                  <TextBlock Text="Chẩn đoán &amp; Tự động sửa lỗi thông minh" FontSize="14" FontWeight="Bold"/>
+                  <TextBlock Text="Trợ lý gặp trục trặc? Để Codex CLI đọc nhật ký và khắc phục tự động, giữ nguyên 100% dữ liệu cũ." FontSize="12" Foreground="#64748B" Margin="0,2,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
               </DockPanel>
             </Border>
           </StackPanel>
         </ScrollViewer>
 
-        <!-- VIEW B: SETUP & QUICK-EDIT FORM -->
+        <!-- VIEW B: COMPACT ZERO-SCROLL SETUP & QUICK-EDIT FORM -->
         <ScrollViewer x:Name="ViewSetupForm" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0" Visibility="Visible">
           <StackPanel>
             <!-- Mode Notice Banner (Visible in Manage Mode) -->
-            <Border x:Name="ManageEditBanner" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="16,11" Margin="0,0,0,14" Visibility="Collapsed">
-              <TextBlock Text="✓ Chế độ Chỉnh sửa nhanh: Chỉ cần sửa ô bạn muốn đổi rồi bấm Lưu thay đổi (~3 giây). Bot Token &amp; API Key có thể để trống để giữ nguyên mã cũ." FontSize="12.5" FontWeight="SemiBold" Foreground="#065F46" TextWrapping="Wrap"/>
+            <Border x:Name="ManageEditBanner" Background="#ECFDF5" BorderBrush="#A7F3D0" BorderThickness="1" CornerRadius="10" Padding="15,9" Margin="0,0,0,12" Visibility="Collapsed">
+              <TextBlock Text="✓ Chế độ Chỉnh sửa nhanh: Chỉ cần sửa ô bạn muốn đổi rồi bấm Lưu thay đổi (~3 giây). Bot Token &amp; API Key có thể để trống để giữ nguyên mã cũ." FontSize="12" FontWeight="SemiBold" Foreground="#065F46" TextWrapping="Wrap"/>
             </Border>
 
             <!-- Saved Draft Notice Banner -->
-            <Border x:Name="SavedDraftBanner" Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="10" Padding="16,10" Margin="0,0,0,14" Visibility="Collapsed">
+            <Border x:Name="SavedDraftBanner" Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="10" Padding="15,8" Margin="0,0,0,12" Visibility="Collapsed">
               <DockPanel>
-                <Button x:Name="ClearSavedDraftBtn" DockPanel.Dock="Right" Style="{StaticResource SecondaryBtn}" Content="Xóa thông số đã lưu" Height="30" Padding="12,0" FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"/>
-                <TextBlock x:Name="SavedDraftBannerText" Text="✓ Đã tự động điền lại các thông số bạn đã nhập ở lần trước (lưu mã hóa an toàn trên máy)." FontSize="12.5" FontWeight="SemiBold" Foreground="#1E40AF" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                <Button x:Name="ClearSavedDraftBtn" DockPanel.Dock="Right" Style="{StaticResource SecondaryBtn}" Content="Xóa thông số đã lưu" Height="28" Padding="11,0" FontSize="11.5" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                <TextBlock x:Name="SavedDraftBannerText" Text="✓ Đã tự động điền lại các thông số bạn đã nhập ở lần trước (lưu mã hóa an toàn trên máy)." FontSize="12" FontWeight="SemiBold" Foreground="#1E40AF" TextWrapping="Wrap" VerticalAlignment="Center"/>
               </DockPanel>
             </Border>
 
-            <!-- Card 0: 1-Click Combo Selector (Fresh Setup Mode Only) -->
-            <Border x:Name="SetupComboCard" Style="{StaticResource CardBorder}" Margin="0,0,0,14">
+            <!-- Step 1: Compact 1-Click Combo Selector -->
+            <Border x:Name="SetupComboCard" Style="{StaticResource CardBorder}" Padding="18,13" Margin="0,0,0,12">
               <StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                  <Border Width="24" Height="24" CornerRadius="6" Background="#EFF6FF" Margin="0,0,9,0">
-                    <TextBlock Text="1" FontSize="12.5" FontWeight="Bold" Foreground="#2563EB" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                  </Border>
-                  <TextBlock Text="Chọn gói cài đặt 1 chạm" FontSize="15" FontWeight="Bold" VerticalAlignment="Center"/>
-                </StackPanel>
+                <DockPanel Margin="0,0,0,10">
+                  <TextBlock x:Name="SetupLicenseAutoNote" DockPanel.Dock="Right" Text="✓ Tự động dùng khóa codex.anhlaptrinh.vn đã kích hoạt" FontSize="11.5" FontWeight="SemiBold" Foreground="#059669" VerticalAlignment="Center"/>
+                  <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Width="22" Height="22" CornerRadius="6" Background="#EFF6FF" Margin="0,0,8,0">
+                      <TextBlock Text="1" FontSize="12" FontWeight="Bold" Foreground="#2563EB" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <TextBlock Text="Chọn gói cài đặt 1 chạm" FontSize="14.5" FontWeight="Bold" VerticalAlignment="Center"/>
+                  </StackPanel>
+                </DockPanel>
                 <UniformGrid Columns="2">
-                  <Border x:Name="ComboFullOption" Background="#EFF6FF" BorderBrush="#2563EB" BorderThickness="1.5" CornerRadius="10" Padding="14,12" Margin="0,0,6,0" Cursor="Hand">
+                  <Border x:Name="ComboFullOption" Background="#EFF6FF" BorderBrush="#2563EB" BorderThickness="1.5" CornerRadius="10" Padding="13,10" Margin="0,0,6,0" Cursor="Hand">
                     <StackPanel>
                       <StackPanel Orientation="Horizontal">
-                        <TextBlock x:Name="ComboFullDot" Text="● " FontSize="13.5" FontWeight="Bold" Foreground="#2563EB"/>
-                        <TextBlock Text="Trọn gói Em Trợ Lý (4 món)" FontSize="13.5" FontWeight="Bold" Foreground="#1E40AF"/>
-                        <Border Background="#DBEAFE" CornerRadius="6" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center">
-                          <TextBlock Text="KHUYÊN DÙNG" FontSize="9.5" FontWeight="Bold" Foreground="#1D4ED8"/>
+                        <TextBlock x:Name="ComboFullDot" Text="● " FontSize="13" FontWeight="Bold" Foreground="#2563EB"/>
+                        <TextBlock Text="Trọn gói Em Trợ Lý (4 món)" FontSize="13" FontWeight="Bold" Foreground="#1E40AF"/>
+                        <Border Background="#DBEAFE" CornerRadius="5" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center">
+                          <TextBlock Text="KHUYÊN DÙNG" FontSize="9" FontWeight="Bold" Foreground="#1D4ED8"/>
                         </Border>
                       </StackPanel>
-                      <TextBlock Text="Codex CLI · Antigravity IDE · Extension · OpenClaw &amp; Zalo" FontSize="12" Foreground="#3B82F6" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                      <TextBlock Text="Codex CLI · Antigravity IDE · Extension · OpenClaw &amp; Zalo" FontSize="11.5" Foreground="#3B82F6" Margin="0,3,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                   </Border>
-                  <Border x:Name="ComboDevOption" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="14,12" Margin="6,0,0,0" Cursor="Hand">
+                  <Border x:Name="ComboDevOption" Background="#FFFFFF" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="13,10" Margin="6,0,0,0" Cursor="Hand">
                     <StackPanel>
                       <StackPanel Orientation="Horizontal">
-                        <TextBlock x:Name="ComboDevDot" Text="○ " FontSize="13.5" FontWeight="Bold" Foreground="#64748B"/>
-                        <TextBlock Text="Chỉ bộ Lập trình AI (3 món)" FontSize="13.5" FontWeight="Bold" Foreground="#0F172A"/>
+                        <TextBlock x:Name="ComboDevDot" Text="○ " FontSize="13" FontWeight="Bold" Foreground="#64748B"/>
+                        <TextBlock Text="Chỉ bộ Lập trình AI (3 món)" FontSize="13" FontWeight="Bold" Foreground="#0F172A"/>
                       </StackPanel>
-                      <TextBlock Text="Codex CLI · Antigravity IDE · Extension (Không cần Telegram)" FontSize="12" Foreground="#64748B" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                      <TextBlock Text="Codex CLI · Antigravity IDE · Extension (Không cần Telegram)" FontSize="11.5" Foreground="#64748B" Margin="0,3,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                   </Border>
                 </UniformGrid>
-                <Border x:Name="ComboDevReadyBanner" Background="#F0FDF4" BorderBrush="#BBF7D0" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,12,0,0" Visibility="Collapsed">
-                  <TextBlock Text="✓ Dùng thẳng khóa bản quyền codex.anhlaptrinh.vn đã kích hoạt — không cần cấu hình Telegram. Bấm &quot;Cài ngay 3 món (1 chạm)&quot; ở góc dưới phải để bắt đầu ngay!" FontSize="12.5" FontWeight="SemiBold" Foreground="#166534" TextWrapping="Wrap"/>
+                <Border x:Name="ComboDevReadyBanner" Background="#F0FDF4" BorderBrush="#BBF7D0" BorderThickness="1" CornerRadius="8" Padding="14,10" Margin="0,10,0,0" Visibility="Collapsed">
+                  <TextBlock Text="✓ Dùng thẳng khóa bản quyền codex.anhlaptrinh.vn đã kích hoạt — không cần cấu hình Telegram. Bấm &quot;Cài ngay 3 món (1 chạm)&quot; ở góc dưới phải để bắt đầu ngay!" FontSize="12" FontWeight="SemiBold" Foreground="#166534" TextWrapping="Wrap"/>
                 </Border>
               </StackPanel>
             </Border>
 
-            <!-- Card 1: Simplified Connection Box (1 Main Input + Collapsible Technical Fields) -->
-            <Border x:Name="SetupTelegramCard" Style="{StaticResource CardBorder}" Margin="0,0,0,14">
+            <!-- Step 2: Streamlined Connection + 2-Column Options + SINGLE Unified Advanced Drawer -->
+            <Border x:Name="SetupTelegramCard" Style="{StaticResource CardBorder}" Padding="18,14">
               <StackPanel>
-                <DockPanel Margin="0,0,0,12">
-                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock x:Name="SetupLicenseAutoNote" Text="✓ Đã tự dùng khóa bản quyền" FontSize="12" FontWeight="SemiBold" Foreground="#059669" VerticalAlignment="Center" Margin="0,0,14,0"/>
-                    <CheckBox x:Name="ShowSecretCheck" Content="Hiện mã" VerticalAlignment="Center" FontSize="12" Foreground="#475569"/>
-                  </StackPanel>
+                <DockPanel Margin="0,0,0,10">
+                  <CheckBox x:Name="ShowSecretCheck" DockPanel.Dock="Right" Content="Hiện mã" VerticalAlignment="Center" FontSize="12" Foreground="#475569"/>
                   <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <Border Width="24" Height="24" CornerRadius="6" Background="#EFF6FF" Margin="0,0,9,0">
-                      <TextBlock Text="2" FontSize="12.5" FontWeight="Bold" Foreground="#2563EB" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <Border Width="22" Height="22" CornerRadius="6" Background="#EFF6FF" Margin="0,0,8,0">
+                      <TextBlock Text="2" FontSize="12" FontWeight="Bold" Foreground="#2563EB" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
-                    <TextBlock Text="Kết nối Telegram &amp; Zalo" FontSize="15" FontWeight="Bold" VerticalAlignment="Center"/>
+                    <TextBlock Text="Kết nối Telegram Bot &amp; Quyền hoạt động" FontSize="14.5" FontWeight="Bold" VerticalAlignment="Center"/>
                   </StackPanel>
                 </DockPanel>
 
-                <!-- Primary Input: Bot Token + Auto-fetch IDs -->
-                <TextBlock x:Name="TokenFieldLabel" Style="{StaticResource FieldLabel}" Text="Telegram Bot Token (tạo qua @BotFather)"/>
+                <!-- Primary Input: Bot Token + Auto-fetch IDs + Test Connection -->
+                <TextBlock x:Name="TokenFieldLabel" Style="{StaticResource FieldLabel}" Text="Telegram Bot Token (tạo qua @BotFather — dán mã rồi bấm Lấy ID tự động)" Margin="0,0,0,5"/>
                 <Grid Margin="0,0,0,10">
                   <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="12"/>
-                    <ColumnDefinition Width="148"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="8"/>
+                    <ColumnDefinition Width="Auto"/>
                   </Grid.ColumnDefinitions>
                   <Grid Grid.Column="0">
                     <PasswordBox x:Name="TokenPwdBox" Style="{StaticResource ModernPassword}"/>
                     <TextBox x:Name="TokenPlainBox" Style="{StaticResource ModernInput}" Visibility="Collapsed"/>
                   </Grid>
-                  <Button x:Name="AutoFetchIdBtn" Grid.Column="2" Style="{StaticResource SoftAccentBtn}" Content="Lấy ID tự động"/>
+                  <Button x:Name="AutoFetchIdBtn" Grid.Column="2" Style="{StaticResource SoftAccentBtn}" Content="Lấy ID tự động" Height="36" Padding="14,0"/>
+                  <Button x:Name="TestConnBtn" Grid.Column="4" Style="{StaticResource SecondaryBtn}" Content="Kiểm tra kết nối" Height="36" Padding="13,0"/>
                 </Grid>
 
                 <!-- Live Verification Feedback Pill -->
-                <Border x:Name="LiveCheckBanner" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="12,9" Margin="0,0,0,10" Visibility="Collapsed">
-                  <TextBlock x:Name="LiveCheckText" Text="" FontSize="12.5" Foreground="#334155" TextWrapping="Wrap"/>
+                <Border x:Name="LiveCheckBanner" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,0,0,10" Visibility="Collapsed">
+                  <TextBlock x:Name="LiveCheckText" Text="" FontSize="12" Foreground="#334155" TextWrapping="Wrap"/>
                 </Border>
 
-                <!-- Zalo Quick Option right below Bot Token -->
-                <Border x:Name="SetupZaloBox" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="13,9" Margin="0,0,0,10">
-                  <CheckBox x:Name="ZaloCheck" Content="Cài đặt kèm Zalo cá nhân &amp; lệnh quét mã /zaloqr (bỏ tích nếu không cần Zalo)" FontSize="13" FontWeight="SemiBold" Foreground="#0F172A" VerticalAlignment="Center"/>
-                </Border>
+                <!-- Compact 2-Column Side-by-Side Options (Zalo + Full Exec Consent) -->
+                <UniformGrid x:Name="SetupQuickChecksGrid" Columns="2" Margin="0,0,0,10">
+                  <Border x:Name="SetupZaloBox" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="9" Padding="12,9" Margin="0,0,6,0">
+                    <StackPanel>
+                      <CheckBox x:Name="ZaloCheck" Content="Kèm Zalo cá nhân (/zaloqr)" FontSize="12.5" FontWeight="Bold" Foreground="#0F172A"/>
+                      <TextBlock Text="Tự cài plugin quét mã QR Zalo gửi qua Telegram" FontSize="11.5" Foreground="#64748B" Margin="22,2,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                  </Border>
+                  <Border x:Name="InstallOptionsCard" Background="#FFFBEB" BorderBrush="#FDE68A" BorderThickness="1" CornerRadius="9" Padding="12,9" Margin="6,0,0,0">
+                    <StackPanel>
+                      <CheckBox x:Name="FullAccessCheck" Content="Đồng ý cấp quyền Full Exec" FontSize="12.5" FontWeight="Bold" Foreground="#92400E"/>
+                      <TextBlock Text="Cho phép Owner &amp; nhóm đã chọn đọc/sửa tệp, chạy lệnh" FontSize="11.5" Foreground="#B45309" Margin="22,2,0,0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                  </Border>
+                </UniformGrid>
 
-                <!-- Collapsible Technical Fields (Hidden by default on fresh setup; auto-expanded in Edit Mode!) -->
-                <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="12,8">
-                  <Expander x:Name="SetupExtraExpander" Header="Tùy chỉnh thông số (Owner ID, Group ID thủ công, API Key, Model AI, tên trợ lý)" FontSize="12.5" FontWeight="SemiBold" Foreground="#475569" IsExpanded="False">
-                    <StackPanel Margin="0,12,0,4">
-                      <TextBlock x:Name="ApiKeyFieldLabel" Style="{StaticResource FieldLabel}" Text="Provider API Key (dùng chung cho OpenClaw &amp; Codex CLI)"/>
-                      <Grid Margin="0,0,0,12">
+                <!-- SINGLE Unified Collapsible Advanced Drawer (Merged from 2 Separate Expanders!) -->
+                <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="9" Padding="12,7">
+                  <Expander x:Name="SetupExtraExpander" Header="Tùy chỉnh nâng cao (Owner/Group thủ công, Model AI, Tên trợ lý, Cổng Gateway &amp; Phong cách)" FontSize="12.5" FontWeight="SemiBold" Foreground="#475569" IsExpanded="False">
+                    <StackPanel Margin="0,10,0,2">
+                      <Grid Margin="0,0,0,10">
                         <Grid.ColumnDefinitions>
                           <ColumnDefinition Width="*"/>
                           <ColumnDefinition Width="12"/>
-                          <ColumnDefinition Width="148"/>
-                        </Grid.ColumnDefinitions>
-                        <Grid Grid.Column="0">
-                          <PasswordBox x:Name="ApiKeyPwdBox" Style="{StaticResource ModernPassword}"/>
-                          <TextBox x:Name="ApiKeyPlainBox" Style="{StaticResource ModernInput}" Visibility="Collapsed"/>
-                        </Grid>
-                        <Button x:Name="TestConnBtn" Grid.Column="2" Style="{StaticResource SecondaryBtn}" Content="Kiểm tra kết nối"/>
-                      </Grid>
-
-                      <Grid Margin="0,0,0,12">
-                        <Grid.ColumnDefinitions>
-                          <ColumnDefinition Width="*"/>
-                          <ColumnDefinition Width="16"/>
                           <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0">
-                          <TextBlock Style="{StaticResource FieldLabel}" Text="Telegram Owner IDs (số dương, cách bởi dấu phẩy)"/>
-                          <TextBox x:Name="OwnersBox" Style="{StaticResource ModernInput}"/>
+                          <TextBlock Style="{StaticResource FieldLabel}" Text="Telegram Owner IDs (số dương, cách bởi dấu phẩy)" Margin="0,0,0,4"/>
+                          <TextBox x:Name="OwnersBox" Style="{StaticResource ModernInput}" Height="34"/>
                         </StackPanel>
                         <StackPanel Grid.Column="2">
-                          <TextBlock Style="{StaticResource FieldLabel}" Text="Telegram Group ID (số âm, ví dụ: -1001234567890)"/>
-                          <TextBox x:Name="GroupBox" Style="{StaticResource ModernInput}"/>
+                          <TextBlock Style="{StaticResource FieldLabel}" Text="Telegram Group ID (số âm, ví dụ: -1001234567890)" Margin="0,0,0,4"/>
+                          <TextBox x:Name="GroupBox" Style="{StaticResource ModernInput}" Height="34"/>
+                        </StackPanel>
+                      </Grid>
+
+                      <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="1.2*"/>
+                          <ColumnDefinition Width="12"/>
+                          <ColumnDefinition Width="1.3*"/>
+                          <ColumnDefinition Width="12"/>
+                          <ColumnDefinition Width="0.9*"/>
+                          <ColumnDefinition Width="12"/>
+                          <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                          <TextBlock Style="{StaticResource FieldLabel}" Text="Mô hình AI (Model)" Margin="0,0,0,4"/>
+                          <ComboBox x:Name="ModelBox" Style="{StaticResource ModernComboBox}" Height="34"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                          <TextBlock Style="{StaticResource FieldLabel}" Text="Tên trợ lý hiển thị" Margin="0,0,0,4"/>
+                          <TextBox x:Name="AssistantBox" Style="{StaticResource ModernInput}" Height="34" Text="Trợ lý OpenClaw"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="4">
+                          <TextBlock Style="{StaticResource FieldLabel}" Text="Cổng Gateway" Margin="0,0,0,4"/>
+                          <TextBox x:Name="PortBox" Style="{StaticResource ModernInput}" Height="34" Text="0"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="6">
+                          <TextBlock Style="{StaticResource FieldLabel}" Text="Owner nhận QR Zalo" Margin="0,0,0,4"/>
+                          <TextBox x:Name="QrOwnerBox" Style="{StaticResource ModernInput}" Height="34"/>
+                        </StackPanel>
+                      </Grid>
+
+                      <Grid Margin="0,0,0,10">
+                        <Grid.ColumnDefinitions>
+                          <ColumnDefinition Width="*"/>
+                          <ColumnDefinition Width="12"/>
+                          <ColumnDefinition Width="*"/>
+                          <ColumnDefinition Width="12"/>
+                          <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0">
+                          <TextBlock Style="{StaticResource FieldLabel}" Text="Đối tượng phục vụ (tùy chọn)" Margin="0,0,0,4"/>
+                          <TextBox x:Name="AudienceBox" Style="{StaticResource ModernInput}" Height="34"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="2">
+                          <TextBlock Style="{StaticResource FieldLabel}" Text="Cách xưng hô (tùy chọn)" Margin="0,0,0,4"/>
+                          <TextBox x:Name="AddressingBox" Style="{StaticResource ModernInput}" Height="34"/>
+                        </StackPanel>
+                        <StackPanel Grid.Column="4">
+                          <TextBlock Style="{StaticResource FieldLabel}" Text="Phong cách trả lời (tùy chọn)" Margin="0,0,0,4"/>
+                          <TextBox x:Name="StyleBox" Style="{StaticResource ModernInput}" Height="34"/>
                         </StackPanel>
                       </Grid>
 
                       <Grid>
                         <Grid.ColumnDefinitions>
-                          <ColumnDefinition Width="*"/>
-                          <ColumnDefinition Width="16"/>
+                          <ColumnDefinition Width="1.4*"/>
+                          <ColumnDefinition Width="12"/>
                           <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0">
-                          <TextBlock Style="{StaticResource FieldLabel}" Text="Mô hình AI mặc định (Model)"/>
-                          <ComboBox x:Name="ModelBox" Style="{StaticResource ModernComboBox}"/>
+                          <TextBlock x:Name="ApiKeyFieldLabel" Style="{StaticResource FieldLabel}" Text="Provider API Key (dùng chung OpenClaw &amp; Codex CLI)" Margin="0,0,0,4"/>
+                          <Grid>
+                            <PasswordBox x:Name="ApiKeyPwdBox" Style="{StaticResource ModernPassword}" Height="34"/>
+                            <TextBox x:Name="ApiKeyPlainBox" Style="{StaticResource ModernInput}" Height="34" Visibility="Collapsed"/>
+                          </Grid>
                         </StackPanel>
                         <StackPanel Grid.Column="2">
-                          <TextBlock Style="{StaticResource FieldLabel}" Text="Tên trợ lý hiển thị"/>
-                          <TextBox x:Name="AssistantBox" Style="{StaticResource ModernInput}" Text="Trợ lý OpenClaw"/>
+                          <TextBlock Style="{StaticResource FieldLabel}" Text="Máy chủ AI chính thức (HTTPS)" Margin="0,0,0,4"/>
+                          <TextBox x:Name="BaseUrlBox" Style="{StaticResource ModernInput}" Height="34" Text="https://codex.anhlaptrinh.vn/v1"/>
                         </StackPanel>
                       </Grid>
+
+                      <CheckBox x:Name="ExistingEditorCheck" Content="Bỏ qua cài đặt Antigravity IDE (vẫn luôn cài đặt Codex CLI để tự sửa lỗi cài đặt)" FontSize="12" Foreground="#64748B" Margin="0,10,0,0"/>
                     </StackPanel>
                   </Expander>
                 </Border>
               </StackPanel>
-            </Border>
-
-            <!-- Card 2: Consent Card (Clean Single-Block Notice) -->
-            <Border x:Name="InstallOptionsCard" Background="#FFFBEB" BorderBrush="#FDE68A" BorderThickness="1" CornerRadius="12" Padding="16,13" Margin="0,0,0,14">
-              <StackPanel>
-                <CheckBox x:Name="FullAccessCheck" Content="Tôi hiểu và đồng ý cấp quyền Full Exec cho Owner &amp; nhóm Telegram đã chọn" FontSize="13" FontWeight="Bold" Foreground="#92400E"/>
-                <TextBlock Text="Quyền Full Exec cho phép trợ lý đọc, sửa tệp và chạy lệnh trên máy theo yêu cầu. Hệ thống luôn ưu tiên cài Codex CLI trước để tự sửa lỗi nếu có." FontSize="12" Foreground="#B45309" Margin="22,4,0,0" TextWrapping="Wrap"/>
-              </StackPanel>
-            </Border>
-
-            <!-- Card 3: Collapsible Advanced Settings -->
-            <Border Style="{StaticResource CardBorder}">
-              <Expander x:Name="AdvancedExpander" Header="Tùy chỉnh nâng cao (Hồ sơ giao tiếp, cổng Gateway, QR Owner, URL máy chủ)" FontSize="13.5" FontWeight="SemiBold" Foreground="#334155" IsExpanded="False">
-                <StackPanel Margin="0,14,0,0">
-                  <Grid Margin="0,0,0,12">
-                    <Grid.ColumnDefinitions>
-                      <ColumnDefinition Width="2*"/>
-                      <ColumnDefinition Width="14"/>
-                      <ColumnDefinition Width="*"/>
-                      <ColumnDefinition Width="14"/>
-                      <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0">
-                      <TextBlock Style="{StaticResource FieldLabel}" Text="Địa chỉ máy chủ AI (HTTPS)"/>
-                      <TextBox x:Name="BaseUrlBox" Style="{StaticResource ModernInput}" Text="https://codex.anhlaptrinh.vn/v1"/>
-                    </StackPanel>
-                    <StackPanel Grid.Column="2">
-                      <TextBlock Style="{StaticResource FieldLabel}" Text="Cổng Gateway (0 = tự động)"/>
-                      <TextBox x:Name="PortBox" Style="{StaticResource ModernInput}" Text="0"/>
-                    </StackPanel>
-                    <StackPanel Grid.Column="4">
-                      <TextBlock Style="{StaticResource FieldLabel}" Text="Owner ID nhận QR Zalo"/>
-                      <TextBox x:Name="QrOwnerBox" Style="{StaticResource ModernInput}"/>
-                    </StackPanel>
-                  </Grid>
-                  <Grid>
-                    <Grid.ColumnDefinitions>
-                      <ColumnDefinition Width="*"/>
-                      <ColumnDefinition Width="14"/>
-                      <ColumnDefinition Width="*"/>
-                      <ColumnDefinition Width="14"/>
-                      <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0">
-                      <TextBlock Style="{StaticResource FieldLabel}" Text="Đối tượng phục vụ (tùy chọn)"/>
-                      <TextBox x:Name="AudienceBox" Style="{StaticResource ModernInput}"/>
-                    </StackPanel>
-                    <StackPanel Grid.Column="2">
-                      <TextBlock Style="{StaticResource FieldLabel}" Text="Cách xưng hô (tùy chọn)"/>
-                      <TextBox x:Name="AddressingBox" Style="{StaticResource ModernInput}"/>
-                    </StackPanel>
-                    <StackPanel Grid.Column="4">
-                      <TextBlock Style="{StaticResource FieldLabel}" Text="Phong cách trả lời (tùy chọn)"/>
-                      <TextBox x:Name="StyleBox" Style="{StaticResource ModernInput}"/>
-                    </StackPanel>
-                  </Grid>
-                  <CheckBox x:Name="ExistingEditorCheck" Content="Bỏ qua cài đặt Antigravity IDE (vẫn luôn cài đặt Codex CLI để tự sửa lỗi cài đặt)" FontSize="12.5" Foreground="#64748B" Margin="0,12,0,0"/>
-                </StackPanel>
-              </Expander>
             </Border>
           </StackPanel>
         </ScrollViewer>
@@ -1223,142 +1242,126 @@ $xamlText = @'
           </StackPanel>
         </ScrollViewer>
 
-        <!-- VIEW D: CODEX CLI WORKSPACE -->
+        <!-- VIEW D: CODEX CLI WORKSPACE (Compact Command Header + Spacious Output) -->
         <Grid x:Name="ViewCodex" Margin="0,0,6,0" Visibility="Collapsed">
           <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
           </Grid.RowDefinitions>
 
-          <!-- Workspace Bar -->
-          <Border Grid.Row="0" Style="{StaticResource CardBorder}" Margin="0,0,0,14" Padding="18,14">
+          <!-- Unified Compact Command & Workspace Card -->
+          <Border Grid.Row="0" Style="{StaticResource CardBorder}" Margin="0,0,0,12" Padding="16,13">
             <StackPanel>
-              <DockPanel Margin="0,0,0,8">
-                <Border DockPanel.Dock="Right" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="10,2" VerticalAlignment="Center">
-                  <TextBlock x:Name="CodexStateText" Text="Đang kiểm tra Codex CLI..." FontSize="12" FontWeight="SemiBold" Foreground="#059669"/>
-                </Border>
-                <TextBlock Text="Thư mục làm việc của Codex CLI" FontSize="14" FontWeight="Bold" VerticalAlignment="Center"/>
-              </DockPanel>
-              <Grid>
+              <Grid Margin="0,0,0,10">
                 <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto"/>
                   <ColumnDefinition Width="*"/>
                   <ColumnDefinition Width="Auto"/>
                   <ColumnDefinition Width="Auto"/>
                   <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBox x:Name="CodexDirBox" Grid.Column="0" Style="{StaticResource ModernInput}"/>
-                <Button x:Name="CodexBrowseBtn" Grid.Column="1" Style="{StaticResource SecondaryBtn}" Content="Chọn thư mục..." Margin="8,0,0,0"/>
-                <Button x:Name="CodexOpenDirBtn" Grid.Column="2" Style="{StaticResource SecondaryBtn}" Content="Mở" Margin="8,0,0,0" MinWidth="64"/>
-                <Button x:Name="CodexTerminalBtn" Grid.Column="3" Style="{StaticResource SoftAccentBtn}" Content="Mở cửa sổ lệnh" Margin="8,0,0,0"/>
+                <TextBlock Grid.Column="0" Text="Thư mục:" FontSize="12.5" FontWeight="Bold" Foreground="#334155" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBox x:Name="CodexDirBox" Grid.Column="1" Style="{StaticResource ModernInput}" Height="34"/>
+                <Button x:Name="CodexBrowseBtn" Grid.Column="2" Style="{StaticResource SecondaryBtn}" Content="Chọn..." Height="34" Padding="11,0" FontSize="12" Margin="6,0,0,0"/>
+                <Button x:Name="CodexOpenDirBtn" Grid.Column="3" Style="{StaticResource SecondaryBtn}" Content="Mở" Height="34" Padding="11,0" FontSize="12" Margin="6,0,0,0"/>
+                <Button x:Name="CodexTerminalBtn" Grid.Column="4" Style="{StaticResource SoftAccentBtn}" Content="Mở Terminal" Height="34" Padding="11,0" FontSize="12" Margin="6,0,0,0"/>
+                <Border Grid.Column="5" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="9,2" Margin="8,0,0,0" VerticalAlignment="Center">
+                  <TextBlock x:Name="CodexStateText" Text="Đang kiểm tra Codex CLI..." FontSize="11.5" FontWeight="SemiBold" Foreground="#059669"/>
+                </Border>
               </Grid>
-            </StackPanel>
-          </Border>
 
-          <!-- Prompt Input Card -->
-          <Border Grid.Row="1" Style="{StaticResource CardBorder}" Margin="0,0,0,14" Padding="18,14">
-            <StackPanel>
-              <DockPanel Margin="0,0,0,10">
+              <DockPanel Margin="0,0,0,6">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                  <Button x:Name="PresetConfigBtn" Style="{StaticResource SoftAccentBtn}" Content="Kiểm tra cấu hình" Height="30" Padding="11,0" FontSize="12" Margin="0,0,6,0"/>
-                  <Button x:Name="PresetSkillBtn" Style="{StaticResource SoftAccentBtn}" Content="Sửa kỹ năng" Height="30" Padding="11,0" FontSize="12" Margin="0,0,6,0"/>
-                  <Button x:Name="PresetFixBtn" Style="{StaticResource SoftAccentBtn}" Content="Tự tìm &amp; sửa lỗi" Height="30" Padding="11,0" FontSize="12"/>
+                  <Button x:Name="PresetConfigBtn" Style="{StaticResource SoftAccentBtn}" Content="Kiểm tra cấu hình" Height="27" Padding="10,0" FontSize="11.5" Margin="0,0,5,0"/>
+                  <Button x:Name="PresetSkillBtn" Style="{StaticResource SoftAccentBtn}" Content="Sửa kỹ năng" Height="27" Padding="10,0" FontSize="11.5" Margin="0,0,5,0"/>
+                  <Button x:Name="PresetFixBtn" Style="{StaticResource SoftAccentBtn}" Content="Tự tìm &amp; sửa lỗi" Height="27" Padding="10,0" FontSize="11.5"/>
                 </StackPanel>
-                <TextBlock Text="Yêu cầu tiếng Việt cho Codex CLI" FontSize="14" FontWeight="Bold" VerticalAlignment="Center"/>
+                <TextBlock Text="Yêu cầu tiếng Việt cho Codex CLI" FontSize="13" FontWeight="Bold" VerticalAlignment="Center"/>
               </DockPanel>
-              <TextBox x:Name="CodexPromptBox" Style="{StaticResource ModernMultilineInput}" Height="82" TextWrapping="Wrap"/>
-              <DockPanel Margin="0,12,0,0">
+
+              <TextBox x:Name="CodexPromptBox" Style="{StaticResource ModernMultilineInput}" Height="66" TextWrapping="Wrap"/>
+
+              <DockPanel Margin="0,10,0,0">
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                  <Button x:Name="CodexClearBtn" Style="{StaticResource SecondaryBtn}" Content="Xóa kết quả" Margin="0,0,8,0"/>
-                  <Button x:Name="CodexStopBtn" Style="{StaticResource SoftDangerBtn}" Content="Dừng" MinWidth="80" Margin="0,0,8,0" IsEnabled="False"/>
-                  <Button x:Name="CodexRunBtn" Style="{StaticResource PrimaryBtn}" Content="Thực hiện bằng Codex" MinWidth="172"/>
+                  <Button x:Name="CodexClearBtn" Style="{StaticResource SecondaryBtn}" Content="Xóa kết quả" Height="34" Padding="12,0" FontSize="12" Margin="0,0,6,0"/>
+                  <Button x:Name="CodexStopBtn" Style="{StaticResource SoftDangerBtn}" Content="Dừng" MinWidth="74" Height="34" Padding="12,0" FontSize="12" Margin="0,0,6,0" IsEnabled="False"/>
+                  <Button x:Name="CodexRunBtn" Style="{StaticResource PrimaryBtn}" Content="▶ Thực hiện bằng Codex" MinWidth="172" Height="34" Padding="14,0" FontSize="12.5"/>
                 </StackPanel>
-                <CheckBox x:Name="CodexWriteCheck" Content="Cho phép Codex sửa tệp trực tiếp" IsChecked="True" VerticalAlignment="Center" FontSize="13" FontWeight="Medium" Foreground="#334155"/>
+                <CheckBox x:Name="CodexWriteCheck" Content="Cho phép Codex sửa tệp trực tiếp" IsChecked="True" VerticalAlignment="Center" FontSize="12.5" FontWeight="Medium" Foreground="#334155"/>
               </DockPanel>
             </StackPanel>
           </Border>
 
-          <!-- Streaming Output Card -->
-          <Border Grid.Row="2" Style="{StaticResource CardBorder}" Padding="18,14">
+          <!-- Spacious Streaming Output Card -->
+          <Border Grid.Row="1" Style="{StaticResource CardBorder}" Padding="16,12">
             <DockPanel>
-              <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-                <Button x:Name="CodexRefreshBtn" DockPanel.Dock="Right" Style="{StaticResource SecondaryBtn}" Content="Làm mới" Height="30" Padding="12,0" FontSize="12"/>
-                <TextBlock Text="Kết quả thực hiện" FontSize="14" FontWeight="Bold" VerticalAlignment="Center"/>
+              <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                <Button x:Name="CodexRefreshBtn" DockPanel.Dock="Right" Style="{StaticResource SecondaryBtn}" Content="Làm mới" Height="28" Padding="11,0" FontSize="11.5"/>
+                <TextBlock Text="Kết quả thực hiện" FontSize="13.5" FontWeight="Bold" VerticalAlignment="Center"/>
               </DockPanel>
               <TextBox x:Name="CodexOutputBox" Style="{StaticResource ModernMultilineInput}" FontSize="13" Background="#F8FAFC" BorderBrush="#E2E8F0" TextWrapping="Wrap"/>
             </DockPanel>
           </Border>
         </Grid>
 
-        <!-- VIEW E: DIAGNOSTICS, PRE-FLIGHT & SUPPORT (Symmetrical Button Grids) -->
+        <!-- VIEW E: COMPACT SYSTEM, UPDATE & SAFE DANGER ZONE (Zero-Scroll) -->
         <ScrollViewer x:Name="ViewDiagnostics" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0" Visibility="Collapsed">
           <StackPanel>
-            <!-- App Self-Update Card -->
-            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,14">
-              <DockPanel>
-                <Button x:Name="DiagCheckUpdateBtn" DockPanel.Dock="Right" Style="{StaticResource PrimaryBtn}" Content="↻ Kiểm tra &amp; Cập nhật phiên bản" MinWidth="220" VerticalAlignment="Center"/>
-                <StackPanel VerticalAlignment="Center" Margin="0,0,14,0">
-                  <TextBlock Text="Cập nhật phiên bản Em Trợ Lý từ GitHub" FontSize="15" FontWeight="Bold"/>
-                  <TextBlock x:Name="DiagUpdateStatusText" Text="Kiểm tra bản phát hành mới nhất trên GitHub, xác thực SHA-256 và nâng cấp tự động (giữ nguyên dữ liệu &amp; bản quyền)." FontSize="12.5" Foreground="#64748B" Margin="0,2,0,0" TextWrapping="Wrap"/>
-                </StackPanel>
-              </DockPanel>
-            </Border>
-
-            <!-- Pre-flight Check Card -->
-            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,14">
-              <StackPanel>
-                <DockPanel Margin="0,0,0,12">
-                  <Button x:Name="RunPreflightBtn" DockPanel.Dock="Right" Style="{StaticResource SoftAccentBtn}" Content="Kiểm tra hệ thống ngay" MinWidth="176"/>
-                  <StackPanel VerticalAlignment="Center" Margin="0,0,12,0">
-                    <TextBlock Text="Kiểm tra máy &amp; kết nối mạng (Pre-flight)" FontSize="15" FontWeight="Bold"/>
-                    <TextBlock Text="Kiểm tra Windows x64, ổ đĩa trống và đường truyền tới Telegram / AI / Node.js" FontSize="12.5" Foreground="#64748B" Margin="0,2,0,0"/>
+            <!-- Top 2-Column Row: App Update + Pre-flight System Check -->
+            <UniformGrid Columns="2" Margin="0,0,0,12">
+              <Border Style="{StaticResource CardBorder}" Padding="16,13" Margin="0,0,6,0">
+                <DockPanel>
+                  <Button x:Name="DiagCheckUpdateBtn" DockPanel.Dock="Bottom" Style="{StaticResource PrimaryBtn}" Content="↻ Kiểm tra &amp; Cập nhật phiên bản" Height="34" FontSize="12.5" HorizontalAlignment="Stretch" Margin="0,12,0,0"/>
+                  <StackPanel>
+                    <TextBlock Text="Cập nhật Em Trợ Lý từ GitHub" FontSize="14" FontWeight="Bold"/>
+                    <TextBlock x:Name="DiagUpdateStatusText" Text="Kiểm tra bản phát hành mới nhất, đối chiếu mã SHA-256 và nâng cấp tự động (giữ nguyên dữ liệu &amp; bản quyền)." FontSize="12" Foreground="#64748B" Margin="0,4,0,0" TextWrapping="Wrap"/>
                   </StackPanel>
                 </DockPanel>
-                <Border Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="14,10">
-                  <StackPanel x:Name="PreflightListPanel">
-                    <TextBlock Text="Bấm nút Kiểm tra hệ thống ngay để quét nhanh tình trạng máy." FontSize="13" Foreground="#64748B"/>
+              </Border>
+
+              <Border Style="{StaticResource CardBorder}" Padding="16,13" Margin="6,0,0,0">
+                <DockPanel>
+                  <Button x:Name="RunPreflightBtn" DockPanel.Dock="Bottom" Style="{StaticResource SoftAccentBtn}" Content="Kiểm tra hệ thống ngay" Height="34" FontSize="12.5" HorizontalAlignment="Stretch" Margin="0,12,0,0"/>
+                  <StackPanel>
+                    <TextBlock Text="Kiểm tra máy &amp; kết nối mạng" FontSize="14" FontWeight="Bold"/>
+                    <StackPanel x:Name="PreflightListPanel" Margin="0,4,0,0">
+                      <TextBlock Text="Quét nhanh Windows x64, ổ đĩa trống và đường truyền tới Telegram / AI / Node.js." FontSize="12" Foreground="#64748B" TextWrapping="Wrap"/>
+                    </StackPanel>
                   </StackPanel>
-                </Border>
-              </StackPanel>
-            </Border>
+                </DockPanel>
+              </Border>
+            </UniformGrid>
 
-            <!-- Auto-Heal & Component Tools (Clean 2x3 Symmetrical Grid) -->
-            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,14">
+            <!-- Unified Recovery, Support & License Management Grid -->
+            <Border Style="{StaticResource CardBorder}" Padding="16,13" Margin="0,0,0,12">
               <StackPanel>
-                <TextBlock Text="Tự động sửa lỗi &amp; Khôi phục từng phần" FontSize="15" FontWeight="Bold" Margin="0,0,0,4"/>
-                <TextBlock Text="An toàn tuyệt đối: giữ nguyên dữ liệu cấu hình và lịch sử trò chuyện cũ trên máy." FontSize="12.5" Foreground="#64748B" Margin="0,0,0,14"/>
+                <TextBlock Text="Công cụ khôi phục, Hỗ trợ kỹ thuật &amp; Bản quyền" FontSize="14" FontWeight="Bold" Margin="0,0,0,3"/>
+                <TextBlock Text="Giữ nguyên lịch sử &amp; dữ liệu cấu hình · Báo cáo hỗ trợ tự động ẩn toàn bộ mã bí mật." FontSize="12" Foreground="#64748B" Margin="0,0,0,11"/>
                 <UniformGrid Columns="3">
-                  <Button x:Name="DiagAutoHealBtn" Style="{StaticResource PrimaryBtn}" Content="Tự sửa lỗi bằng Codex" Padding="8,0" Margin="0,0,6,10"/>
-                  <Button x:Name="DiagRestartBtn" Style="{StaticResource SecondaryBtn}" Content="Khởi động lại Gateway" Padding="8,0" Margin="5,0,5,10"/>
-                  <Button x:Name="DiagZaloQrBtn" Style="{StaticResource SoftAccentBtn}" Content="Lấy mã QR Zalo" Padding="8,0" Margin="6,0,0,10"/>
-                  <Button x:Name="DiagZaloBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Đồng bộ Zalo" Padding="8,0" Margin="0,0,6,0"/>
-                  <Button x:Name="DiagCodexBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Sửa Antigravity &amp; Codex" Padding="8,0" Margin="5,0,5,0"/>
-                  <Button x:Name="DiagUninstallBtn" Style="{StaticResource SoftDangerBtn}" Content="Gỡ trợ lý để cài lại" Padding="8,0" Margin="6,0,0,0"/>
+                  <Button x:Name="DiagAutoHealBtn" Style="{StaticResource PrimaryBtn}" Content="✨ Tự sửa lỗi bằng Codex" Height="35" FontSize="12" Padding="8,0" Margin="0,0,5,8"/>
+                  <Button x:Name="DiagRestartBtn" Style="{StaticResource SecondaryBtn}" Content="Khởi động lại Gateway" Height="35" FontSize="12" Padding="8,0" Margin="4,0,4,8"/>
+                  <Button x:Name="DiagZaloQrBtn" Style="{StaticResource SoftAccentBtn}" Content="Lấy mã QR Zalo" Height="35" FontSize="12" Padding="8,0" Margin="5,0,0,8"/>
+                  <Button x:Name="DiagZaloBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Đồng bộ Zalo" Height="35" FontSize="12" Padding="8,0" Margin="0,0,5,8"/>
+                  <Button x:Name="DiagCodexBtn" Style="{StaticResource SecondaryBtn}" Content="Cài / Sửa Antigravity" Height="35" FontSize="12" Padding="8,0" Margin="4,0,4,8"/>
+                  <Button x:Name="DiagExportBtn" Style="{StaticResource SoftAccentBtn}" Content="Xuất báo cáo (.txt)" Height="35" FontSize="12" Padding="8,0" Margin="5,0,0,8"/>
+                  <Button x:Name="DiagShortcutBtn" Style="{StaticResource SecondaryBtn}" Content="Tạo lối tắt Desktop" Height="35" FontSize="12" Padding="8,0" Margin="0,0,5,0"/>
+                  <Button x:Name="DiagChangeLicenseBtn" Style="{StaticResource SecondaryBtn}" Content="Đổi khóa bản quyền" Height="35" FontSize="12" Padding="8,0" Margin="4,0,4,0"/>
+                  <Button x:Name="DiagSignOutLicenseBtn" Style="{StaticResource SoftDangerBtn}" Content="Thoát bản quyền" Height="35" FontSize="12" Padding="8,0" Margin="5,0,0,0"/>
                 </UniformGrid>
               </StackPanel>
             </Border>
 
-            <!-- Support Export & Desktop Shortcut (Clean 2x2 Symmetrical Grid) -->
-            <Border Style="{StaticResource CardBorder}">
-              <StackPanel>
-                <TextBlock Text="Hỗ trợ kỹ thuật &amp; Lối tắt ứng dụng" FontSize="15" FontWeight="Bold" Margin="0,0,0,4"/>
-                <TextBlock Text="File báo cáo hỗ trợ đã tự động ẩn toàn bộ Bot Token, API Key và Gateway Token trước khi xuất." FontSize="12.5" Foreground="#64748B" Margin="0,0,0,14"/>
-                <UniformGrid Columns="2">
-                  <Button x:Name="DiagExportBtn" Style="{StaticResource SoftAccentBtn}" Content="Xuất báo cáo hỗ trợ (.txt)" Margin="0,0,6,10"/>
-                  <Button x:Name="DiagShortcutBtn" Style="{StaticResource SecondaryBtn}" Content="Tạo lối tắt trên Desktop" Margin="6,0,0,10"/>
-                  <Button x:Name="DiagChangeLicenseBtn" Style="{StaticResource SecondaryBtn}" Content="Đổi khóa bản quyền" Margin="0,0,6,0"/>
-                  <Button x:Name="DiagSignOutLicenseBtn" Style="{StaticResource SoftDangerBtn}" Content="Thoát bản quyền" Margin="6,0,0,0"/>
-                </UniformGrid>
-              </StackPanel>
-            </Border>
-
-            <!-- Full Clean-Slate Factory Reset Card -->
-            <Border Background="#FEF2F2" BorderBrush="#FECACA" BorderThickness="1" CornerRadius="12" Padding="20,15" Margin="0,14,0,0">
+            <!-- Single Consolidated Safe Danger Zone (Only Place in App to Prevent Accidental Resets) -->
+            <Border Background="#FEF2F2" BorderBrush="#FECACA" BorderThickness="1" CornerRadius="12" Padding="16,12">
               <DockPanel>
-                <Button x:Name="DiagResetAllBtn" DockPanel.Dock="Right" Style="{StaticResource DangerBtn}" Content="Reset cài lại từ đầu" MinWidth="180" VerticalAlignment="Center"/>
-                <StackPanel VerticalAlignment="Center" Margin="0,0,14,0">
-                  <TextBlock Text="Reset cài lại từ đầu (Trắng tinh như máy mới)" FontSize="14.5" FontWeight="Bold" Foreground="#991B1B"/>
-                  <TextBlock Text="Khác với nút 'Gỡ trợ lý để cài lại' (giữ lại Codex &amp; Antigravity), nút này xóa sạch 100% dữ liệu, môi trường riêng, thông số lưu nháp và khóa bản quyền như người mới lần đầu cài Em Trợ Lý." FontSize="12.5" Foreground="#B91C1C" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                  <Button x:Name="DiagUninstallBtn" Style="{StaticResource SecondaryBtn}" Content="Gỡ trợ lý cũ" Height="35" Padding="13,0" FontSize="12" Margin="0,0,8,0"/>
+                  <Button x:Name="DiagResetAllBtn" Style="{StaticResource DangerBtn}" Content="↺ Reset từ đầu" Height="35" Padding="15,0" FontSize="12.5"/>
+                </StackPanel>
+                <StackPanel VerticalAlignment="Center">
+                  <TextBlock Text="Khu vực đặt lại hệ thống (Gỡ trợ lý / Reset trắng như máy mới)" FontSize="13.5" FontWeight="Bold" Foreground="#991B1B"/>
+                  <TextBlock Text="Gỡ trợ lý cũ giữ lại Codex &amp; IDE · Reset từ đầu xóa sạch 100% dữ liệu, môi trường riêng &amp; bản quyền như máy mới." FontSize="11.5" Foreground="#B91C1C" Margin="0,2,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
               </DockPanel>
             </Border>
@@ -1488,8 +1491,8 @@ $xamlText = @'
                   <Button x:Name="ModInstall4Btn" Grid.Column="4" Style="{StaticResource SoftAccentBtn}" Content="Cài phần này" MinWidth="164" Height="36" Padding="10,0" HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
                 </Grid>
 
-                <!-- Inline Telegram Fields for OpenClaw Modular Setup -->
-                <Border x:Name="ModOpenClawInputsBox" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="14,12" Margin="72,12,0,0">
+                <!-- Inline Telegram Fields for OpenClaw Modular Setup (Smart Auto-Collapsed Until Checked) -->
+                <Border x:Name="ModOpenClawInputsBox" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="14,12" Margin="72,12,0,0" Visibility="Collapsed">
                   <StackPanel>
                     <DockPanel Margin="0,0,0,10">
                       <CheckBox x:Name="ModZaloCheck" DockPanel.Dock="Right" Content="Kèm plugin Zalo QR (/zaloqr)" IsChecked="True" FontSize="12" FontWeight="SemiBold" Foreground="#0F172A" VerticalAlignment="Center"/>
@@ -1660,8 +1663,11 @@ $xamlText = @'
       <Grid>
         <Border Width="520" VerticalAlignment="Center" HorizontalAlignment="Center" Style="{StaticResource CardBorder}" CornerRadius="16" Padding="34,30">
           <StackPanel>
-            <Border Width="210" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="10" Padding="14,10" HorizontalAlignment="Center" Margin="0,0,0,16">
-              <Image x:Name="LicenseLogoImage" Height="44" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality"/>
+            <Border Width="296" Background="#FFFFFF" BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="12" Padding="20,14" HorizontalAlignment="Center" Margin="0,0,0,16" SnapsToDevicePixels="True">
+              <Border.Effect>
+                <DropShadowEffect Color="#0F172A" BlurRadius="12" ShadowDepth="2" Direction="270" Opacity="0.05"/>
+              </Border.Effect>
+              <Image x:Name="LicenseLogoImage" Height="32" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" SnapsToDevicePixels="True" RenderOptions.BitmapScalingMode="HighQuality"/>
             </Border>
 
             <Border Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="14" Padding="12,4" HorizontalAlignment="Center" Margin="0,0,0,10">
@@ -1812,9 +1818,11 @@ $sidebarStatusText  = Get-Ui 'SidebarStatusText'
 $versionText        = Get-Ui 'VersionText'
 $sidebarUpdateLinkBtn = Get-Ui 'SidebarUpdateLinkBtn'
 $navHomeBtn         = Get-Ui 'NavHomeBtn'
+$navHomeLabel       = Get-Ui 'NavHomeLabel'
 $navModularBtn      = Get-Ui 'NavModularBtn'
 $navStoreBtn        = Get-Ui 'NavStoreBtn'
 $navConfigBtn       = Get-Ui 'NavConfigBtn'
+$navConfigLabel     = Get-Ui 'NavConfigLabel'
 $navCodexBtn        = Get-Ui 'NavCodexBtn'
 $navDiagBtn         = Get-Ui 'NavDiagBtn'
 $sidebarResetAllBtn = Get-Ui 'SidebarResetAllBtn'
@@ -1900,6 +1908,7 @@ $comboDevDot        = Get-Ui 'ComboDevDot'
 $comboDevReadyBanner = Get-Ui 'ComboDevReadyBanner'
 $setupTelegramCard  = Get-Ui 'SetupTelegramCard'
 $setupLicenseAutoNote = Get-Ui 'SetupLicenseAutoNote'
+$setupQuickChecksGrid = Get-Ui 'SetupQuickChecksGrid'
 $setupZaloBox       = Get-Ui 'SetupZaloBox'
 $setupExtraExpander = Get-Ui 'SetupExtraExpander'
 $showSecretCheck    = Get-Ui 'ShowSecretCheck'
@@ -2057,7 +2066,7 @@ $fullAccessCheck.Checked = $false
 $zaloCheck.Checked = $true
 $zaloCheck.Enabled = $true
 $existingEditorCheck.Checked = $false
-$versionText.Text = "v$($appVersionObj.InstallerVersion) · Anh Lập Trình"
+$versionText.Text = "v$($appVersionObj.InstallerVersion)"
 
 foreach ($m in @('gpt-6.2-sol', 'GPT-6.1-terra', 'gpt-6.2-astra')) {
   [void]$modelBox.Items.Add($m)
@@ -2066,7 +2075,7 @@ foreach ($m in @('gpt-6.2-sol', 'GPT-6.1-terra', 'gpt-6.2-astra')) {
 $modelBox.SelectedIndex = 0
 if ($modModelBox) { $modModelBox.SelectedIndex = 0 }
 
-# Load Brand Logo (alt.png) & Window Icon (alt.ico) without locking files on disk
+# Load Brand Logo (alt.png — trimmed cleanly to crisp typography + dot-bar inside vector pill frame)
 $logoPath = Join-Path $PayloadRoot 'alt.png'
 if (-not (Test-Path -LiteralPath $logoPath -PathType Leaf) -and $PSScriptRoot) {
   $cand = Join-Path (Split-Path -Parent $PSScriptRoot) 'alt.png'
@@ -2079,12 +2088,27 @@ if (Test-Path -LiteralPath $logoPath -PathType Leaf) {
     $bmp = New-Object System.Windows.Media.Imaging.BitmapImage
     $bmp.BeginInit()
     $bmp.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+    $bmp.DecodePixelWidth = 1085
     $bmp.StreamSource = $ms
     $bmp.EndInit()
     $bmp.Freeze()
     $ms.Dispose()
-    $logoImage.Source = $bmp
-    if ($licenseLogoImage) { $licenseLogoImage.Source = $bmp }
+
+    $logoSourceFinal = $bmp
+    if ($bmp.PixelWidth -ge 200 -and $bmp.PixelHeight -ge 70) {
+      $cropX = [int][Math]::Round($bmp.PixelWidth * 0.046)
+      $cropY = [int][Math]::Round($bmp.PixelHeight * 0.295)
+      $cropW = [Math]::Max(100, [int][Math]::Round($bmp.PixelWidth * 0.908))
+      $cropH = [Math]::Max(32, [int][Math]::Round($bmp.PixelHeight * 0.365))
+      if (($cropX + $cropW) -gt $bmp.PixelWidth) { $cropW = $bmp.PixelWidth - $cropX }
+      if (($cropY + $cropH) -gt $bmp.PixelHeight) { $cropH = $bmp.PixelHeight - $cropY }
+      $cropped = New-Object System.Windows.Media.Imaging.CroppedBitmap($bmp, (New-Object System.Windows.Int32Rect($cropX, $cropY, $cropW, $cropH)))
+      $cropped.Freeze()
+      $logoSourceFinal = $cropped
+    }
+
+    $logoImage.Source = $logoSourceFinal
+    if ($licenseLogoImage) { $licenseLogoImage.Source = $logoSourceFinal }
   } catch { }
 }
 
@@ -2712,8 +2736,16 @@ function Set-NavActive([string]$Key) {
 }
 
 function Set-Buttons {
-  $navHomeBtn.Content   = if ($script:isManageMode) { '  Tổng quan' } else { '  Cài đặt nhanh' }
-  $navConfigBtn.Content = if ($script:isManageMode) { '  Cấu hình nhanh' } else { '  Tiến trình cài đặt' }
+  if ($navHomeLabel) {
+    $navHomeLabel.Text = if ($script:isManageMode) { 'Tổng quan' } else { 'Cài đặt nhanh' }
+  } else {
+    $navHomeBtn.Content = if ($script:isManageMode) { '  Tổng quan' } else { '  Cài đặt nhanh' }
+  }
+  if ($navConfigLabel) {
+    $navConfigLabel.Text = if ($script:isManageMode) { 'Cấu hình nhanh' } else { 'Tiến trình cài đặt' }
+  } else {
+    $navConfigBtn.Content = if ($script:isManageMode) { '  Cấu hình nhanh' } else { '  Tiến trình cài đặt' }
+  }
 
   foreach ($nb in @($navHomeBtn, $navModularBtn, $navStoreBtn, $navConfigBtn, $navCodexBtn, $navDiagBtn)) {
     if (-not $nb) { continue }
@@ -2724,10 +2756,12 @@ function Set-Buttons {
   }
 
   $onCodex = ($script:currentView -eq 'codex')
-  $headerQuickBtn.Content = if ($onCodex) {
-    if ($script:isManageMode) { '← Về Tổng quan' } else { '← Về Cài đặt' }
-  } else { 'Mở Codex CLI' }
-  $headerQuickBtn.IsEnabled = (-not $script:installRunning -and -not $script:retryEditor)
+  if ($headerQuickBtn) {
+    $headerQuickBtn.Content = if ($onCodex) {
+      if ($script:isManageMode) { '← Về Tổng quan' } else { '← Về Cài đặt' }
+    } else { 'Mở Codex CLI' }
+    $headerQuickBtn.IsEnabled = (-not $script:installRunning -and -not $script:retryEditor)
+  }
   if ($headerUpdateBtn) {
     $headerUpdateBtn.IsEnabled = (-not $script:installRunning -and -not $script:appUpdateChecking -and -not $script:appUpdateDownloading)
   }
@@ -3003,6 +3037,7 @@ function Apply-ManageModeUI {
   $savedDraftBanner.Visibility = [System.Windows.Visibility]::Collapsed
   if ($setupComboCard) { $setupComboCard.Visibility = [System.Windows.Visibility]::Collapsed }
   if ($setupTelegramCard) { $setupTelegramCard.Visibility = [System.Windows.Visibility]::Visible }
+  if ($setupQuickChecksGrid) { $setupQuickChecksGrid.Visibility = [System.Windows.Visibility]::Collapsed }
   if ($setupZaloBox) { $setupZaloBox.Visibility = [System.Windows.Visibility]::Collapsed }
   if ($setupExtraExpander) { $setupExtraExpander.IsExpanded = $true }
   $installOptionsCard.Visibility = [System.Windows.Visibility]::Collapsed
@@ -3286,7 +3321,7 @@ function Update-ModularCards {
   } else {
     $modInstall4Btn.Content = 'Cài đặt'
     $modCheck4.IsEnabled = $true
-    $modOpenClawInputsBox.Visibility = [System.Windows.Visibility]::Visible
+    $modOpenClawInputsBox.Visibility = if ([bool]$modCheck4.IsChecked) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
     if ([string]::IsNullOrWhiteSpace($modOwnersBox.Text) -and -not [string]::IsNullOrWhiteSpace($ownersBox.Text)) {
       $modOwnersBox.Text = $ownersBox.Text
     }
@@ -3700,6 +3735,9 @@ function Set-SetupComboMode([string]$Mode) {
   }
   if ($setupTelegramCard) {
     $setupTelegramCard.Visibility = if ($isFull) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
+  }
+  if ($setupQuickChecksGrid) {
+    $setupQuickChecksGrid.Visibility = if ($isFull) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
   }
   if ($installOptionsCard) {
     $installOptionsCard.Visibility = if ($isFull) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
@@ -4895,10 +4933,12 @@ if ($storeComboBtn) {
   })
 }
 
-$headerQuickBtn.Add_Click({
-  if ($script:installRunning -or $script:retryEditor) { return }
-  if ($script:currentView -eq 'codex') { Set-NavActive 'home' } else { Set-NavActive 'codex' }
-})
+if ($headerQuickBtn) {
+  $headerQuickBtn.Add_Click({
+    if ($script:installRunning -or $script:retryEditor) { return }
+    if ($script:currentView -eq 'codex') { Set-NavActive 'home' } else { Set-NavActive 'codex' }
+  })
+}
 
 # GitHub Self-Update Check, Notification Banner & SHA-256 Verified Auto-Update
 $appUpdatePollTimer = New-Object System.Windows.Threading.DispatcherTimer
@@ -5273,7 +5313,27 @@ $modInstall3Btn.Add_Click({
   $msClick = Get-EmTroLyModularStatus
   Start-ModularInstall @('codex-extension') -ForceReinstall:([bool]($msClick -and $msClick.CodexExtensionInstalled))
 })
-$modInstall4Btn.Add_Click({ Start-ModularInstall @('openclaw') })
+$modCheck4.Add_Click({
+  $msToggle = if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) { Get-EmTroLyModularStatus } else { $null }
+  if ($msToggle -and $msToggle.OpenClawInstalled) {
+    $modOpenClawInputsBox.Visibility = [System.Windows.Visibility]::Collapsed
+  } else {
+    $modOpenClawInputsBox.Visibility = if ([bool]$modCheck4.IsChecked) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
+  }
+})
+$modInstall4Btn.Add_Click({
+  $msClick4 = if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) { Get-EmTroLyModularStatus } else { $null }
+  if ((-not $msClick4 -or -not $msClick4.OpenClawInstalled) -and
+      [string]::IsNullOrWhiteSpace($modTokenPwdBox.Password) -and
+      [string]::IsNullOrWhiteSpace($tokenBox.Text) -and
+      $modOpenClawInputsBox.Visibility -ne [System.Windows.Visibility]::Visible) {
+    $modCheck4.IsChecked = $true
+    $modOpenClawInputsBox.Visibility = [System.Windows.Visibility]::Visible
+    [void]$modTokenPwdBox.Focus()
+    return
+  }
+  Start-ModularInstall @('openclaw')
+})
 $modAutoFetchBtn.Add_Click({
   $tokMod = $modTokenPwdBox.Password.Trim()
   if ([string]::IsNullOrWhiteSpace($tokMod)) {
