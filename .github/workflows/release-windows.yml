@@ -139,6 +139,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
+            --latest=false \
             --title "installer_emtroly ${{ steps.version.outputs.version }}" \
             --generate-notes 2>/dev/null || true
           gh release upload "$GITHUB_REF_NAME" --clobber \
@@ -149,6 +150,7 @@ jobs:
             native-full-bundle.tar.gz \
             native-full-bundle.sha256 \
             MANIFEST.txt
+          gh release edit "$GITHUB_REF_NAME" --latest
 
       - name: Attach immutable EmTroLy-Setup.exe to latest release if missing
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

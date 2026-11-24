@@ -164,6 +164,7 @@ jobs:
           for attempt in 1 2 3 4; do
             gh release view "$GITHUB_REF_NAME" --repo "${{ github.repository }}" >/dev/null 2>&1 || \
               gh release create "$GITHUB_REF_NAME" --repo "${{ github.repository }}" \
+                --latest=false \
                 --title "installer_emtroly ${{ steps.version.outputs.version }}" \
                 --generate-notes 2>/dev/null || true
             if gh release upload "$GITHUB_REF_NAME" --repo "${{ github.repository }}" --clobber "${assets[@]}"; then
