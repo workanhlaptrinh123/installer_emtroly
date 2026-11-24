@@ -1195,6 +1195,186 @@ class StaticIntegrityTests(unittest.TestCase):
             srv.shutdown()
             srv.server_close()
 
+    @unittest.skipUnless(SHELL and os.name == "nt", "Requires Windows PowerShell")
+    def test_github_self_update_helpers_sha256_and_wpf_banner_flow(self):
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        import threading
+
+        fake_exe = b"MZ-EMTROLY-SELF-UPDATE-PAYLOAD-2099" * 128
+        good_sha = hashlib.sha256(fake_exe).hexdigest().lower()
+        srv_state = {
+            "tag": "v2099.12.31.1",
+            "sha": good_sha,
+            "include_assets": True,
+        }
+
+        class MockGitHubUpdateServer(BaseHTTPRequestHandler):
+            def do_GET(self):
+                host_hdr = self.headers.get("Host", f"127.0.0.1:{self.server.server_port}")
+                base_u = f"http://{host_hdr}"
+                if self.path == "/releases/latest":
+                    assets = []
+                    if srv_state["include_assets"]:
+                        assets = [
+                            {
+                                "name": "emtroly.exe",
+                                "browser_download_url": f"{base_u}/download/emtroly.exe",
+                                "size": len(fake_exe),
+                            },
+                            {
+                                "name": "emtroly.exe.sha256",
+                                "browser_download_url": f"{base_u}/download/emtroly.exe.sha256",
+                                "size": 80,
+                            },
+                        ]
+                    payload = json.dumps(
+                        {
+                            "tag_name": srv_state["tag"],
+                            "html_url": "https://github.com/workanhlaptrinh123/installer_emtroly/releases/tag/" + srv_state["tag"],
+                            "body": "Bổ sung thông báo và tự động cập nhật phiên bản mới.",
+                            "assets": assets,
+                        }
+                    ).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                elif self.path == "/download/emtroly.exe.sha256":
+                    data = f"{srv_state['sha']}  emtroly.exe\n".encode("ascii")
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                elif self.path == "/download/emtroly.exe":
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(fake_exe)))
+                    self.end_headers()
+                    self.wfile.write(fake_exe)
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        srv = HTTPServer(("127.0.0.1", 0), MockGitHubUpdateServer)
+        port = srv.server_address[1]
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            helpers = ROOT / "windows-installer/wizard-helpers.ps1"
+            wizard_ps1 = ROOT / "windows-installer/wizard.ps1"
+            with tempfile.TemporaryDirectory(prefix="emtroly-selfupd-win-") as td:
+                temp = Path(td)
+                home = temp / "home"
+                local = temp / "local"
+                home.mkdir()
+                local.mkdir()
+                env = {
+                    **os.environ,
+                    "USERPROFILE": str(home),
+                    "LOCALAPPDATA": str(local),
+                    "EMTROLY_UPDATE_API_BASE": f"http://127.0.0.1:{port}/releases",
+                    "EMTROLY_TEST_SKIP_UPDATE_RELAUNCH": "1",
+                    "EMTROLY_ALLOW_MULTI_INSTANCE": "1",
+                    "EMTROLY_TEST_DESKTOP_DIR": str(temp / "desktop"),
+                    "EMTROLY_TEST_PROGRAMS_DIR": str(temp / "programs"),
+                }
+                (temp / "desktop").mkdir()
+                (temp / "programs").mkdir()
+
+                # 1. Unit-test helper functions (trusted URLs, update check, SHA-256 download, bad hash rejection, UI sync)
+                res_unit = run_ps(
+                    f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{helpers}", [Text.Encoding]::UTF8)))\n'
+                    "$ErrorActionPreference = 'Stop'\n"
+                    "if (Test-EmTroLyTrustedGitHubUrl -Url 'https://evil.example.com/emtroly.exe') { throw 'evil-url-accepted' }\n"
+                    "if (-not (Test-EmTroLyTrustedGitHubUrl -Url 'https://github.com/workanhlaptrinh123/installer_emtroly/releases/latest')) { throw 'github-url-rejected' }\n"
+                    f"$uNew = Get-EmTroLyAppUpdateInfo -PayloadRoot '{ROOT}' -CurrentVersion '2026.11.24.3'\n"
+                    "if (-not $uNew.Ok -or -not $uNew.HasUpdate -or $uNew.LatestVersion -cne '2099.12.31.1') { throw 'update-not-detected' }\n"
+                    "$uSame = Get-EmTroLyAppUpdateInfo -CurrentVersion '2099.12.31.1'\n"
+                    "if (-not $uSame.Ok -or $uSame.HasUpdate) { throw 'same-version-marked-update' }\n"
+                    "$stFile = Join-Path $env:LOCALAPPDATA 'upd.status'\n"
+                    "$dlOk = Install-EmTroLyAppUpdate -UpdateInfo $uNew -StatusFile $stFile\n"
+                    "if (-not $dlOk.Ok -or -not (Test-Path -LiteralPath $dlOk.ExePath -PathType Leaf)) { throw 'download-update-failed' }\n"
+                    "# Seed older installed EmTroLyUI and verify Sync-EmTroLyInstalledUiIfNewer refreshes it\n"
+                    "$uiWin = Join-Path $env:LOCALAPPDATA 'EmTroLyUI\\windows-installer'\n"
+                    "[void][IO.Directory]::CreateDirectory($uiWin)\n"
+                    "[IO.File]::WriteAllText((Join-Path $uiWin 'wizard.ps1'), '# old')\n"
+                    "[IO.File]::WriteAllText((Join-Path $env:LOCALAPPDATA 'EmTroLyUI\\MANIFEST.txt'), \"installer_version=2025.1.1`n\")\n"
+                    f"if (-not (Sync-EmTroLyInstalledUiIfNewer -PayloadRoot '{ROOT}')) {{ throw 'ui-sync-did-not-run' }}\n"
+                    "$syncedVer = (Get-EmTroLyAppVersion -PayloadRoot (Join-Path $env:LOCALAPPDATA 'EmTroLyUI')).InstallerVersion\n"
+                    "if ($syncedVer -eq '2025.1.1') { throw 'ui-manifest-not-updated' }\n"
+                    "Write-Output 'WIN_UPDATE_HELPER_OK'\n",
+                    env=env,
+                )
+                self.assertEqual(res_unit.returncode, 0, res_unit.stdout + res_unit.stderr)
+                self.assertIn("WIN_UPDATE_HELPER_OK", res_unit.stdout)
+
+                # Tampered SHA-256 must fail closed and delete partial file
+                srv_state["sha"] = "f" * 64
+                srv_state["tag"] = "v2099.12.31.2"
+                res_bad = run_ps(
+                    f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{helpers}", [Text.Encoding]::UTF8)))\n'
+                    "$ErrorActionPreference = 'Stop'\n"
+                    "$uBad = Get-EmTroLyAppUpdateInfo -CurrentVersion '2026.11.24.3'\n"
+                    "$failed = $false\n"
+                    "try { [void](Install-EmTroLyAppUpdate -UpdateInfo $uBad -OutDir (Join-Path $env:LOCALAPPDATA 'bad-upd')) } catch { $failed = $true }\n"
+                    "if (-not $failed) { throw 'tampered-sha-not-rejected' }\n"
+                    "if (@(Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'bad-upd') -Force -ErrorAction SilentlyContinue).Count -ne 0) { throw 'corrupt-part-left-behind' }\n"
+                    "Write-Output 'TAMPERED_REJECTED_OK'\n",
+                    env=env,
+                )
+                self.assertEqual(res_bad.returncode, 0, res_bad.stdout + res_bad.stderr)
+                self.assertIn("TAMPERED_REJECTED_OK", res_bad.stdout)
+
+                # 2. End-to-end WPF UI banner & self-update button probe
+                srv_state["sha"] = good_sha
+                srv_state["tag"] = "v2099.12.31.5"
+                for h in ("codex-cli.ps1", "manage-instance.ps1", "auto-heal-codex.ps1", "wizard-helpers.ps1"):
+                    (temp / h).write_text((ROOT / "windows-installer" / h).read_text(encoding="utf-8-sig"), encoding="utf-8-sig")
+                wiz_src = wizard_ps1.read_text(encoding="utf-8-sig")
+                probe_ui = r"""
+Unlock-LicenseGate 'sk-upd-ui-test-key-123'
+$script:probeStep = 0
+$script:probePassed = $false
+$script:probeError = ''
+$probeTimer = New-Object System.Windows.Threading.DispatcherTimer
+$probeTimer.Interval = [TimeSpan]::FromMilliseconds(100)
+$probeTimer.Add_Tick({
+  try {
+    if ($script:probeStep -eq 0 -and $null -ne $script:latestUpdateInfo -and -not $script:appUpdateChecking) {
+      if ($appUpdateBanner.Visibility -ne [System.Windows.Visibility]::Visible) {
+        throw 'update-banner-did-not-appear'
+      }
+      if ([string]$headerUpdateBtn.Content -notmatch '2099\.12\.31\.5') {
+        throw ('unexpected-header-btn:' + [string]$headerUpdateBtn.Content)
+      }
+      $script:probeStep = 1
+      Start-AppSelfUpdate
+    } elseif ($script:probeStep -eq 1 -and -not $script:appUpdateDownloading -and $script:relaunchingForUpdate) {
+      $probeTimer.Stop()
+      $script:probePassed = $true
+      $window.Close()
+    }
+  } catch {
+    $probeTimer.Stop()
+    $script:probeError = [string]$_.Exception.Message
+    $window.Close()
+  }
+})
+$window.Add_ContentRendered({ $probeTimer.Start() })
+[void]$window.ShowDialog()
+if (-not $script:probePassed) { throw ('wpf-update-probe-failed:' + $script:probeError) }
+Write-Output 'WPF_UPDATE_BANNER_AND_DOWNLOAD_OK'
+"""
+                (temp / "wiz_upd.ps1").write_text(wiz_src.replace("[void]$window.ShowDialog()", probe_ui), encoding="utf-8-sig")
+                res_ui = run_ps(f'& "{temp / "wiz_upd.ps1"}" -PayloadRoot "{ROOT}"\n', env=env, sta=True, timeout=40)
+                self.assertEqual(res_ui.returncode, 0, res_ui.stdout + res_ui.stderr)
+                self.assertIn("WPF_UPDATE_BANNER_AND_DOWNLOAD_OK", res_ui.stdout)
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

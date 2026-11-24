@@ -110,6 +110,9 @@ $appVersionObj = if (Get-Command Get-EmTroLyAppVersion -ErrorAction SilentlyCont
 } else {
   [pscustomobject]@{ InstallerVersion = '2026.11.21'; Display = 'v2026.11.21 · OpenClaw 2026.11.4' }
 }
+if (-not $SmokeTest -and (Get-Command Sync-EmTroLyInstalledUiIfNewer -ErrorAction SilentlyContinue)) {
+  try { [void](Sync-EmTroLyInstalledUiIfNewer -PayloadRoot $PayloadRoot) } catch { }
+}
 
 $xamlText = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -654,7 +657,14 @@ $xamlText = @'
               </StackPanel>
             </Border>
 
-            <TextBlock x:Name="VersionText" Text="v2026.11.23 · Anh Lập Trình" FontSize="11" Foreground="#94A3B8" Margin="15,2,0,0" TextTrimming="CharacterEllipsis"/>
+            <Grid Margin="15,2,0,0">
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <TextBlock x:Name="VersionText" Grid.Column="0" Text="v2026.11.23 · Anh Lập Trình" FontSize="11" Foreground="#94A3B8" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+              <Button x:Name="SidebarUpdateLinkBtn" Grid.Column="1" Background="Transparent" BorderThickness="0" Cursor="Hand" Content="Cập nhật" FontSize="11" FontWeight="SemiBold" Foreground="#2563EB" Padding="6,0,0,0" VerticalAlignment="Center" ToolTip="Kiểm tra phiên bản mới trên GitHub và cập nhật tự động"/>
+            </Grid>
           </StackPanel>
         </Border>
 
@@ -697,6 +707,7 @@ $xamlText = @'
                 <TextBlock Text="Đã kết nối Zalo" FontSize="12" FontWeight="Bold" Foreground="#065F46" VerticalAlignment="Center"/>
               </StackPanel>
             </Border>
+            <Button x:Name="HeaderUpdateBtn" Style="{StaticResource SecondaryBtn}" Content="↻ Kiểm tra cập nhật" VerticalAlignment="Center" Padding="13,0" Height="36" Margin="0,0,8,0" ToolTip="Kiểm tra phiên bản mới trên GitHub và cập nhật ứng dụng"/>
             <Button x:Name="HeaderQuickBtn" Style="{StaticResource SoftAccentBtn}" Content="Mở Codex CLI" VerticalAlignment="Center" MinWidth="146" Padding="14,0" Height="36"/>
           </StackPanel>
           <StackPanel VerticalAlignment="Center">
@@ -704,6 +715,26 @@ $xamlText = @'
             <TextBlock x:Name="HeaderSubtitle" Text="Nhập 4 thông tin cơ bản bên dưới rồi bấm Cài đặt — mọi thứ còn lại hoàn toàn tự động" FontSize="12.5" Foreground="#64748B" Margin="0,2,0,0" TextWrapping="Wrap"/>
           </StackPanel>
         </DockPanel>
+      </Border>
+
+      <!-- GitHub New Version Notification & Live Self-Update Banner -->
+      <Border x:Name="AppUpdateBanner" DockPanel.Dock="Top" Background="#EFF6FF" BorderBrush="#93C5FD" BorderThickness="0,0,0,1" Padding="24,10" Visibility="Collapsed">
+        <StackPanel>
+          <DockPanel>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="14,0,0,0">
+              <Button x:Name="AppUpdateNotesBtn" Style="{StaticResource SecondaryBtn}" Content="Xem trên GitHub" Height="32" Padding="12,0" FontSize="12" Margin="0,0,8,0"/>
+              <Button x:Name="AppUpdateNowBtn" Style="{StaticResource PrimaryBtn}" Content="↑ Cập nhật ngay" Height="32" Padding="14,0" FontSize="12" Margin="0,0,8,0"/>
+              <Button x:Name="AppUpdateDismissBtn" Style="{StaticResource SecondaryBtn}" Content="Để sau" Height="32" Padding="10,0" FontSize="12"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+              <Border Background="#2563EB" CornerRadius="6" Padding="7,2" Margin="0,0,10,0" VerticalAlignment="Center">
+                <TextBlock x:Name="AppUpdateBadgeText" Text="BẢN MỚI" FontSize="10.5" FontWeight="Bold" Foreground="#FFFFFF"/>
+              </Border>
+              <TextBlock x:Name="AppUpdateTitleText" Text="Đã có phiên bản mới trên GitHub!" FontSize="13" FontWeight="SemiBold" Foreground="#1E3A8A" VerticalAlignment="Center" TextWrapping="Wrap"/>
+            </StackPanel>
+          </DockPanel>
+          <ProgressBar x:Name="AppUpdateProgressBar" Style="{StaticResource ModernProgressBar}" Height="7" Minimum="0" Maximum="100" Value="0" Margin="0,8,0,0" Visibility="Collapsed"/>
+        </StackPanel>
       </Border>
 
       <!-- Bottom Sticky Action Bar (Uniform 38px Buttons, Never Clips Hint Text) -->
@@ -1262,6 +1293,17 @@ $xamlText = @'
         <!-- VIEW E: DIAGNOSTICS, PRE-FLIGHT & SUPPORT (Symmetrical Button Grids) -->
         <ScrollViewer x:Name="ViewDiagnostics" VerticalScrollBarVisibility="Auto" Padding="0,0,6,0" Visibility="Collapsed">
           <StackPanel>
+            <!-- App Self-Update Card -->
+            <Border Style="{StaticResource CardBorder}" Margin="0,0,0,14">
+              <DockPanel>
+                <Button x:Name="DiagCheckUpdateBtn" DockPanel.Dock="Right" Style="{StaticResource PrimaryBtn}" Content="↻ Kiểm tra &amp; Cập nhật phiên bản" MinWidth="220" VerticalAlignment="Center"/>
+                <StackPanel VerticalAlignment="Center" Margin="0,0,14,0">
+                  <TextBlock Text="Cập nhật phiên bản Em Trợ Lý từ GitHub" FontSize="15" FontWeight="Bold"/>
+                  <TextBlock x:Name="DiagUpdateStatusText" Text="Kiểm tra bản phát hành mới nhất trên GitHub, xác thực SHA-256 và nâng cấp tự động (giữ nguyên dữ liệu &amp; bản quyền)." FontSize="12.5" Foreground="#64748B" Margin="0,2,0,0" TextWrapping="Wrap"/>
+                </StackPanel>
+              </DockPanel>
+            </Border>
+
             <!-- Pre-flight Check Card -->
             <Border Style="{StaticResource CardBorder}" Margin="0,0,0,14">
               <StackPanel>
@@ -1768,6 +1810,7 @@ $sidebarStatusPill  = Get-Ui 'SidebarStatusPill'
 $sidebarStatusDot   = Get-Ui 'SidebarStatusDot'
 $sidebarStatusText  = Get-Ui 'SidebarStatusText'
 $versionText        = Get-Ui 'VersionText'
+$sidebarUpdateLinkBtn = Get-Ui 'SidebarUpdateLinkBtn'
 $navHomeBtn         = Get-Ui 'NavHomeBtn'
 $navModularBtn      = Get-Ui 'NavModularBtn'
 $navStoreBtn        = Get-Ui 'NavStoreBtn'
@@ -1776,9 +1819,17 @@ $navCodexBtn        = Get-Ui 'NavCodexBtn'
 $navDiagBtn         = Get-Ui 'NavDiagBtn'
 $sidebarResetAllBtn = Get-Ui 'SidebarResetAllBtn'
 $headerZaloBadge    = Get-Ui 'HeaderZaloBadge'
+$headerUpdateBtn    = Get-Ui 'HeaderUpdateBtn'
 $headerQuickBtn     = Get-Ui 'HeaderQuickBtn'
 $headerTitle        = Get-Ui 'HeaderTitle'
 $headerSubtitle     = Get-Ui 'HeaderSubtitle'
+$appUpdateBanner    = Get-Ui 'AppUpdateBanner'
+$appUpdateBadgeText = Get-Ui 'AppUpdateBadgeText'
+$appUpdateTitleText = Get-Ui 'AppUpdateTitleText'
+$appUpdateNotesBtn  = Get-Ui 'AppUpdateNotesBtn'
+$appUpdateNowBtn    = Get-Ui 'AppUpdateNowBtn'
+$appUpdateDismissBtn = Get-Ui 'AppUpdateDismissBtn'
+$appUpdateProgressBar = Get-Ui 'AppUpdateProgressBar'
 $stopTaskButton     = Get-Ui 'StopTaskBtn'
 $cancelButton       = Get-Ui 'CancelBtn'
 $primaryActionBtn   = Get-Ui 'PrimaryActionBtn'
@@ -1936,6 +1987,8 @@ if ($codexOutputBox) {
   $codexOutputBox.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
 }
 
+$diagCheckUpdateBtn = Get-Ui 'DiagCheckUpdateBtn'
+$diagUpdateStatusText = Get-Ui 'DiagUpdateStatusText'
 $runPreflightBtn    = Get-Ui 'RunPreflightBtn'
 $preflightListPanel = Get-Ui 'PreflightListPanel'
 $diagAutoHealBtn    = Get-Ui 'DiagAutoHealBtn'
@@ -2096,6 +2149,12 @@ $script:storeCategory = 'all'
 $script:storeCatalogCache = $null
 $script:activeStoreCombo = $null
 $script:detachedPayloadDir = $null
+$script:latestUpdateInfo = $null
+$script:appUpdateChecking = $false
+$script:appUpdateInteractive = $false
+$script:appUpdateDownloading = $false
+$script:appUpdateStatusFile = ''
+$script:relaunchingForUpdate = $false
 
 $codexGuideText = "Hướng dẫn nhanh:`r`n1. Chọn thư mục cần chỉnh sửa (mặc định là thư mục trợ lý OpenClaw).`r`n2. Nhập yêu cầu bằng tiếng Việt vào ô phía trên (hoặc bấm 1 mẫu gợi ý).`r`n3. Bấm `"Thực hiện bằng Codex`" để Codex CLI tự đọc và sửa tệp giúp bạn."
 $codexDirBox.Text = Get-CodexDefaultWorkspace
@@ -2669,6 +2728,12 @@ function Set-Buttons {
     if ($script:isManageMode) { '← Về Tổng quan' } else { '← Về Cài đặt' }
   } else { 'Mở Codex CLI' }
   $headerQuickBtn.IsEnabled = (-not $script:installRunning -and -not $script:retryEditor)
+  if ($headerUpdateBtn) {
+    $headerUpdateBtn.IsEnabled = (-not $script:installRunning -and -not $script:appUpdateChecking -and -not $script:appUpdateDownloading)
+  }
+  if ($diagCheckUpdateBtn) {
+    $diagCheckUpdateBtn.IsEnabled = (-not $script:installRunning -and -not $script:appUpdateChecking -and -not $script:appUpdateDownloading)
+  }
 
   if ($script:isManageMode) {
     $sidebarStatusPill.Background = [System.Windows.Media.Brushes]::Transparent
@@ -4835,6 +4900,277 @@ $headerQuickBtn.Add_Click({
   if ($script:currentView -eq 'codex') { Set-NavActive 'home' } else { Set-NavActive 'codex' }
 })
 
+# GitHub Self-Update Check, Notification Banner & SHA-256 Verified Auto-Update
+$appUpdatePollTimer = New-Object System.Windows.Threading.DispatcherTimer
+$appUpdatePollTimer.Interval = [TimeSpan]::FromMilliseconds(150)
+$appUpdatePollTimer.Add_Tick({
+  if (-not $script:appUpdateDownloading -or [string]::IsNullOrWhiteSpace($script:appUpdateStatusFile)) { return }
+  if (Test-Path -LiteralPath $script:appUpdateStatusFile -PathType Leaf) {
+    try {
+      $msgTxt = ([IO.File]::ReadAllText($script:appUpdateStatusFile, [System.Text.Encoding]::UTF8)).Trim()
+      if ($msgTxt) {
+        if ($appUpdateTitleText) { $appUpdateTitleText.Text = $msgTxt }
+        if ($diagUpdateStatusText) { $diagUpdateStatusText.Text = $msgTxt }
+        if ($appUpdateProgressBar -and $msgTxt -match '(?<!\d)(\d{1,3})%') {
+          $pctVal = [Math]::Max(4, [Math]::Min(100, [int]$Matches[1]))
+          $appUpdateProgressBar.IsIndeterminate = $false
+          $appUpdateProgressBar.Value = $pctVal
+        }
+      }
+    } catch { }
+  }
+})
+
+function Start-AppSelfUpdate {
+  if ($script:installRunning -or $script:codexRunning) {
+    Show-Error 'Hãy đợi tiến trình đang chạy hoàn tất trước khi cập nhật phiên bản ứng dụng.'
+    return
+  }
+  if ($script:appUpdateDownloading -or -not $script:latestUpdateInfo -or -not $script:latestUpdateInfo.HasUpdate) {
+    return
+  }
+  $upd = $script:latestUpdateInfo
+  $script:appUpdateDownloading = $true
+  $script:appUpdateStatusFile = Join-Path ([IO.Path]::GetTempPath()) ('emtroly-app-update-' + [guid]::NewGuid().ToString('N') + '.status')
+
+  if ($appUpdateBanner) { $appUpdateBanner.Visibility = [System.Windows.Visibility]::Visible }
+  if ($appUpdateBadgeText) { $appUpdateBadgeText.Text = "v$($upd.LatestVersion)" }
+  if ($appUpdateTitleText) { $appUpdateTitleText.Text = "Đang kết nối GitHub tải bản cập nhật Em Trợ Lý v$($upd.LatestVersion)..." }
+  if ($appUpdateProgressBar) {
+    $appUpdateProgressBar.Visibility = [System.Windows.Visibility]::Visible
+    $appUpdateProgressBar.IsIndeterminate = $false
+    $appUpdateProgressBar.Value = 5
+  }
+  if ($appUpdateNowBtn) {
+    $appUpdateNowBtn.IsEnabled = $false
+    $appUpdateNowBtn.Content = 'Đang cập nhật...'
+  }
+  if ($appUpdateDismissBtn) { $appUpdateDismissBtn.IsEnabled = $false }
+  if ($headerUpdateBtn) {
+    $headerUpdateBtn.IsEnabled = $false
+    $headerUpdateBtn.Content = 'Đang cập nhật...'
+  }
+  if ($diagCheckUpdateBtn) {
+    $diagCheckUpdateBtn.IsEnabled = $false
+    $diagCheckUpdateBtn.Content = 'Đang tải bản cập nhật...'
+  }
+  $appUpdatePollTimer.Start()
+
+  Start-AsyncUiTask -Params @{
+    HelperPath = $wizardHelperPath
+    UpdateObj  = $upd
+    StatusPath = $script:appUpdateStatusFile
+  } -Work {
+    param($HelperPath, $UpdateObj, $StatusPath)
+    . ([ScriptBlock]::Create([IO.File]::ReadAllText($HelperPath, [System.Text.Encoding]::UTF8)))
+    return (Install-EmTroLyAppUpdate -UpdateInfo $UpdateObj -StatusFile $StatusPath)
+  } -OnComplete {
+    param($res, $err)
+    $appUpdatePollTimer.Stop()
+    if ($script:appUpdateStatusFile -and (Test-Path -LiteralPath $script:appUpdateStatusFile -PathType Leaf)) {
+      Remove-Item -LiteralPath $script:appUpdateStatusFile -Force -ErrorAction SilentlyContinue
+    }
+    $script:appUpdateStatusFile = ''
+    $script:appUpdateDownloading = $false
+
+    if ($err -or -not $res -or -not $res.Ok) {
+      $errDetail = if ($err -and $err.Exception) { [string]$err.Exception.Message } else { 'Không thể tải hoặc xác minh gói cập nhật từ GitHub.' }
+      $retryVer = if ($script:latestUpdateInfo -and $script:latestUpdateInfo.LatestVersion) { [string]$script:latestUpdateInfo.LatestVersion } else { '' }
+      if ($appUpdateProgressBar) { $appUpdateProgressBar.Visibility = [System.Windows.Visibility]::Collapsed }
+      if ($appUpdateNowBtn) {
+        $appUpdateNowBtn.IsEnabled = $true
+        $appUpdateNowBtn.Content = "↑ Thử cập nhật lại"
+      }
+      if ($appUpdateDismissBtn) { $appUpdateDismissBtn.IsEnabled = $true }
+      if ($headerUpdateBtn) {
+        $headerUpdateBtn.IsEnabled = (-not $script:installRunning)
+        $headerUpdateBtn.Content = if ($retryVer) { "↑ Cập nhật v$retryVer" } else { '↻ Kiểm tra cập nhật' }
+      }
+      if ($diagCheckUpdateBtn) {
+        $diagCheckUpdateBtn.IsEnabled = (-not $script:installRunning)
+        $diagCheckUpdateBtn.Content = if ($retryVer) { "↑ Cập nhật lên v$retryVer" } else { '↻ Kiểm tra & Cập nhật phiên bản' }
+      }
+      if ($appUpdateTitleText) { $appUpdateTitleText.Text = "Cập nhật chưa hoàn tất: $errDetail" }
+      if ($diagUpdateStatusText) { $diagUpdateStatusText.Text = "Cập nhật chưa hoàn tất: $errDetail" }
+      Show-Error "Không thể hoàn tất cập nhật phiên bản mới:`n$errDetail"
+      return
+    }
+
+    if ($appUpdateProgressBar) { $appUpdateProgressBar.Value = 100 }
+    if ($appUpdateTitleText) { $appUpdateTitleText.Text = "✓ Đã tải & xác minh an toàn SHA-256 bản v$($res.Version)! Đang mở phiên bản mới..." }
+    if ($diagUpdateStatusText) { $diagUpdateStatusText.Text = "✓ Đã tải sẵn sàng bản v$($res.Version): $($res.ExePath)" }
+
+    if (-not $SmokeTest -and -not $script:isManageMode -and $script:draftDirty) {
+      Save-CurrentFormDraft
+    }
+    $script:relaunchingForUpdate = $true
+    $script:resultCode = 0
+
+    if ($env:EMTROLY_TEST_SKIP_UPDATE_RELAUNCH -eq '1') {
+      if ($appUpdateNowBtn) { $appUpdateNowBtn.Content = "✓ Đã cập nhật v$($res.Version)" }
+      if ($headerUpdateBtn) { $headerUpdateBtn.Content = "✓ Đã tải v$($res.Version)" }
+      return
+    }
+
+    try {
+      if ($script:singleInstanceMutex) {
+        try { $script:singleInstanceMutex.ReleaseMutex() } catch { }
+        try { $script:singleInstanceMutex.Dispose() } catch { }
+        $script:singleInstanceMutex = $null
+      }
+      Start-EmTroLyUpdatedInstallerHandoff -InstallerExePath ([string]$res.ExePath) -WaitParentPid $PID
+      $window.Close()
+    } catch {
+      $script:relaunchingForUpdate = $false
+      Show-Info "Đã tải bản cập nhật v$($res.Version) tại:`n$($res.ExePath)`n`nHãy mở tệp này để hoàn tất cập nhật." 'Đã tải xong bản mới'
+    }
+  }
+}
+
+function Start-AppUpdateCheck([switch]$Interactive) {
+  if ($script:appUpdateChecking -or $script:appUpdateDownloading) { return }
+  $script:appUpdateChecking = $true
+  $script:appUpdateInteractive = [bool]$Interactive
+  if ($headerUpdateBtn) {
+    $headerUpdateBtn.IsEnabled = $false
+    $headerUpdateBtn.Content = 'Đang kiểm tra...'
+  }
+  if ($diagCheckUpdateBtn) {
+    $diagCheckUpdateBtn.IsEnabled = $false
+    $diagCheckUpdateBtn.Content = 'Đang kiểm tra GitHub...'
+  }
+  if ($script:appUpdateInteractive -and $diagUpdateStatusText) {
+    $diagUpdateStatusText.Text = 'Đang kiểm tra phiên bản mới nhất trên GitHub...'
+  }
+
+  Start-AsyncUiTask -Params @{
+    HelperPath = $wizardHelperPath
+    PayloadDir = $PayloadRoot
+    CurVer     = [string]$appVersionObj.InstallerVersion
+  } -Work {
+    param($HelperPath, $PayloadDir, $CurVer)
+    . ([ScriptBlock]::Create([IO.File]::ReadAllText($HelperPath, [System.Text.Encoding]::UTF8)))
+    return (Get-EmTroLyAppUpdateInfo -PayloadRoot $PayloadDir -CurrentVersion $CurVer)
+  } -OnComplete {
+    param($res, $err)
+    $wasInteractive = [bool]$script:appUpdateInteractive
+    $script:appUpdateChecking = $false
+    $script:appUpdateInteractive = $false
+    $canEnable = (-not $script:installRunning -and -not $script:appUpdateDownloading)
+    if ($headerUpdateBtn) { $headerUpdateBtn.IsEnabled = $canEnable }
+    if ($diagCheckUpdateBtn) { $diagCheckUpdateBtn.IsEnabled = $canEnable }
+
+    if ($err -or -not $res -or -not $res.Ok) {
+      if ($headerUpdateBtn) {
+        $headerUpdateBtn.Content = '↻ Kiểm tra cập nhật'
+        $headerUpdateBtn.Style = $window.FindResource('SecondaryBtn')
+      }
+      if ($diagCheckUpdateBtn) { $diagCheckUpdateBtn.Content = '↻ Kiểm tra & Cập nhật phiên bản' }
+      $failMsg = if ($res -and $res.Message) { [string]$res.Message } else { 'Không kiểm tra được phiên bản mới trên GitHub. Hãy kiểm tra kết nối mạng.' }
+      if ($diagUpdateStatusText) { $diagUpdateStatusText.Text = $failMsg }
+      if ($wasInteractive) { Show-Error $failMsg }
+      return
+    }
+
+    if ($res.HasUpdate) {
+      $script:latestUpdateInfo = $res
+      if ($headerUpdateBtn) {
+        $headerUpdateBtn.Content = "↑ Cập nhật v$($res.LatestVersion)"
+        $headerUpdateBtn.Style = $window.FindResource('PrimaryBtn')
+      }
+      if ($sidebarUpdateLinkBtn) {
+        $sidebarUpdateLinkBtn.Content = "↑ Có bản v$($res.LatestVersion)"
+      }
+      if ($diagCheckUpdateBtn) {
+        $diagCheckUpdateBtn.Content = "↑ Cập nhật lên v$($res.LatestVersion)"
+      }
+      if ($diagUpdateStatusText) {
+        $diagUpdateStatusText.Text = "Đã có phiên bản mới v$($res.LatestVersion) trên GitHub (phiên bản đang chạy: v$($res.CurrentVersion)). Bấm nút bên phải để tải và cập nhật ngay."
+      }
+      if ($appUpdateBanner) {
+        $appUpdateBadgeText.Text = "v$($res.LatestVersion)"
+        $appUpdateTitleText.Text = "Đã có phiên bản mới Em Trợ Lý v$($res.LatestVersion) trên GitHub (đang dùng v$($res.CurrentVersion)) — giữ nguyên dữ liệu & bản quyền."
+        $appUpdateNowBtn.Content = "↑ Cập nhật ngay"
+        $appUpdateNowBtn.IsEnabled = $true
+        $appUpdateDismissBtn.IsEnabled = $true
+        $appUpdateProgressBar.Visibility = [System.Windows.Visibility]::Collapsed
+        $appUpdateBanner.Visibility = [System.Windows.Visibility]::Visible
+      }
+      if ($wasInteractive) {
+        $notesPart = if ($res.ReleaseNotes) { "`n`nĐiểm mới:`n$($res.ReleaseNotes)" } else { '' }
+        $askUpd = [System.Windows.MessageBox]::Show(
+          $window,
+          "Đã có phiên bản mới Em Trợ Lý v$($res.LatestVersion) trên GitHub (phiên bản hiện tại: v$($res.CurrentVersion)).$notesPart`n`nBạn có muốn tự động tải về và cập nhật ngay bây giờ không?`n(Giữ nguyên 100% cấu hình trợ lý, dữ liệu và khóa bản quyền trên máy)",
+          'Có phiên bản mới trên GitHub',
+          [System.Windows.MessageBoxButton]::YesNo,
+          [System.Windows.MessageBoxImage]::Information
+        )
+        if ($askUpd -eq [System.Windows.MessageBoxResult]::Yes) {
+          Start-AppSelfUpdate
+        }
+      }
+      return
+    }
+
+    $script:latestUpdateInfo = $res
+    if ($headerUpdateBtn) {
+      $headerUpdateBtn.Content = '↻ Kiểm tra cập nhật'
+      $headerUpdateBtn.Style = $window.FindResource('SecondaryBtn')
+    }
+    if ($sidebarUpdateLinkBtn) { $sidebarUpdateLinkBtn.Content = 'Cập nhật' }
+    if ($diagCheckUpdateBtn) { $diagCheckUpdateBtn.Content = '↻ Kiểm tra & Cập nhật phiên bản' }
+    if ($diagUpdateStatusText) { $diagUpdateStatusText.Text = [string]$res.Message }
+    if ($wasInteractive) {
+      $titleTxt = if ($res.BuildingAssets) { 'Phiên bản mới đang đóng gói' } else { 'Đã là phiên bản mới nhất' }
+      Show-Info ([string]$res.Message) $titleTxt
+    }
+  }
+}
+
+$invokeHeaderOrDiagUpdateClick = {
+  if ($script:installRunning -or $script:appUpdateChecking -or $script:appUpdateDownloading) { return }
+  if ($script:latestUpdateInfo -and $script:latestUpdateInfo.HasUpdate) {
+    $updNow = $script:latestUpdateInfo
+    $notesSnippet = if ($updNow.ReleaseNotes) { "`n`nĐiểm mới:`n$($updNow.ReleaseNotes)" } else { '' }
+    $confirmUp = [System.Windows.MessageBox]::Show(
+      $window,
+      "Cập nhật Em Trợ Lý từ v$($updNow.CurrentVersion) lên phiên bản mới v$($updNow.LatestVersion) ngay bây giờ?$notesSnippet`n`nỨng dụng sẽ tự động tải gói chính thức từ GitHub, xác thực SHA-256 và khởi động lại vào phiên bản mới (giữ nguyên toàn bộ dữ liệu & bản quyền).",
+      "Cập nhật Em Trợ Lý v$($updNow.LatestVersion)",
+      [System.Windows.MessageBoxButton]::YesNo,
+      [System.Windows.MessageBoxImage]::Question
+    )
+    if ($confirmUp -eq [System.Windows.MessageBoxResult]::Yes) {
+      Start-AppSelfUpdate
+    }
+  } else {
+    Start-AppUpdateCheck -Interactive
+  }
+}
+
+if ($headerUpdateBtn) { $headerUpdateBtn.Add_Click($invokeHeaderOrDiagUpdateClick) }
+if ($sidebarUpdateLinkBtn) { $sidebarUpdateLinkBtn.Add_Click($invokeHeaderOrDiagUpdateClick) }
+if ($diagCheckUpdateBtn) { $diagCheckUpdateBtn.Add_Click($invokeHeaderOrDiagUpdateClick) }
+if ($appUpdateNowBtn) { $appUpdateNowBtn.Add_Click({ Start-AppSelfUpdate }) }
+if ($appUpdateDismissBtn) {
+  $appUpdateDismissBtn.Add_Click({
+    if (-not $script:appUpdateDownloading -and $appUpdateBanner) {
+      $appUpdateBanner.Visibility = [System.Windows.Visibility]::Collapsed
+    }
+  })
+}
+if ($appUpdateNotesBtn) {
+  $appUpdateNotesBtn.Add_Click({
+    $url = if ($script:latestUpdateInfo -and $script:latestUpdateInfo.ReleasePageUrl) {
+      [string]$script:latestUpdateInfo.ReleasePageUrl
+    } else {
+      'https://github.com/workanhlaptrinh123/installer_emtroly/releases/latest'
+    }
+    if (Test-EmTroLyTrustedGitHubUrl -Url $url -AllowLoopback $false) {
+      try { Start-Process -FilePath $url | Out-Null } catch { }
+    }
+  })
+}
+
 $dashOpenWebBtn.Add_Click({
   if ($script:gatewayDashboardUrl) {
     Start-Process -FilePath $script:gatewayDashboardUrl | Out-Null
@@ -5090,6 +5426,7 @@ $window.Add_Closing({
     Save-CurrentFormDraft
   }
   Stop-ZaloQrSession
+  if ($appUpdatePollTimer) { $appUpdatePollTimer.Stop() }
   if ($asyncTimer) { $asyncTimer.Stop() }
   foreach ($asyncItem in @($script:asyncTasks)) {
     try { $asyncItem.Ps.Stop() } catch { }
@@ -5104,7 +5441,7 @@ $window.Add_Closing({
   }
   Cleanup-Secret
   $script:sessionApiKeyFallback = ''
-  if (-not $script:retryEditor -and -not $script:installCompleted) {
+  if (-not $script:retryEditor -and -not $script:installCompleted -and -not $script:relaunchingForUpdate) {
     $script:resultCode = 2
   }
 })
@@ -5154,6 +5491,9 @@ $window.Add_ContentRendered({
   $window.Activate()
   if (-not $SmokeTest -and -not $script:licenseVerified) {
     [void]$licensePwdBox.Focus()
+  }
+  if (-not $SmokeTest -and $env:EMTROLY_DISABLE_AUTO_UPDATE_CHECK -ne '1') {
+    Start-AppUpdateCheck
   }
 })
 try {

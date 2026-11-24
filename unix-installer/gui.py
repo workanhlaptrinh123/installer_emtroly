@@ -130,12 +130,15 @@ def main():
     import settings
     import telegram
     import uninstaller
+    import updater
+    import webbrowser
 
     source = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
     app_ver = read_installer_version(source)
     events = queue.Queue()
     codex_events = queue.Queue()
     qr_events = queue.Queue()
+    update_events = queue.Queue()
 
     window = tk.Tk()
     window.title(f"Em Trợ Lý v{app_ver} - Cài đặt, Zalo QR & Codex CLI")
@@ -180,7 +183,7 @@ def main():
     style.configure("Secondary.TButton", font=font_regular, foreground="#1E293B", background="#F8FAFC", padding=(14, 7))
 
     window.columnconfigure(0, weight=1)
-    window.rowconfigure(1, weight=1)
+    window.rowconfigure(2, weight=1)
 
     header = ttk.Frame(window, style="Header.TFrame", padding=(22, 14))
     header.grid(row=0, column=0, sticky="ew")
@@ -205,8 +208,26 @@ def main():
     )
     ttk.Label(header, textvariable=subtitle_var, style="HeaderSub.TLabel").grid(row=1, column=1, sticky="w", pady=(2, 0))
 
+    update_banner = tk.Frame(window, bg="#EFF6FF", bd=1, relief="solid", padx=18, pady=8)
+    update_banner.grid(row=1, column=0, sticky="ew", padx=16, pady=(10, 0))
+    update_banner.columnconfigure(0, weight=1)
+    update_banner_var = tk.StringVar(value="")
+    tk.Label(
+        update_banner,
+        textvariable=update_banner_var,
+        font=font_bold,
+        fg="#1E3A8A",
+        bg="#EFF6FF",
+        anchor="w",
+        justify="left",
+        wraplength=640,
+    ).grid(row=0, column=0, sticky="w")
+    update_banner_btns = tk.Frame(update_banner, bg="#EFF6FF")
+    update_banner_btns.grid(row=0, column=1, sticky="e", padx=(12, 0))
+    update_banner.grid_remove()
+
     notebook = ttk.Notebook(window)
-    notebook.grid(row=1, column=0, sticky="nsew", padx=16, pady=(12, 16))
+    notebook.grid(row=2, column=0, sticky="nsew", padx=16, pady=(12, 16))
 
     tab_connect = ttk.Frame(notebook, style="Card.TFrame", padding=20)
     tab_profile = ttk.Frame(notebook, style="Card.TFrame", padding=20)
@@ -223,6 +244,104 @@ def main():
 
     header_actions = ttk.Frame(header, style="Header.TFrame")
     header_actions.grid(row=0, column=2, rowspan=2, sticky="e")
+
+    update_state = {"info": None, "checking": False, "downloading": False}
+
+    def open_release_page():
+        info = update_state.get("info") or {}
+        url = str(info.get("release_url") or "https://github.com/workanhlaptrinh123/installer_emtroly/releases/latest")
+        if updater.is_trusted_github_url(url):
+            webbrowser.open(url)
+
+    def start_self_update():
+        if busy or codex_busy:
+            messagebox.showwarning("Đang bận", "Hãy đợi tác vụ đang chạy hoàn tất trước khi cập nhật phiên bản ứng dụng.")
+            return
+        info = update_state.get("info")
+        if update_state["downloading"] or not info or not info.get("has_update"):
+            return
+        update_state["downloading"] = True
+        update_banner.grid()
+        update_banner_var.set(f"Đang kết nối GitHub tải bản cập nhật Em Trợ Lý v{info['latest_version']}...")
+        update_now_btn.state(["disabled"])
+        update_dismiss_btn.state(["disabled"])
+        update_hdr_btn.state(["disabled"])
+        update_hdr_btn.configure(text="Đang cập nhật...")
+
+        def _upd_worker():
+            try:
+                dl_res = updater.download_and_verify_update(
+                    info,
+                    progress=lambda msg, _pct: update_events.put(("dl_progress", msg)),
+                )
+                apply_res = updater.apply_and_relaunch_update(
+                    dl_res["archive_path"],
+                    info,
+                    progress=lambda msg, _pct: update_events.put(("dl_progress", msg)),
+                )
+                update_events.put(("apply_done", {**dl_res, **apply_res}))
+            except Exception as exc:
+                update_events.put(("apply_error", str(exc)))
+
+        threading.Thread(target=_upd_worker, daemon=True).start()
+
+    def start_update_check(interactive=False):
+        if update_state["checking"] or update_state["downloading"]:
+            return
+        update_state["checking"] = True
+        update_hdr_btn.state(["disabled"])
+        update_hdr_btn.configure(text="Đang kiểm tra...")
+
+        def _chk_worker():
+            res = updater.check_for_updates(app_ver)
+            update_events.put(("check_done", (res, interactive)))
+
+        threading.Thread(target=_chk_worker, daemon=True).start()
+
+    def on_header_update_clicked():
+        if busy or update_state["checking"] or update_state["downloading"]:
+            return
+        info = update_state.get("info")
+        if info and info.get("has_update"):
+            notes_txt = f"\n\nĐiểm mới:\n{info['release_notes']}" if info.get("release_notes") else ""
+            if messagebox.askyesno(
+                f"Cập nhật Em Trợ Lý v{info['latest_version']}",
+                f"Cập nhật Em Trợ Lý từ v{info['current_version']} lên phiên bản mới v{info['latest_version']} ngay bây giờ?{notes_txt}\n\n"
+                "Ứng dụng sẽ tự động tải gói chính thức từ GitHub, xác thực SHA-256 và cập nhật an toàn (giữ nguyên toàn bộ dữ liệu & bản quyền).",
+            ):
+                start_self_update()
+        else:
+            start_update_check(interactive=True)
+
+    update_notes_btn = ttk.Button(
+        update_banner_btns,
+        text="Xem GitHub",
+        style="Secondary.TButton",
+        command=open_release_page,
+    )
+    update_notes_btn.pack(side="left", padx=(0, 6))
+    update_now_btn = ttk.Button(
+        update_banner_btns,
+        text="↑ Cập nhật ngay",
+        style="Primary.TButton",
+        command=start_self_update,
+    )
+    update_now_btn.pack(side="left", padx=(0, 6))
+    update_dismiss_btn = ttk.Button(
+        update_banner_btns,
+        text="Để sau",
+        style="Secondary.TButton",
+        command=update_banner.grid_remove,
+    )
+    update_dismiss_btn.pack(side="left")
+
+    update_hdr_btn = ttk.Button(
+        header_actions,
+        text="↻ Kiểm tra cập nhật",
+        style="Secondary.TButton",
+        command=on_header_update_clicked,
+    )
+    update_hdr_btn.pack(side="left", padx=(0, 8))
 
     quick_btn = ttk.Button(
         header_actions,
@@ -1334,6 +1453,77 @@ def main():
                     stop_qr_session()
                     messagebox.showinfo("Đăng nhập Zalo thành công", "Trợ lý OpenClaw đã kết nối Zalo cá nhân thành công!")
 
+        while True:
+            try:
+                ukind, uval = update_events.get_nowait()
+            except queue.Empty:
+                break
+            if ukind == "check_done":
+                res, interactive = uval
+                update_state["checking"] = False
+                update_hdr_btn.state(["!disabled"])
+                if not res.get("ok"):
+                    update_hdr_btn.configure(text="↻ Kiểm tra cập nhật", style="Secondary.TButton")
+                    if interactive:
+                        messagebox.showwarning("Kiểm tra cập nhật", res.get("message") or "Không thể kết nối GitHub.")
+                elif res.get("has_update"):
+                    update_state["info"] = res
+                    update_hdr_btn.configure(text=f"↑ Cập nhật v{res['latest_version']}", style="Primary.TButton")
+                    update_banner_var.set(
+                        f"Đã có phiên bản mới Em Trợ Lý v{res['latest_version']} trên GitHub (đang dùng v{res['current_version']}) — giữ nguyên dữ liệu & bản quyền."
+                    )
+                    update_now_btn.state(["!disabled"])
+                    update_dismiss_btn.state(["!disabled"])
+                    update_banner.grid()
+                    if interactive:
+                        notes_txt = f"\n\nĐiểm mới:\n{res['release_notes']}" if res.get("release_notes") else ""
+                        if messagebox.askyesno(
+                            "Có phiên bản mới trên GitHub",
+                            f"Đã có phiên bản mới Em Trợ Lý v{res['latest_version']} (phiên bản hiện tại: v{res['current_version']}).{notes_txt}\n\n"
+                            "Bạn có muốn tải về và cập nhật ngay bây giờ không?",
+                        ):
+                            start_self_update()
+                else:
+                    update_state["info"] = res
+                    update_hdr_btn.configure(text="↻ Kiểm tra cập nhật", style="Secondary.TButton")
+                    if interactive:
+                        messagebox.showinfo("Đã là phiên bản mới nhất", res.get("message") or f"Đang dùng bản mới nhất v{app_ver}.")
+            elif ukind == "dl_progress":
+                update_banner_var.set(uval)
+            elif ukind == "apply_done":
+                update_state["downloading"] = False
+                if uval.get("relaunched"):
+                    persist_unix_draft()
+                    stop_qr_session()
+                    window.destroy()
+                    return
+                update_now_btn.state(["!disabled"])
+                update_dismiss_btn.state(["!disabled"])
+                update_hdr_btn.state(["!disabled"])
+                update_hdr_btn.configure(text=f"✓ Đã tải v{uval.get('version', '')}", style="Secondary.TButton")
+                saved_to = uval.get("installed_path", "")
+                manual_cmd = uval.get("manual_command", "")
+                extra_cmd = f"\n\nChạy lệnh để cài gói hệ thống:\n{manual_cmd}" if manual_cmd else ""
+                update_banner_var.set(f"✓ Đã tải và xác minh SHA-256 bản v{uval.get('version', '')} tại: {saved_to}")
+                messagebox.showinfo(
+                    "Đã tải xong bản cập nhật",
+                    f"Đã tải và xác minh an toàn SHA-256 bản v{uval.get('version', '')} tại:\n{saved_to}{extra_cmd}",
+                )
+            elif ukind == "apply_error":
+                update_state["downloading"] = False
+                info = update_state.get("info") or {}
+                ver_lbl = info.get("latest_version", "")
+                update_now_btn.state(["!disabled"])
+                update_now_btn.configure(text="↑ Thử cập nhật lại")
+                update_dismiss_btn.state(["!disabled"])
+                update_hdr_btn.state(["!disabled"])
+                update_hdr_btn.configure(
+                    text=f"↑ Cập nhật v{ver_lbl}" if ver_lbl else "↻ Kiểm tra cập nhật",
+                    style="Primary.TButton" if ver_lbl else "Secondary.TButton",
+                )
+                update_banner_var.set(f"Cập nhật chưa hoàn tất: {uval}")
+                messagebox.showerror("Không thể cập nhật", uval)
+
         window.after(200, poll)
 
     def do_uninstall():
@@ -1559,6 +1749,8 @@ def main():
     refresh_modular_status()
 
     refresh_codex_state()
+    if os.environ.get("EMTROLY_DISABLE_AUTO_UPDATE_CHECK") != "1":
+        window.after(450, lambda: start_update_check(interactive=False))
     window.protocol("WM_DELETE_WINDOW", close)
     window.after(200, poll)
     window.mainloop()
