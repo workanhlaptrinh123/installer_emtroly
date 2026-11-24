@@ -19,7 +19,8 @@ NAME="caidattroly-$PLATFORM-$ARCH-PREVIEW"
   --hidden-import shlex --hidden-import uuid --hidden-import argparse --hidden-import copy \
   --hidden-import datetime --hidden-import dataclasses --hidden-import stat --hidden-import typing \
   --hidden-import codex_setup --hidden-import license_gate --hidden-import runner \
-  --hidden-import net_utils --hidden-import uninstaller --hidden-import ssl --hidden-import http.client \
+  --hidden-import net_utils --hidden-import uninstaller --hidden-import updater --hidden-import webbrowser \
+  --hidden-import ssl --hidden-import http.client \
   --hidden-import configuration --hidden-import secrets --hidden-import hmac --hidden-import base64 \
   --hidden-import hashlib --hidden-import tarfile --hidden-import zipfile --hidden-import importlib.util \
   --hidden-import urllib.request --hidden-import urllib.error --hidden-import urllib.parse \

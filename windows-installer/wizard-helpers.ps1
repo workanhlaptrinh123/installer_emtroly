@@ -1550,3 +1550,394 @@ function Get-EmTroLyOpenClawVersionInfo {
     Root             = $root
   }
 }
+
+function Set-EmTroLyTlsSecurityProtocol {
+  try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]3072 -bor [Net.SecurityProtocolType]12288
+  } catch {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  }
+}
+
+function Test-EmTroLyTrustedGitHubUrl {
+  param(
+    [string]$Url = '',
+    [bool]$AllowLoopback = $false
+  )
+  if ([string]::IsNullOrWhiteSpace($Url)) { return $false }
+  $parsed = $null
+  if (-not [uri]::TryCreate($Url.Trim(), [System.UriKind]::Absolute, [ref]$parsed)) { return $false }
+  if ($AllowLoopback -and $parsed.Scheme -ieq 'http' -and $parsed.Host -ieq '127.0.0.1') {
+    return $true
+  }
+  if ($parsed.Scheme -ine 'https') { return $false }
+  $hostLower = ([string]$parsed.Host).ToLowerInvariant()
+  if ($hostLower -eq 'github.com' -or
+      $hostLower -eq 'api.github.com' -or
+      $hostLower.EndsWith('.github.com') -or
+      $hostLower.EndsWith('.githubusercontent.com')) {
+    return $true
+  }
+  return $false
+}
+
+function Get-EmTroLyAppUpdateInfo {
+  param(
+    [string]$PayloadRoot = '',
+    [string]$CurrentVersion = '',
+    [string]$Repo = 'workanhlaptrinh123/installer_emtroly',
+    [string]$ApiBaseUrl = ''
+  )
+  Set-EmTroLyTlsSecurityProtocol
+  $curVer = if (-not [string]::IsNullOrWhiteSpace($CurrentVersion)) {
+    $CurrentVersion.Trim().TrimStart('v', 'V')
+  } else {
+    (Get-EmTroLyAppVersion -PayloadRoot $PayloadRoot).InstallerVersion
+  }
+
+  $effectiveApiBase = if (-not [string]::IsNullOrWhiteSpace($ApiBaseUrl)) {
+    $ApiBaseUrl.Trim().TrimEnd('/')
+  } elseif (-not [string]::IsNullOrWhiteSpace($env:EMTROLY_UPDATE_API_BASE)) {
+    $env:EMTROLY_UPDATE_API_BASE.Trim().TrimEnd('/')
+  } else {
+    "https://api.github.com/repos/$Repo/releases"
+  }
+
+  $allowLoopback = ((-not [string]::IsNullOrWhiteSpace($ApiBaseUrl)) -or (-not [string]::IsNullOrWhiteSpace($env:EMTROLY_UPDATE_API_BASE))) -and
+    ($effectiveApiBase -match '^http://127\.0\.0\.1:\d+')
+
+  if (-not (Test-EmTroLyTrustedGitHubUrl -Url "$effectiveApiBase/latest" -AllowLoopback $allowLoopback)) {
+    return [pscustomobject]@{
+      Ok             = $false
+      HasUpdate      = $false
+      BuildingAssets = $false
+      CurrentVersion = $curVer
+      LatestVersion  = ''
+      TagName        = ''
+      DownloadUrl    = ''
+      Sha256Url      = ''
+      ReleasePageUrl = ''
+      AssetSizeBytes = 0L
+      ReleaseNotes   = ''
+      Message        = 'Địa chỉ máy chủ kiểm tra cập nhật không hợp lệ (chỉ chấp nhận GitHub chính thức).'
+    }
+  }
+
+  $latestVer = ''
+  $tagName = ''
+  $downloadUrl = ''
+  $sha256Url = ''
+  $releasePageUrl = "https://github.com/$Repo/releases/latest"
+  $assetSize = 0L
+  $releaseNotes = ''
+  $apiErrMsg = ''
+
+  try {
+    $headers = @{
+      'User-Agent' = 'AnhLapTrinh-EmTroLy-Updater/1.0'
+      'Accept'     = 'application/vnd.github+json'
+    }
+    $rel = Invoke-RestMethod -UseBasicParsing -Method Get -Uri "$effectiveApiBase/latest" -Headers $headers -TimeoutSec 12 -MaximumRedirection 3
+    if ($rel -and $rel.tag_name) {
+      $tagName = ([string]$rel.tag_name).Trim()
+      $latestVer = $tagName.TrimStart('v', 'V')
+      if ($rel.html_url) { $releasePageUrl = ([string]$rel.html_url).Trim() }
+      if ($rel.body) {
+        $cleanNotes = ([string]$rel.body).Trim()
+        if ($cleanNotes.Length -gt 500) { $cleanNotes = $cleanNotes.Substring(0, 500).TrimEnd() + '...' }
+        $releaseNotes = $cleanNotes
+      }
+      $exeAsset = @($rel.assets | Where-Object { $_.name -eq 'emtroly.exe' } | Select-Object -First 1)
+      $shaAsset = @($rel.assets | Where-Object { $_.name -eq 'emtroly.exe.sha256' } | Select-Object -First 1)
+      if ($exeAsset.Count -gt 0 -and $exeAsset[0].browser_download_url) {
+        $downloadUrl = ([string]$exeAsset[0].browser_download_url).Trim()
+        if ($exeAsset[0].size) { $assetSize = [long]$exeAsset[0].size }
+      }
+      if ($shaAsset.Count -gt 0 -and $shaAsset[0].browser_download_url) {
+        $sha256Url = ([string]$shaAsset[0].browser_download_url).Trim()
+      }
+    }
+  } catch {
+    $apiErrMsg = [string]$_.Exception.Message
+  }
+
+  # Automatic CDN fallback if GitHub REST API rate-limits anonymous IPs (HTTP 403 / 429)
+  if ([string]::IsNullOrWhiteSpace($latestVer) -and -not $allowLoopback -and $effectiveApiBase -eq "https://api.github.com/repos/$Repo/releases") {
+    try {
+      $cdnBase = "https://github.com/$Repo/releases/latest/download"
+      $manifestResp = Invoke-WebRequest -UseBasicParsing -Method Get -Uri "$cdnBase/MANIFEST.txt" -Headers @{ 'User-Agent' = 'AnhLapTrinh-EmTroLy-Updater/1.0' } -TimeoutSec 12
+      $manifestTxt = if ($manifestResp.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($manifestResp.Content) } else { [string]$manifestResp.Content }
+      $verMatch = [regex]::Match($manifestTxt, '(?m)^installer_version=([0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?)\s*$')
+      if ($verMatch.Success) {
+        $latestVer = $verMatch.Groups[1].Value.Trim()
+        $tagName = "v$latestVer"
+        $downloadUrl = "https://github.com/$Repo/releases/download/$tagName/emtroly.exe"
+        $sha256Url = "https://github.com/$Repo/releases/download/$tagName/emtroly.exe.sha256"
+        $releasePageUrl = "https://github.com/$Repo/releases/tag/$tagName"
+      }
+    } catch { }
+  }
+
+  if ([string]::IsNullOrWhiteSpace($latestVer) -or $latestVer -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$') {
+    return [pscustomobject]@{
+      Ok             = $false
+      HasUpdate      = $false
+      BuildingAssets = $false
+      CurrentVersion = $curVer
+      LatestVersion  = ''
+      TagName        = ''
+      DownloadUrl    = ''
+      Sha256Url      = ''
+      ReleasePageUrl = $releasePageUrl
+      AssetSizeBytes = 0L
+      ReleaseNotes   = ''
+      Message        = 'Không kiểm tra được phiên bản mới trên GitHub. Vui lòng kiểm tra kết nối mạng rồi thử lại.'
+    }
+  }
+
+  $cmp = Compare-EmTroLyVersion -Current $curVer -Target $latestVer
+  if ($cmp -lt 0) {
+    $validUrls = (Test-EmTroLyTrustedGitHubUrl -Url $downloadUrl -AllowLoopback $allowLoopback) -and
+                 (Test-EmTroLyTrustedGitHubUrl -Url $sha256Url -AllowLoopback $allowLoopback)
+    if (-not $validUrls) {
+      return [pscustomobject]@{
+        Ok             = $true
+        HasUpdate      = $false
+        BuildingAssets = $true
+        CurrentVersion = $curVer
+        LatestVersion  = $latestVer
+        TagName        = $(if ($tagName) { $tagName } else { "v$latestVer" })
+        DownloadUrl    = ''
+        Sha256Url      = ''
+        ReleasePageUrl = $releasePageUrl
+        AssetSizeBytes = 0L
+        ReleaseNotes   = $releaseNotes
+        Message        = "Phiên bản mới v$latestVer vừa được tạo trên GitHub và đang hoàn tất đóng gói — vui lòng thử lại sau ít phút."
+      }
+    }
+    return [pscustomobject]@{
+      Ok             = $true
+      HasUpdate      = $true
+      BuildingAssets = $false
+      CurrentVersion = $curVer
+      LatestVersion  = $latestVer
+      TagName        = $(if ($tagName) { $tagName } else { "v$latestVer" })
+      DownloadUrl    = $downloadUrl
+      Sha256Url      = $sha256Url
+      ReleasePageUrl = $releasePageUrl
+      AssetSizeBytes = $assetSize
+      ReleaseNotes   = $releaseNotes
+      Message        = "Đã có phiên bản mới Em Trợ Lý v$latestVer trên GitHub (phiên bản hiện tại: v$curVer)."
+    }
+  }
+
+  return [pscustomobject]@{
+    Ok             = $true
+    HasUpdate      = $false
+    BuildingAssets = $false
+    CurrentVersion = $curVer
+    LatestVersion  = $latestVer
+    TagName        = $(if ($tagName) { $tagName } else { "v$latestVer" })
+    DownloadUrl    = $downloadUrl
+    Sha256Url      = $sha256Url
+    ReleasePageUrl = $releasePageUrl
+    AssetSizeBytes = $assetSize
+    ReleaseNotes   = $releaseNotes
+    Message        = "Bạn đang sử dụng phiên bản Em Trợ Lý mới nhất (v$curVer)."
+  }
+}
+
+function Install-EmTroLyAppUpdate {
+  param(
+    [Parameter(Mandatory=$true)]$UpdateInfo,
+    [string]$StatusFile = '',
+    [string]$OutDir = '',
+    [switch]$AllowLoopback
+  )
+  Set-EmTroLyTlsSecurityProtocol
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  $writeProgress = {
+    param([string]$Txt)
+    if (-not [string]::IsNullOrWhiteSpace($StatusFile)) {
+      try { [IO.File]::WriteAllText($StatusFile, $Txt, $utf8NoBom) } catch { }
+    }
+  }
+
+  $loopbackOk = [bool]$AllowLoopback -or ((-not [string]::IsNullOrWhiteSpace($env:EMTROLY_UPDATE_API_BASE)) -and ($env:EMTROLY_UPDATE_API_BASE -match '^http://127\.0\.0\.1:\d+'))
+  $dlUrl = ([string](Get-SafeProp $UpdateInfo 'DownloadUrl')).Trim()
+  $shaUrl = ([string](Get-SafeProp $UpdateInfo 'Sha256Url')).Trim()
+  $verRaw = ([string](Get-SafeProp $UpdateInfo 'LatestVersion')).Trim().TrimStart('v', 'V')
+  if (-not $verRaw -or $verRaw -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$') {
+    throw 'Thông tin phiên bản cập nhật không hợp lệ.'
+  }
+  if (-not (Test-EmTroLyTrustedGitHubUrl -Url $dlUrl -AllowLoopback $loopbackOk) -or
+      -not (Test-EmTroLyTrustedGitHubUrl -Url $shaUrl -AllowLoopback $loopbackOk)) {
+    throw 'Đường dẫn tải bản cập nhật không thuộc máy chủ GitHub chính thức.'
+  }
+
+  & $writeProgress "Đang xác minh mã kiểm tra an toàn SHA-256 cho bản v$verRaw..."
+  $shaResp = Invoke-WebRequest -UseBasicParsing -Method Get -Uri $shaUrl -Headers @{ 'User-Agent' = 'AnhLapTrinh-EmTroLy-Updater/1.0' } -TimeoutSec 25
+  $shaContent = if ($shaResp.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($shaResp.Content) } else { [string]$shaResp.Content }
+  $shaMatch = [regex]::Match($shaContent, '(?i)\b([a-f0-9]{64})\b')
+  if (-not $shaMatch.Success) {
+    throw 'Không đọc được mã kiểm tra toàn vẹn SHA-256 chính thức từ GitHub Release.'
+  }
+  $expectedHash = $shaMatch.Groups[1].Value.ToLowerInvariant()
+
+  $isDefaultCache = [string]::IsNullOrWhiteSpace($OutDir)
+  $workDir = if (-not $isDefaultCache) {
+    [IO.Path]::GetFullPath($OutDir)
+  } elseif ($env:LOCALAPPDATA) {
+    Join-Path $env:LOCALAPPDATA 'AnhLapTrinh\EmTroLy\bootstrap'
+  } else {
+    Join-Path ([IO.Path]::GetTempPath()) 'EmTroLy-Updates'
+  }
+  [void][IO.Directory]::CreateDirectory($workDir)
+  $safeVer = [regex]::Replace($verRaw, '[^0-9A-Za-z._-]', '')
+  $targetExe = Join-Path $workDir "emtroly-v$safeVer.exe"
+
+  if (Test-Path -LiteralPath $targetExe -PathType Leaf) {
+    $existingHash = (Get-FileHash -LiteralPath $targetExe -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($existingHash -eq $expectedHash) {
+      & $writeProgress "Đã xác minh bản cập nhật v$verRaw sẵn sàng (100%)!"
+      try { Unblock-File -LiteralPath $targetExe -ErrorAction SilentlyContinue } catch { }
+      return [pscustomobject]@{
+        Ok      = $true
+        ExePath = $targetExe
+        Sha256  = $expectedHash
+        Version = $verRaw
+      }
+    }
+  }
+
+  $tmpExe = "$targetExe.part-" + [guid]::NewGuid().ToString('N').Substring(0, 8)
+  try {
+    $req = [System.Net.HttpWebRequest]::Create([uri]$dlUrl)
+    $req.Method = 'GET'
+    $req.AllowAutoRedirect = $true
+    $req.UserAgent = 'AnhLapTrinh-EmTroLy-Updater/1.0'
+    $req.Timeout = 600000
+    $req.ReadWriteTimeout = 120000
+
+    $resp = $req.GetResponse()
+    try {
+      if (-not (Test-EmTroLyTrustedGitHubUrl -Url ([string]$resp.ResponseUri) -AllowLoopback $loopbackOk)) {
+        throw "Máy chủ chuyển hướng tải về không hợp lệ: $($resp.ResponseUri.Host)"
+      }
+      $totalBytes = [long]$resp.ContentLength
+      if ($totalBytes -le 0) {
+        $hintSize = [long](Get-SafeProp $UpdateInfo 'AssetSizeBytes')
+        if ($hintSize -gt 0) { $totalBytes = $hintSize }
+      }
+      $inStream = $resp.GetResponseStream()
+      try {
+        $outStream = New-Object System.IO.FileStream($tmpExe, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None, 262144)
+        try {
+          $buffer = New-Object byte[] 65536
+          $readTotal = 0L
+          $lastTick = [Environment]::TickCount - 500
+          while (($n = $inStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $outStream.Write($buffer, 0, $n)
+            $readTotal += $n
+            $now = [Environment]::TickCount
+            if (($now - $lastTick) -ge 150 -or ($totalBytes -gt 0 -and $readTotal -ge $totalBytes)) {
+              $lastTick = $now
+              $mbDone = ($readTotal / 1MB).ToString('0.0')
+              if ($totalBytes -gt 0) {
+                $pct = [int][Math]::Min(96L, [Math]::Max(5L, [long](($readTotal * 96L) / $totalBytes)))
+                $mbAll = ($totalBytes / 1MB).ToString('0.0')
+                & $writeProgress "Đang tải bản cập nhật v$verRaw... $pct% ($mbDone / $mbAll MB)"
+              } else {
+                & $writeProgress "Đang tải bản cập nhật v$verRaw... ($mbDone MB)"
+              }
+            }
+          }
+        } finally {
+          $outStream.Dispose()
+        }
+      } finally {
+        $inStream.Dispose()
+      }
+    } finally {
+      $resp.Close()
+    }
+
+    & $writeProgress "Đang kiểm tra mã toàn vẹn SHA-256 của bản v$verRaw... 98%"
+    $actualHash = (Get-FileHash -LiteralPath $tmpExe -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne $expectedHash) {
+      throw 'Mã kiểm tra SHA-256 của bản cập nhật không khớp. Đã hủy để bảo vệ an toàn máy tính.'
+    }
+
+    Move-Item -LiteralPath $tmpExe -Destination $targetExe -Force
+    try { Unblock-File -LiteralPath $targetExe -ErrorAction SilentlyContinue } catch { }
+
+    if ($isDefaultCache) {
+      $targetLeaf = Split-Path -Leaf $targetExe
+      foreach ($oldFile in @(Get-ChildItem -LiteralPath $workDir -Filter 'emtroly-*.exe' -File -ErrorAction SilentlyContinue)) {
+        if ($oldFile.Name -ine $targetLeaf) {
+          Remove-Item -LiteralPath $oldFile.FullName -Force -ErrorAction SilentlyContinue
+        }
+      }
+    }
+
+    & $writeProgress "Đã tải xong & xác minh an toàn bản v$verRaw (100%)! Đang mở phiên bản mới..."
+    return [pscustomobject]@{
+      Ok      = $true
+      ExePath = $targetExe
+      Sha256  = $expectedHash
+      Version = $verRaw
+    }
+  } finally {
+    if (Test-Path -LiteralPath $tmpExe -PathType Leaf) {
+      Remove-Item -LiteralPath $tmpExe -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
+function Start-EmTroLyUpdatedInstallerHandoff {
+  param(
+    [Parameter(Mandatory=$true)][string]$InstallerExePath,
+    [int]$WaitParentPid = 0
+  )
+  if (-not (Test-Path -LiteralPath $InstallerExePath -PathType Leaf)) {
+    throw 'Không tìm thấy tệp bộ cài mới để khởi chạy.'
+  }
+  $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  $workDir = Split-Path -Parent ([IO.Path]::GetFullPath($InstallerExePath))
+  $escapedExe = $InstallerExePath.Replace("'", "''")
+  $escapedDir = $workDir.Replace("'", "''")
+  $cmdScript = "if ($WaitParentPid -gt 0) { try { Wait-Process -Id $WaitParentPid -Timeout 12 -ErrorAction SilentlyContinue } catch {} }; Start-Sleep -Milliseconds 250; Start-Process -FilePath '$escapedExe' -WorkingDirectory '$escapedDir'"
+  $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($cmdScript))
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $psExe
+  $psi.Arguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand $encoded"
+  $psi.WorkingDirectory = $workDir
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+  [void][System.Diagnostics.Process]::Start($psi)
+}
+
+function Sync-EmTroLyInstalledUiIfNewer {
+  param([string]$PayloadRoot = '')
+  if (-not $env:LOCALAPPDATA -or [string]::IsNullOrWhiteSpace($PayloadRoot) -or -not (Test-Path -LiteralPath $PayloadRoot -PathType Container)) {
+    return $false
+  }
+  $emUiDir = Join-Path $env:LOCALAPPDATA 'EmTroLyUI'
+  $installedWizard = Join-Path $emUiDir 'windows-installer\wizard.ps1'
+  if (-not (Test-Path -LiteralPath $installedWizard -PathType Leaf)) {
+    return $false
+  }
+  try {
+    if ([IO.Path]::GetFullPath($PayloadRoot).TrimEnd('\') -ieq [IO.Path]::GetFullPath($emUiDir).TrimEnd('\')) {
+      return $false
+    }
+    $curUiVer = (Get-EmTroLyAppVersion -PayloadRoot $emUiDir).InstallerVersion
+    $newPayloadVer = (Get-EmTroLyAppVersion -PayloadRoot $PayloadRoot).InstallerVersion
+    if ((Compare-EmTroLyVersion -Current $curUiVer -Target $newPayloadVer) -lt 0) {
+      [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot)
+      return $true
+    }
+  } catch { }
+  return $false
+}
