@@ -3,7 +3,8 @@
   if ([string]$Settings.member -cnotmatch '^[a-z][a-z0-9_-]{0,63}$') { throw 'invalid-member' }
   if ([string]::IsNullOrWhiteSpace([string]$Settings.assistant_name)) { throw 'missing-assistant-name' }
   if ([string]$Settings.owner_ids -notmatch '^[1-9][0-9]*(,[1-9][0-9]*)*$') { throw 'invalid-owners' }
-  if ([string]$Settings.group_id -notmatch '^-[1-9][0-9]*$') { throw 'invalid-group' }
+  $grpCheck = ([string]$Settings.group_id).Trim()
+  if (-not [string]::IsNullOrWhiteSpace($grpCheck) -and $grpCheck -notmatch '^-[1-9][0-9]*$') { throw 'invalid-group' }
   if ([string]$Settings.telegram_token -notmatch '^[0-9]{5,}:[A-Za-z0-9_-]{20,}$') { throw 'invalid-telegram-token' }
   if ([string]::IsNullOrWhiteSpace([string]$Settings.ai_api_key)) { throw 'missing-api-key' }
   if ([string]$Settings.model -notin @('gpt-6.2-sol', 'GPT-6.1-terra', 'gpt-6.2-astra')) { throw 'invalid-model' }

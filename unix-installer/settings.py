@@ -108,7 +108,7 @@ def validate(settings):
     if len(owners) != len(set(owners)):
         raise ValueError("duplicate-owners")
     group = text("group_id")
-    if not re.fullmatch(r"-[1-9][0-9]*", group):
+    if group and not re.fullmatch(r"-[1-9][0-9]*", group):
         raise ValueError("invalid-group")
     telegram = text("telegram_token")
     if not re.fullmatch(r"[0-9]{5,}:[A-Za-z0-9_-]{20,}", telegram):

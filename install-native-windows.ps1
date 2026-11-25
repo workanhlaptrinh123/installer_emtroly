@@ -49,7 +49,7 @@ if ($BaseUrl -match '^\s*\[[^\]]+\]\((https?://[^)]+)\)\s*$') { $BaseUrl = $Matc
 $owners = @($OwnerIds -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[1-9][0-9]*$' })
 if ($owners.Count -eq 0) { throw 'At least one positive Telegram owner ID is required.' }
 $GroupId = $GroupId.Trim()
-if ($GroupId -notmatch '^-[1-9][0-9]*$') { throw 'GroupId must be an explicit negative Telegram group ID for the group allowlist.' }
+if (-not [string]::IsNullOrWhiteSpace($GroupId) -and $GroupId -notmatch '^-[1-9][0-9]*$') { throw 'GroupId must be an explicit negative Telegram group ID for the group allowlist, or left empty.' }
 $zaloSelected = ($Profile -eq 'installer-basic') -or ($Modules -contains 'zalo-personal') -or ($Modules -contains 'zalo-qr-basic')
 if ($zaloSelected -and ($QrOwnerId -notin $owners)) { throw 'QrOwnerId must be one of the Telegram owner IDs.' }
 if ($DryRun) { Write-Host "DRY-RUN: native OpenClaw $OpenClawVersion for $Name (model: $Model); no files or services changed."; exit 0 }
@@ -176,7 +176,9 @@ $account = @{
 }
 $targetGroup = $GroupId
 $account.groups=@{}
-$account.groups[$targetGroup]=@{ groupPolicy='allowlist'; requireMention=$false; tools=@{ allow=@('*') }; toolsBySender=@{ '*'=@{ alsoAllow=@('exec','process') } } }
+if (-not [string]::IsNullOrWhiteSpace($targetGroup)) {
+  $account.groups[$targetGroup]=@{ groupPolicy='allowlist'; requireMention=$false; tools=@{ allow=@('*') }; toolsBySender=@{ '*'=@{ alsoAllow=@('exec','process') } } }
+}
 $randomBytes = New-Object byte[] 32
 $randomGenerator = [Security.Cryptography.RandomNumberGenerator]::Create()
 try { $randomGenerator.GetBytes($randomBytes) } finally { $randomGenerator.Dispose() }

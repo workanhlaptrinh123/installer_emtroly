@@ -384,7 +384,7 @@ def main():
         ("ai_api_key", "Provider API Key", "", True),
         ("owner_ids", "Telegram Owner IDs (dấu phẩy)", "", False),
         ("qr_owner_id", "Owner ID nhận QR Zalo", "", False),
-        ("group_id", "Telegram Group ID (số âm)", "", False),
+        ("group_id", "Telegram Group ID (tùy chọn, số âm — có thể bỏ trống)", "", False),
         ("base_url", "Địa chỉ Provider (HTTPS)", "https://codex.anhlaptrinh.vn/v1", False),
         ("model", "Mô hình AI (Model)", "gpt-6.2-sol", False),
         ("gateway_port", "Cổng Gateway (0 = tự động)", "0", False),
@@ -416,8 +416,9 @@ def main():
                         variables["group_id"].set(info["group_id"])
                     priv_note = (" " + info["privacy_warning"]) if info.get("privacy_warning") else ""
                     if info["owner_id"] or info["group_id"]:
+                        grp_note = info["group_id"] or "bỏ qua (tùy chọn)"
                         live_banner_var.set(
-                            f"✓ Bot {info['bot_username']}: Đã điền Owner={info['owner_id'] or '—'}, Group={info['group_id'] or '—'}.{priv_note}"
+                            f"✓ Bot {info['bot_username']}: Đã điền Owner={info['owner_id'] or '—'}, Group={grp_note}.{priv_note}"
                         )
                     else:
                         live_banner_var.set(
@@ -1322,7 +1323,7 @@ def main():
                     "missing-assistant-name": "Vui lòng nhập tên trợ lý.",
                     "invalid-owners": "Telegram owner ID phải là số dương, cách nhau bằng dấu phẩy.",
                     "duplicate-owners": "Không nhập trùng Telegram owner ID.",
-                    "invalid-group": "Telegram group ID phải là số âm.",
+                    "invalid-group": "Telegram group ID phải là số âm (hoặc để trống nếu không dùng nhóm).",
                     "invalid-telegram-token": "Telegram bot token không đúng định dạng.",
                     "missing-api-key": "Vui lòng nhập provider API key.",
                     "invalid-model": "Model không được hỗ trợ.",

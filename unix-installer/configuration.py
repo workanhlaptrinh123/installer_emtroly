@@ -14,6 +14,11 @@ def create_config(settings, root, port):
     token_file = str(root / "telegram.token")
     secret_file = str(root / "member-provider.secret")
     execution = {"host": "gateway", "mode": "full", "strictInlineEval": False}
+    groups_cfg = (
+        {settings["group_id"]: {"groupPolicy": "allowlist", "requireMention": False}}
+        if settings.get("group_id")
+        else {}
+    )
     return {
         "gateway": {"mode": "local", "bind": "loopback", "port": port,
                     "auth": {"mode": "token", "token": secrets.token_hex(32)}},
@@ -34,7 +39,7 @@ def create_config(settings, root, port):
             "commands": {"native": True, "nativeSkills": False}, "accounts": {member: {
                 "enabled": True, "tokenFile": token_file, "dmPolicy": "allowlist", "allowFrom": owners,
                 "groupPolicy": "allowlist", "groupAllowFrom": owners,
-                "groups": {settings["group_id"]: {"groupPolicy": "allowlist", "requireMention": False}}}}}},
+                "groups": groups_cfg}}}},
         "bindings": [{"agentId": "main", "match": {"channel": "telegram", "accountId": member}}],
         "commands": {"ownerAllowFrom": ["telegram:" + owner for owner in owners]},
         "tools": {"exec": execution},
