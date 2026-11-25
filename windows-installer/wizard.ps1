@@ -1017,7 +1017,7 @@ $xamlText = @'
                   <Border x:Name="InstallOptionsCard" Background="#FFFBEB" BorderBrush="#FDE68A" BorderThickness="1" CornerRadius="9" Padding="12,9" Margin="6,0,0,0">
                     <StackPanel>
                       <CheckBox x:Name="FullAccessCheck" Content="Đồng ý cấp quyền Full Exec" FontSize="12.5" FontWeight="Bold" Foreground="#92400E"/>
-                      <TextBlock Text="Cho phép Owner &amp; nhóm đã chọn đọc/sửa tệp, chạy lệnh" FontSize="11.5" Foreground="#B45309" Margin="22,2,0,0" TextWrapping="Wrap"/>
+                      <TextBlock Text="Cho phép Owner (và nhóm nếu có) đọc/sửa tệp, chạy lệnh" FontSize="11.5" Foreground="#B45309" Margin="22,2,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                   </Border>
                 </UniformGrid>
@@ -1037,7 +1037,7 @@ $xamlText = @'
                           <TextBox x:Name="OwnersBox" Style="{StaticResource ModernInput}" Height="34"/>
                         </StackPanel>
                         <StackPanel Grid.Column="2">
-                          <TextBlock Style="{StaticResource FieldLabel}" Text="Telegram Group ID (số âm, ví dụ: -1001234567890)" Margin="0,0,0,4"/>
+                          <TextBlock Style="{StaticResource FieldLabel}" Text="Telegram Group ID (không bắt buộc — để trống nếu không dùng nhóm)" Margin="0,0,0,4"/>
                           <TextBox x:Name="GroupBox" Style="{StaticResource ModernInput}" Height="34"/>
                         </StackPanel>
                       </Grid>
@@ -1519,7 +1519,7 @@ $xamlText = @'
                         <TextBox x:Name="ModOwnersBox" Style="{StaticResource ModernInput}" Height="34"/>
                       </StackPanel>
                       <StackPanel Grid.Column="2">
-                        <TextBlock Text="Telegram Group ID (số âm)" FontSize="11.5" FontWeight="SemiBold" Foreground="#475569" Margin="0,0,0,4"/>
+                        <TextBlock Text="Telegram Group ID (tùy chọn — có thể bỏ trống)" FontSize="11.5" FontWeight="SemiBold" Foreground="#475569" Margin="0,0,0,4"/>
                         <TextBox x:Name="ModGroupBox" Style="{StaticResource ModernInput}" Height="34"/>
                       </StackPanel>
                     </Grid>
@@ -2501,7 +2501,8 @@ function Update-DashboardCards {
   $script:zaloInstalledState = [bool]$st.ZaloInstalled
 
   $dashHeroTitle.Text = "$($st.AssistantName) đã sẵn sàng trên máy"
-  $dashHeroSub.Text = "Model: $($st.Model) · Owner IDs: $($st.OwnerIds) · Group: $($st.GroupId)"
+  $grpHeroDisplay = if ([string]::IsNullOrWhiteSpace($st.GroupId)) { 'Không gắn nhóm (chỉ DM)' } else { $st.GroupId }
+  $dashHeroSub.Text = "Model: $($st.Model) · Owner IDs: $($st.OwnerIds) · Group: $grpHeroDisplay"
   $dashOpenWebBtn.IsEnabled = (-not [string]::IsNullOrWhiteSpace($dash.GatewayUrl))
 
   if ($dash.PSObject.Properties['OpenClawNeedsUpgrade'] -and $dash.OpenClawNeedsUpgrade) {
@@ -3082,7 +3083,7 @@ function Test-FormInputs([bool]$ForManageConfig = $false) {
   if ($baseUrlBox.Text.Trim().TrimEnd('/') -cne 'https://codex.anhlaptrinh.vn/v1') { Show-Error 'Chỉ hỗ trợ máy chủ chính thức https://codex.anhlaptrinh.vn/v1.'; return $false }
   if ([string]$modelBox.SelectedItem -notin @('gpt-6.2-sol', 'GPT-6.1-terra', 'gpt-6.2-astra')) { if ($setupExtraExpander) { $setupExtraExpander.IsExpanded = $true }; Show-Error 'Model phải là gpt-6.2-sol, GPT-6.1-terra hoặc gpt-6.2-astra.'; return $false }
   if ($ownersBox.Text.Trim() -notmatch '^[1-9][0-9]*(,[1-9][0-9]*)*$') { if ($setupExtraExpander) { $setupExtraExpander.IsExpanded = $true }; Show-Error 'Telegram Owner IDs không hợp lệ (hãy bấm "Lấy ID tự động" hoặc nhập số dương).'; return $false }
-  if ($groupBox.Text.Trim() -notmatch '^-[1-9][0-9]*$') { if ($setupExtraExpander) { $setupExtraExpander.IsExpanded = $true }; Show-Error 'Telegram Group ID phải là số âm (hãy bấm "Lấy ID tự động" hoặc nhập số âm ví dụ: -1001234567890).'; return $false }
+  if (-not [string]::IsNullOrWhiteSpace($groupBox.Text) -and $groupBox.Text.Trim() -notmatch '^-[1-9][0-9]*$') { if ($setupExtraExpander) { $setupExtraExpander.IsExpanded = $true }; Show-Error 'Telegram Group ID phải là số âm (ví dụ: -1001234567890), hoặc xóa trống để bỏ qua nếu không dùng nhóm.'; return $false }
   $portVal = 0
   if (-not [int]::TryParse($portBox.Text.Trim(), [ref]$portVal) -or ($portVal -ne 0 -and ($portVal -lt 1024 -or $portVal -gt 65000))) {
     Show-Error 'Cổng Gateway phải là 0 hoặc từ 1024 đến 65000.'
@@ -3398,14 +3399,15 @@ function Start-ModularInstall([string[]]$SelectedList, [switch]$ForceReinstall) 
     } else {
       if (-not [string]::IsNullOrWhiteSpace($modTokenPwdBox.Password)) { $tokenBox.Text = $modTokenPwdBox.Password.Trim() }
       if (-not [string]::IsNullOrWhiteSpace($modOwnersBox.Text)) { $ownersBox.Text = $modOwnersBox.Text.Trim() }
-      if (-not [string]::IsNullOrWhiteSpace($modGroupBox.Text)) { $groupBox.Text = $modGroupBox.Text.Trim() }
+      $groupBox.Text = $modGroupBox.Text.Trim()
       if ([string]::IsNullOrWhiteSpace($apiKeyBox.Text)) { $apiKeyBox.Text = $effectiveKey }
       $zaloCheck.Checked = [bool]$modZaloCheck.IsChecked
       $fullAccessCheck.Checked = $true
       if (-not (Test-FormInputs -ForManageConfig $false)) { return }
+      $modExecScope = if ([string]::IsNullOrWhiteSpace($groupBox.Text)) { 'các Owner IDs đã chọn' } else { 'các Owner IDs và nhóm Telegram đã chọn' }
       $ansExecMod = [System.Windows.MessageBox]::Show(
         $window,
-        'Cài đặt Phần 4 (OpenClaw) sẽ cấp quyền Full Exec cho các Owner IDs và nhóm Telegram đã chọn. Bạn xác nhận tin tưởng và tiếp tục?',
+        "Cài đặt Phần 4 (OpenClaw) sẽ cấp quyền Full Exec cho $modExecScope. Bạn xác nhận tin tưởng và tiếp tục?",
         'Xác nhận Full Exec cho OpenClaw',
         [System.Windows.MessageBoxButton]::YesNo,
         [System.Windows.MessageBoxImage]::Warning
@@ -4071,7 +4073,8 @@ function Start-Install {
     if (-not $SmokeTest) { Save-CurrentFormDraft }
     if (-not (Test-FormInputs -ForManageConfig $false)) { return }
     if (-not $SmokeTest) { Save-CurrentFormDraft }
-    $ansExec = [System.Windows.MessageBox]::Show($window, 'Các Owner IDs và thành viên trong nhóm Telegram đã chọn có thể yêu cầu đọc, sửa tệp và chạy lệnh trên máy. Bạn có tin tưởng họ?', 'Xác nhận Full Exec', [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
+    $execScopeMsg = if ([string]::IsNullOrWhiteSpace($groupBox.Text)) { 'Các Owner IDs đã chọn có thể yêu cầu đọc, sửa tệp và chạy lệnh trên máy. Bạn có tin tưởng họ?' } else { 'Các Owner IDs và thành viên trong nhóm Telegram đã chọn có thể yêu cầu đọc, sửa tệp và chạy lệnh trên máy. Bạn có tin tưởng họ?' }
+    $ansExec = [System.Windows.MessageBox]::Show($window, $execScopeMsg, 'Xác nhận Full Exec', [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Warning)
     if ($ansExec -ne [System.Windows.MessageBoxResult]::Yes) { return }
     if ($zaloCheck.Checked) {
       $ansZalo = [System.Windows.MessageBox]::Show($window, 'Zalo dùng danh sách cho phép. Sau khi cài xong, Owner nhắn /zaloqr trong Telegram riêng của bot để quét mã QR. Bạn đồng ý?', 'Xác nhận cài Zalo', [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Question)

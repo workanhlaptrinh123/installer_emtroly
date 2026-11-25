@@ -1,5 +1,8 @@
+import tempfile
 import unittest
+from pathlib import Path
 
+import configuration
 import settings
 
 
@@ -16,6 +19,20 @@ class SettingsTests(unittest.TestCase):
         result = settings.validate(sample())
         self.assertEqual(result["owner_ids"], ["12345", "67890"])
         self.assertEqual(result["gateway_port"], 0)
+
+    def test_optional_empty_group_id_is_valid_and_omits_empty_group_key(self):
+        for raw_grp in ("", "   "):
+            data = sample()
+            data["group_id"] = raw_grp
+            normalized = settings.normalize(data)
+            self.assertEqual(normalized["group_id"], "")
+            validated = settings.validate(normalized)
+            self.assertEqual(validated["group_id"], "")
+            cfg_root = Path(tempfile.gettempdir()).resolve() / "emtroly-test"
+            cfg = configuration.create_config(validated, cfg_root, 19789)
+            groups_map = cfg["channels"]["telegram"]["accounts"]["member01"]["groups"]
+            self.assertEqual(groups_map, {})
+            self.assertNotIn("", groups_map)
 
     def test_each_unsafe_setting_is_rejected(self):
         cases = {"member": "../x", "assistant_name": "", "owner_ids": "*",

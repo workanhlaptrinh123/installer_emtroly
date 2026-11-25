@@ -25,7 +25,7 @@ ERROR_MESSAGES = {
     "invalid-owners": "Telegram owner ID phải là số dương, cách nhau bằng dấu phẩy.",
     "duplicate-owners": "Không nhập trùng Telegram owner ID.",
     "invalid-qr-owner": "Owner nhận QR phải nằm trong danh sách owner ID.",
-    "invalid-group": "Telegram group ID phải là số âm.",
+    "invalid-group": "Telegram group ID phải là số âm (hoặc nhấn Enter để bỏ qua).",
     "invalid-telegram-token": "Telegram bot token không đúng định dạng.",
     "missing-api-key": "Vui lòng nhập provider API key.",
     "invalid-model": "Model không được hỗ trợ.",
@@ -80,7 +80,7 @@ def collect():
     }
     values["owner_ids"] = ",".join(owner.strip() for owner in values["owner_ids"].split(","))
     first_owner = values["owner_ids"].split(",", 1)[0].strip()
-    group_id = prompt("Telegram group ID (số âm)")
+    group_id = prompt("Telegram group ID (tùy chọn, số âm — Enter để bỏ qua)")
     print("Token và API key sẽ hiện trên màn hình khi nhập; không chia sẻ màn hình hoặc ảnh chụp.")
     values.update({
         "qr_owner_id": first_owner,

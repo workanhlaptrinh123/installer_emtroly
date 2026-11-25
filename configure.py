@@ -32,7 +32,7 @@ owners = settings['owner_ids']
 if not owners or any(not re.fullmatch(r'[1-9][0-9]*', str(owner)) for owner in owners):
     raise SystemExit('Explicit positive Telegram owner IDs required')
 group_id = str(settings.get('group_id', '')).strip()
-if not re.fullmatch(r'-[1-9][0-9]*', group_id):
+if group_id and not re.fullmatch(r'-[1-9][0-9]*', group_id):
     raise SystemExit('An explicit negative Telegram group ID is required for the group allowlist')
 os.umask(0o077)
 (root / 'telegram.token').write_text(settings['telegram_token'].strip() + '\n')
@@ -41,12 +41,12 @@ account = {
     'dmPolicy': 'allowlist', 'allowFrom': [str(x) for x in owners],
     'groupPolicy': 'allowlist', 'groupAllowFrom': ['*'],
 }
-account['groups'] = {group_id: {
+account['groups'] = ({group_id: {
     'groupPolicy': 'allowlist',
     'requireMention': False,
     'tools': {'allow': ['*']},
     'toolsBySender': {'*': {'alsoAllow': ['exec', 'process']}},
-}}
+}} if group_id else {})
 document = {
     'gateway': {'mode': 'local', 'bind': 'loopback', 'auth': {'mode': 'token', 'token': secrets.token_hex(32)}},
     'secrets': {'providers': {'customer': {'source': 'file', 'path': str(runtime_root / 'member-provider.secret'), 'mode': 'singleValue'}}},

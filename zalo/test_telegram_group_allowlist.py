@@ -88,16 +88,22 @@ class TelegramGroupAllowlistTests(unittest.TestCase):
         check = next(item for item in checks if item["name"] == "telegram_group_allowlist_full_tools")
         self.assertEqual(check["group_ids"], [self.settings["group_id"]])
 
-    def test_missing_group_is_rejected_before_credentials_are_written(self):
-        settings = dict(self.settings)
-        settings.pop("group_id")
-        result = self.generate(settings)
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("group allowlist", result.stderr)
-        self.assertFalse((self.root / "state/telegram.token").exists())
+    def test_optional_missing_group_creates_empty_allowlist_without_wildcard(self):
+        for payload in (
+            {k: v for k, v in self.settings.items() if k != "group_id"},
+            dict(self.settings, group_id=""),
+            dict(self.settings, group_id="   "),
+        ):
+            result = self.generate(payload)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            document = json.loads((self.root / "state/openclaw.json").read_text())
+            account = document["channels"]["telegram"]["accounts"]["groupfixture"]
+            self.assertEqual(account["groupPolicy"], "allowlist")
+            self.assertEqual(account["groups"], {})
+            (self.root / "state/openclaw.json").unlink()
 
     def test_invalid_group_ids_cannot_enable_wildcard_or_sender_id(self):
-        for group_id in ("", "*", "123456789", "-0", "-1001234567890,*"):
+        for group_id in ("*", "123456789", "-0", "-1001234567890,*"):
             with self.subTest(group_id=group_id):
                 result = self.generate(dict(self.settings, group_id=group_id))
                 self.assertNotEqual(result.returncode, 0)

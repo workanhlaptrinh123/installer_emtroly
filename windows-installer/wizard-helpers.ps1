@@ -197,7 +197,7 @@ function Get-TelegramIdsFromBotUpdates {
     $firstGroup = if ($groupItems.Count -gt 0) { [string]$groupItems[0].Id } else { '' }
 
     if ($ownerItems.Count -eq 0 -and $groupItems.Count -eq 0) {
-      $emptyMsg = "Đã tìm thấy bot $botUser nhưng chưa có tin nhắn gần đây. Hãy mở Telegram nhắn /start cho $botUser (và nhắn 1 tin trong nhóm có bot), sau đó bấm lại nút này!"
+      $emptyMsg = "Đã tìm thấy bot $botUser nhưng chưa có tin nhắn gần đây. Hãy mở Telegram nhắn /start cho $botUser (hoặc nhắn trong nhóm nếu muốn gắn nhóm), sau đó bấm lại nút này!"
       if ($privWarning) { $emptyMsg += " $privWarning" }
       return [pscustomobject]@{
         Ok                      = $true
@@ -214,9 +214,12 @@ function Get-TelegramIdsFromBotUpdates {
 
     $summaryParts = @("Bot $botUser hợp lệ.")
     if ($firstOwner) { $summaryParts += "Owner ID: $firstOwner ($($ownerMap[$firstOwner]))." }
-    if ($firstGroup) { $summaryParts += "Group ID: $firstGroup ($($groupMap[$firstGroup]))." }
-    else { $summaryParts += 'Chưa thấy tin nhắn nhóm (hãy thêm bot vào nhóm rồi nhắn 1 tin nếu cần lấy Group ID).' }
-    if ($privWarning) { $summaryParts += $privWarning }
+    if ($firstGroup) {
+      $summaryParts += "Group ID: $firstGroup ($($groupMap[$firstGroup]))."
+      if ($privWarning) { $summaryParts += $privWarning }
+    } else {
+      $summaryParts += 'Group ID: bỏ qua (không bắt buộc — có thể thêm nhóm sau bất cứ lúc nào).'
+    }
 
     return [pscustomobject]@{
       Ok                      = $true

@@ -705,7 +705,7 @@ function Invoke-ManageWorkerMain {
       if ($model -notin @('gpt-6.2-sol', 'GPT-6.1-terra', 'gpt-6.2-astra')) { throw 'invalid-model' }
       if ($ownerIdsRaw -notmatch '^[1-9][0-9]*(,[1-9][0-9]*)*$') { throw 'invalid-owners' }
       $owners = @($ownerIdsRaw -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-      if ($groupId -notmatch '^-[1-9][0-9]*$') { throw 'invalid-group' }
+      if (-not [string]::IsNullOrWhiteSpace($groupId) -and $groupId -notmatch '^-[1-9][0-9]*$') { throw 'invalid-group' }
       $port = 0
       if (-not [int]::TryParse($portRaw, [ref]$port) -or ($port -ne 0 -and ($port -lt 1024 -or $port -gt 65000))) { throw 'invalid-port' }
 
@@ -761,7 +761,7 @@ assistant_name = sys.argv[2]
 base_url = sys.argv[3]
 model = sys.argv[4]
 owners = [x.strip() for x in sys.argv[5].split(",") if x.strip()]
-group_id = sys.argv[6]
+group_id = "" if sys.argv[6] == "__NONE__" else sys.argv[6].strip()
 port = int(sys.argv[7])
 
 data = json.loads(cfg_path.read_text(encoding="utf-8"))
@@ -798,14 +798,17 @@ acc["allowFrom"] = list(owners)
 tg.setdefault("execApprovals", {})["approvers"] = list(owners)
 acc.setdefault("execApprovals", {})["approvers"] = list(owners)
 
-acc["groups"] = {
-    group_id: {
-        "groupPolicy": "allowlist",
-        "requireMention": False,
-        "tools": {"allow": ["*"]},
-        "toolsBySender": {"*": {"alsoAllow": ["exec", "process"]}},
+if group_id:
+    acc["groups"] = {
+        group_id: {
+            "groupPolicy": "allowlist",
+            "requireMention": False,
+            "tools": {"allow": ["*"]},
+            "toolsBySender": {"*": {"alsoAllow": ["exec", "process"]}},
+        }
     }
-}
+else:
+    acc["groups"] = {}
 
 data.setdefault("commands", {})["ownerAllowFrom"] = [f"telegram:{o}" for o in owners]
 for kind in ("exec", "plugin"):
@@ -824,8 +827,9 @@ cfg_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encod
 print(account_name)
 '@
       [IO.File]::WriteAllText($pyScript, $pyCode, $utf8NoBom)
+      $groupArg = if ([string]::IsNullOrWhiteSpace($groupId)) { '__NONE__' } else { $groupId }
       try {
-        $accountOut = (& python $pyScript $configPath $assistantName $baseUrl $resolvedModel ($owners -join ',') $groupId ([string]$port) | Out-String).Trim()
+        $accountOut = (& python $pyScript $configPath $assistantName $baseUrl $resolvedModel ($owners -join ',') $groupArg ([string]$port) | Out-String).Trim()
         if ($LASTEXITCODE -ne 0) { throw 'config-patch-failed' }
       } finally {
         Remove-Item -LiteralPath $pyScript -Force -ErrorAction SilentlyContinue

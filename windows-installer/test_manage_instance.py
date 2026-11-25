@@ -223,6 +223,62 @@ class ManageInstanceTests(unittest.TestCase):
             self.assertTrue((oc / "restarted.marker").is_file())
             self.assertEqual(len(list((oc / "backups").glob("quick-edit-*"))), 1)
 
+            # 3. Clearing group_id to "" is allowed (Telegram Group ID is optional) and leaves groups={} with no "" key
+            req_file.write_text(
+                json.dumps(
+                    {
+                        "action": "update-config",
+                        "assistant_name": "Trợ Lý Mới",
+                        "base_url": "https://codex.anhlaptrinh.vn/v1",
+                        "model": "GPT-6.1-terra",
+                        "owner_ids": "222222222",
+                        "group_id": "",
+                        "gateway_port": "19789",
+                        "audience": "Học viên",
+                        "addressing": "thầy - bạn",
+                        "style": "Thân thiện",
+                        "telegram_token": "",
+                        "ai_api_key": "",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            run_empty_grp = subprocess.run(
+                [
+                    SHELL,
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(staged_manage),
+                    "-RunManageWorker",
+                    "-WorkerRequestFile",
+                    str(req_file),
+                    "-WorkerPayloadRoot",
+                    str(ROOT),
+                    "-WorkerLogFile",
+                    str(status_file),
+                ],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(run_empty_grp.returncode, 0, run_empty_grp.stdout + run_empty_grp.stderr)
+            cleared_cfg = json.loads((oc / "openclaw.json").read_text(encoding="utf-8"))
+            self.assertEqual(cleared_cfg["channels"]["telegram"]["accounts"]["emtroly"]["groups"], {})
+            self.assertNotIn("", cleared_cfg["channels"]["telegram"]["accounts"]["emtroly"]["groups"])
+            probe_res2 = subprocess.run(
+                [SHELL, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(probe_ps)],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            self.assertEqual(probe_res2.returncode, 0, probe_res2.stdout + probe_res2.stderr)
+            self.assertEqual(json.loads(probe_res2.stdout.strip())["GroupId"], "")
+
     def test_updates_token_and_api_key_when_provided_and_syncs_codex_auth(self):
         with tempfile.TemporaryDirectory(prefix="emtroly-manage-secrets-") as temporary:
             temp = Path(temporary)
