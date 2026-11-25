@@ -28,6 +28,13 @@ python .agents/skills/git-team-flow/scripts/team_git.py status
 ```
 Shows the current branch, local dirty files, ahead/behind counts vs `origin/main`, and a table of all active remote branches with author, timestamp, and last commit summary.
 
+### 1b. Mở ứng dụng Team Git Studio trực quan ("Mở giao diện Git", "Xem sơ đồ nhánh trực quan")
+Double-click `Team-Git.bat` (Windows) / `Team-Git.command` (macOS), or run:
+```bash
+python .agents/skills/git-team-flow/scripts/team_git.py ui
+```
+Starts **Team Git Studio** (`http://127.0.0.1:8765`): auto-detects the active Git email/Gmail (`<gmail-id>/...`), provides the 3-step daily workflow (**1. Lấy code mới nhất về** `sync` → **2. Code xong tự tạo nhánh theo Gmail & đẩy PR** `pr` → **3. Mở PR duyệt & tự merge**), Conflict Advisor with 1-click AI prompt copy, and a live SVG branch graph.
+
 ### 2. Bắt đầu đầu việc mới ("Tạo nhánh mới để làm việc X")
 ```bash
 python .agents/skills/git-team-flow/scripts/team_git.py start "<short-task-slug>"
@@ -36,7 +43,16 @@ python .agents/skills/git-team-flow/scripts/team_git.py start "<short-task-slug>
 - Auto-prefixes the branch with the local Git username (e.g. `giangcr7/fix-zalo-qr` or `sep/update-ui`).
 - Never loses uncommitted local work (refuses if uncommitted edits exist unless the user asks to carry them over to the new branch with `--carry`).
 
-### 3. Đẩy nhánh, kiểm tra conflict rồi gộp vào `main` ("Push nhánh, check conflict rồi gộp vào main")
+### 3. Đẩy nhánh → Tự tạo PR → Chờ 1 Approve → Tự động Merge (Mức 2 - Khuyên dùng)
+```bash
+python .agents/skills/git-team-flow/scripts/team_git.py pr -m "<commit & PR title>"
+```
+- Auto-normalizes BOM/LF and verifies safety invariants (no secrets, immutable `EmTroLy-Setup.exe` SHA-256).
+- Auto-creates `<git-username>/<work-timestamp>` if currently on `main`.
+- Verifies zero conflicts with `origin/main` before pushing.
+- Pushes the branch so `.github/workflows/auto-pr-and-guard.yml` automatically opens a Pull Request, runs `PR Safety Guard`, and arms GitHub Auto-Merge (Squash + Delete branch) once 1 reviewer approves and all required checks pass.
+
+### 4. Đẩy nhánh, kiểm tra conflict rồi gộp thẳng vào `main` ("Push nhánh, check conflict rồi gộp vào main")
 1. First run preflight & conflict check:
    ```bash
    python .agents/skills/git-team-flow/scripts/team_git.py check-merge
