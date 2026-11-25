@@ -128,11 +128,13 @@ class ManageInstanceTests(unittest.TestCase):
             staged_manage.write_text(MANAGE.read_text(encoding="utf-8-sig"), encoding="utf-8-sig")
 
             # 1. Verify Get-EmTroLyInstalledState reads pre-filled fields accurately
+            state_json = temp / "state-out.json"
             probe_ps = temp / "probe.ps1"
             probe_ps.write_text(
+                "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n"
                 f'. "{staged_manage}"\n'
                 "$st = Get-EmTroLyInstalledState\n"
-                "Write-Output ($st | ConvertTo-Json -Compress)\n",
+                f'[IO.File]::WriteAllText("{state_json}", ($st | ConvertTo-Json -Compress), (New-Object System.Text.UTF8Encoding($false)))\n',
                 encoding="utf-8-sig",
             )
             env = {**os.environ, "USERPROFILE": str(home), "LOCALAPPDATA": str(local_app)}
@@ -141,10 +143,12 @@ class ManageInstanceTests(unittest.TestCase):
                 env=env,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=20,
             )
-            self.assertEqual(probe_res.returncode, 0, probe_res.stdout + probe_res.stderr)
-            state = json.loads(probe_res.stdout.strip())
+            self.assertEqual(probe_res.returncode, 0, (probe_res.stdout or "") + (probe_res.stderr or ""))
+            state = json.loads(state_json.read_text(encoding="utf-8"))
             self.assertTrue(state["OpenClawInstalled"])
             self.assertEqual(state["AssistantName"], "Tro Ly Cu")
             self.assertEqual(state["OwnerIds"], "111111111")
@@ -263,9 +267,11 @@ class ManageInstanceTests(unittest.TestCase):
                 env=env,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=30,
             )
-            self.assertEqual(run_empty_grp.returncode, 0, run_empty_grp.stdout + run_empty_grp.stderr)
+            self.assertEqual(run_empty_grp.returncode, 0, (run_empty_grp.stdout or "") + (run_empty_grp.stderr or ""))
             cleared_cfg = json.loads((oc / "openclaw.json").read_text(encoding="utf-8"))
             self.assertEqual(cleared_cfg["channels"]["telegram"]["accounts"]["emtroly"]["groups"], {})
             self.assertNotIn("", cleared_cfg["channels"]["telegram"]["accounts"]["emtroly"]["groups"])
@@ -274,10 +280,12 @@ class ManageInstanceTests(unittest.TestCase):
                 env=env,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=20,
             )
-            self.assertEqual(probe_res2.returncode, 0, probe_res2.stdout + probe_res2.stderr)
-            self.assertEqual(json.loads(probe_res2.stdout.strip())["GroupId"], "")
+            self.assertEqual(probe_res2.returncode, 0, (probe_res2.stdout or "") + (probe_res2.stderr or ""))
+            self.assertEqual(json.loads(state_json.read_text(encoding="utf-8"))["GroupId"], "")
 
     def test_updates_token_and_api_key_when_provided_and_syncs_codex_auth(self):
         with tempfile.TemporaryDirectory(prefix="emtroly-manage-secrets-") as temporary:
