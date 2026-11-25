@@ -385,6 +385,53 @@ def cmd_ship(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_install_shortcut(_args: argparse.Namespace) -> int:
+    """Create a 1-click 'Team Git Studio' shortcut on the user's Desktop (Windows & macOS)."""
+    desktop = Path.home() / "Desktop"
+    if not desktop.is_dir():
+        # Handle OneDrive Desktop on Windows
+        od_desktop = Path.home() / "OneDrive" / "Desktop"
+        if od_desktop.is_dir():
+            desktop = od_desktop
+        else:
+            print(f"ERROR: Desktop folder not found at {desktop}", file=sys.stderr)
+            return 1
+
+    if sys.platform == "win32":
+        lnk_path = desktop / "Team Git Studio.lnk"
+        target_bat = ROOT / "Team-Git.bat"
+        ps_script = (
+            "$ws = New-Object -ComObject WScript.Shell; "
+            f"$sc = $ws.CreateShortcut('{str(lnk_path).replace(chr(39), chr(39)*2)}'); "
+            f"$sc.TargetPath = '{str(target_bat).replace(chr(39), chr(39)*2)}'; "
+            f"$sc.WorkingDirectory = '{str(ROOT).replace(chr(39), chr(39)*2)}'; "
+            "$sc.WindowStyle = 7; "
+            "$sc.IconLocation = 'shell32.dll,14'; "
+            "$sc.Description = 'Team Git Studio - installer_emtroly'; "
+            "$sc.Save()"
+        )
+        res = subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True, text=True)
+        if res.returncode != 0:
+            print(res.stdout + res.stderr, file=sys.stderr)
+            return 1
+        print(f"SHORTCUT_OK: Created Desktop shortcut at {lnk_path}")
+        return 0
+
+    # macOS / Linux
+    target_cmd = ROOT / "Team-Git.command"
+    link_path = desktop / "Team Git Studio.command"
+    try:
+        if link_path.exists() or link_path.is_symlink():
+            link_path.unlink()
+        link_path.symlink_to(target_cmd)
+        target_cmd.chmod(0o755)
+        print(f"SHORTCUT_OK: Created Desktop shortcut at {link_path}")
+        return 0
+    except OSError as exc:
+        print(f"ERROR: Could not create shortcut: {exc}", file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="installer_emtroly Team Git Flow helper")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -408,6 +455,8 @@ def main() -> int:
     p_ui.add_argument("--port", type=int, default=8765, help="Localhost port (default: 8765)")
     p_ui.add_argument("--no-open", action="store_true", help="Do not auto-open the browser")
 
+    sub.add_parser("install-shortcut", help="Create a 'Team Git Studio' shortcut on the Desktop")
+
     args = parser.parse_args()
     if args.cmd == "sync":
         return cmd_sync(args)
@@ -421,6 +470,8 @@ def main() -> int:
         return cmd_pr(args)
     if args.cmd == "ship":
         return cmd_ship(args)
+    if args.cmd == "install-shortcut":
+        return cmd_install_shortcut(args)
     if args.cmd == "ui":
         ui_script = Path(__file__).resolve().with_name("team_git_ui.py")
         cmd = [sys.executable, str(ui_script), "--port", str(args.port)]
