@@ -1786,5 +1786,107 @@ Write-Output 'WPF_UPDATE_BANNER_AND_DOWNLOAD_OK'
             self.assertIn("SHARED_LOCK_AND_CLEAN_ERRORS_OK", res_shared.stdout)
 
 
+class Step3CleanPcAndFailureUiTests(unittest.TestCase):
+    def test_step3_parallel_downloader_uses_runspaces_never_threadpool_events(self):
+        deps_src = (ROOT / "native" / "user-dependencies.ps1").read_text(encoding="utf-8-sig")
+        wizard_src = (ROOT / "windows-installer" / "wizard.ps1").read_text(encoding="utf-8-sig")
+        runner_src = (ROOT / "windows-installer" / "run-native-install.ps1").read_text(encoding="utf-8-sig")
+        self.assertNotIn(
+            "add_DownloadProgressChanged",
+            deps_src,
+            "WebClient.add_DownloadProgressChanged fires on ThreadPool without Runspace and crashes PS 5.1 silently",
+        )
+        self.assertIn("RunspaceFactory", deps_src)
+        self.assertIn("Sanitize-WizardFailureSummary", wizard_src)
+        self.assertIn("New-UnexpectedExitDiagnosticPayload", wizard_src)
+        self.assertIn("'dependencies'", wizard_src)
+        self.assertIn("$stage = 'dependencies'", runner_src)
+
+        if not sys.platform.startswith("win"):
+            return
+
+        import http.server
+        import socketserver
+        import threading
+
+        class DualPayloadHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                payload = (b"NODE_" * 4096) if "node" in self.path else (b"FFMPEG_" * 4096)
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, format, *args):
+                return
+
+        class ReusableTcpServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+
+        server = ReusableTcpServer(("127.0.0.1", 0), DualPayloadHandler)
+        port = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                helpers_path = str(ROOT / "windows-installer" / "wizard-helpers.ps1")
+                deps_path = str(ROOT / "native" / "user-dependencies.ps1")
+                out1 = str(tmp_path / "node.part")
+                out2 = str(tmp_path / "ffmpeg.part")
+                test_ps1 = tmp_path / "verify_step3_and_sanitize.ps1"
+                test_ps1.write_text(
+                    "$ErrorActionPreference = 'Stop'\n"
+                    "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8\n"
+                    f". '{helpers_path}'\n"
+                    "$sanitized = Sanitize-WizardFailureSummary -Summary 'Đang kiểm tra và cài Node.js, Python, FFmpeg nếu máy còn thiếu…' -ExitCode 2 -LastStepIndex 3\n"
+                    "if ($sanitized -match '^(?i)Đang') { throw ('in-progress-leaked:' + $sanitized) }\n"
+                    "if ($sanitized -notmatch 'Bước 3') { throw ('missing-step:' + $sanitized) }\n"
+                    "$diag = New-UnexpectedExitDiagnosticPayload -Summary 'Đang tải...' -ExitCode 2 -LastStepIndex 3\n"
+                    "if ($diag.stage -ne 'dependencies') { throw ('bad-stage:' + $diag.stage) }\n"
+                    "if ($diag.friendlyMessage -match '^(?i)Đang') { throw ('diag-in-progress:' + $diag.friendlyMessage) }\n"
+                    "$tokens = $null; $parseErrs = $null\n"
+                    f"$ast = [System.Management.Automation.Language.Parser]::ParseFile('{deps_path}', [ref]$tokens, [ref]$parseErrs)\n"
+                    "if ($parseErrs.Count -gt 0) { throw ('parse-err:' + $parseErrs[0].Message) }\n"
+                    "$assign = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left.Extent.Text -eq '$workerScript' }, $true)\n"
+                    "if (-not $assign) { throw 'workerScript-not-found' }\n"
+                    "$sbText = $assign.Right.Expression.ScriptBlock.Extent.Text\n"
+                    "$innerText = $sbText.Substring(1, $sbText.Length - 2)\n"
+                    "$workerSb = [scriptblock]::Create($innerText)\n"
+                    "$map = [hashtable]::Synchronized(@{\n"
+                    "  node = [hashtable]::Synchronized(@{ Received = 0L; Total = 20480L; Error = '' })\n"
+                    "  ffmpeg = [hashtable]::Synchronized(@{ Received = 0L; Total = 28672L; Error = '' })\n"
+                    "})\n"
+                    f"$items = @(@{{ Key='node'; Uri='http://127.0.0.1:{port}/node.zip'; Out='{out1}' }}, @{{ Key='ffmpeg'; Uri='http://127.0.0.1:{port}/ffmpeg.zip'; Out='{out2}' }})\n"
+                    "$active = @()\n"
+                    "foreach ($it in $items) {\n"
+                    "  $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace(); $rs.Open()\n"
+                    "  $ps = [System.Management.Automation.PowerShell]::Create(); $ps.Runspace = $rs\n"
+                    "  [void]$ps.AddScript($workerSb).AddArgument([string]$it.Uri).AddArgument([string]$it.Out).AddArgument([string]$it.Key).AddArgument($map)\n"
+                    "  $active += [pscustomobject]@{ Ps=$ps; Rs=$rs; Handle=$ps.BeginInvoke() }\n"
+                    "}\n"
+                    "foreach ($a in $active) {\n"
+                    "  $r = $a.Ps.EndInvoke($a.Handle)\n"
+                    "  if (-not $r -or ($r | Select-Object -Last 1) -ne $true) { throw 'parallel-worker-failed' }\n"
+                    "  $a.Ps.Dispose(); $a.Rs.Close(); $a.Rs.Dispose()\n"
+                    "}\n"
+                    "if ($map['node'].Received -ne 20480 -or $map['ffmpeg'].Received -ne 28672) { throw ('bad-bytes:' + $map['node'].Received + '/' + $map['ffmpeg'].Received) }\n"
+                    "Write-Output 'STEP3_RUNSPACE_AND_SANITIZE_OK'\n",
+                    encoding="utf-8-sig",
+                )
+                res = subprocess.run(
+                    ["powershell.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(test_ps1)],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+                self.assertIn("STEP3_RUNSPACE_AND_SANITIZE_OK", res.stdout)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+
 if __name__ == "__main__":
     unittest.main()
