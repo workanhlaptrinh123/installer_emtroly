@@ -36,7 +36,23 @@ $activationProbe = Join-Path $PSScriptRoot 'activation-probe'
 $activationTest = Join-Path $activationProbe 'test.js'
 
 function Write-EditorStatus([string]$Text) {
-  [IO.File]::WriteAllText($StatusFile, $Text, (New-Object Text.UTF8Encoding($false)))
+  if ([string]::IsNullOrWhiteSpace($StatusFile)) { return }
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Text)
+  for ($attempt = 1; $attempt -le 12; $attempt++) {
+    $fs = $null
+    try {
+      $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+      $fs = New-Object System.IO.FileStream($StatusFile, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::Write, $share)
+      $fs.SetLength(0)
+      if ($bytes.Length -gt 0) { $fs.Write($bytes, 0, $bytes.Length) }
+      $fs.Flush()
+      return
+    } catch {
+      if ($attempt -lt 12) { Start-Sleep -Milliseconds 25 }
+    } finally {
+      if ($null -ne $fs) { try { $fs.Dispose() } catch { } }
+    }
+  }
 }
 
 function Set-PrivateDirectoryAcl([string]$Path) {

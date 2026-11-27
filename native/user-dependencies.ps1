@@ -93,9 +93,22 @@ function Test-PythonCandidate {
 function Write-DependencyInstallStatus {
   param([string]$Text)
   if ($env:MEMBER_INSTALL_STATUS_FILE -and -not [string]::IsNullOrWhiteSpace($Text)) {
-    try {
-      [IO.File]::WriteAllText($env:MEMBER_INSTALL_STATUS_FILE, $Text, (New-Object System.Text.UTF8Encoding($false)))
-    } catch { }
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Text)
+    for ($attempt = 1; $attempt -le 8; $attempt++) {
+      $fs = $null
+      try {
+        $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+        $fs = New-Object System.IO.FileStream($env:MEMBER_INSTALL_STATUS_FILE, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::Write, $share)
+        $fs.SetLength(0)
+        $fs.Write($bytes, 0, $bytes.Length)
+        $fs.Flush()
+        break
+      } catch {
+        if ($attempt -lt 8) { Start-Sleep -Milliseconds 20 }
+      } finally {
+        if ($null -ne $fs) { try { $fs.Dispose() } catch { } }
+      }
+    }
   }
 }
 

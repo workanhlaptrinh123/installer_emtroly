@@ -46,7 +46,22 @@ function Write-NativeInstallLog([string]$Entry, [string[]]$Secrets = @()) {
 
 function Write-NativeInstallStatus([string]$Text) {
   if ($env:MEMBER_INSTALL_STATUS_FILE) {
-    [IO.File]::WriteAllText($env:MEMBER_INSTALL_STATUS_FILE, $Text, (New-Object Text.UTF8Encoding($false)))
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Text)
+    for ($attempt = 1; $attempt -le 12; $attempt++) {
+      $fs = $null
+      try {
+        $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+        $fs = New-Object System.IO.FileStream($env:MEMBER_INSTALL_STATUS_FILE, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::Write, $share)
+        $fs.SetLength(0)
+        if ($bytes.Length -gt 0) { $fs.Write($bytes, 0, $bytes.Length) }
+        $fs.Flush()
+        break
+      } catch {
+        if ($attempt -lt 12) { Start-Sleep -Milliseconds 25 }
+      } finally {
+        if ($null -ne $fs) { try { $fs.Dispose() } catch { } }
+      }
+    }
   }
   Write-NativeInstallLog -Entry ("STATUS: " + $Text)
 }

@@ -7,6 +7,185 @@
 # - Xuất báo cáo hỗ trợ kỹ thuật (đã tự động ẩn sạch Token & API Key)
 # - Tạo lối tắt ứng dụng Quản lý "Em Tro Ly - Anh Lap Trinh" trên Desktop & Start Menu
 
+function Write-EmTroLySharedStatusFile {
+  param(
+    [string]$Path = '',
+    [string]$Text = '',
+    [int]$MaxAttempts = 12,
+    [int]$RetryDelayMs = 25
+  )
+  if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Text)
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    $fs = $null
+    try {
+      $parent = Split-Path -Parent $Path
+      if ($parent -and -not (Test-Path -LiteralPath $parent -PathType Container)) {
+        [void][IO.Directory]::CreateDirectory($parent)
+      }
+      $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+      $fs = New-Object System.IO.FileStream($Path, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::Write, $share)
+      $fs.SetLength(0)
+      if ($bytes.Length -gt 0) {
+        $fs.Write($bytes, 0, $bytes.Length)
+      }
+      $fs.Flush()
+      return $true
+    } catch {
+      if ($attempt -lt $MaxAttempts) {
+        Start-Sleep -Milliseconds $RetryDelayMs
+      }
+    } finally {
+      if ($null -ne $fs) {
+        try { $fs.Dispose() } catch { }
+      }
+    }
+  }
+  return $false
+}
+
+function Read-EmTroLySharedUtf8File {
+  param(
+    [string]$Path = '',
+    [int]$MaxAttempts = 5,
+    [int]$RetryDelayMs = 20
+  )
+  if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    return ''
+  }
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    $fs = $null
+    $sr = $null
+    try {
+      $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+      $fs = New-Object System.IO.FileStream($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $share)
+      $sr = New-Object System.IO.StreamReader($fs, [System.Text.Encoding]::UTF8, $true)
+      return $sr.ReadToEnd()
+    } catch {
+      if ($attempt -lt $MaxAttempts) {
+        Start-Sleep -Milliseconds $RetryDelayMs
+      }
+    } finally {
+      if ($null -ne $sr) {
+        try { $sr.Dispose() } catch { }
+      } elseif ($null -ne $fs) {
+        try { $fs.Dispose() } catch { }
+      }
+    }
+  }
+  return ''
+}
+
+if (-not (Get-Command -Name 'Get-EmTroLyInstalledState' -ErrorAction Ignore)) {
+  function Get-EmTroLyInstalledState {
+    $root = if ($env:USERPROFILE) { Join-Path $env:USERPROFILE 'openclaw' } else { '' }
+    $configPath = if ($root) { Join-Path $root 'openclaw.json' } else { '' }
+    $installingMarker = if ($root) { Join-Path $root '.emtroly-installing.json' } else { '' }
+    $codexInfo = if (Get-Command -Name 'Find-EmTroLyCodexCli' -ErrorAction Ignore) {
+      Find-EmTroLyCodexCli
+    } else {
+      [pscustomobject]@{ Available = $false; Executable = ''; CodexHome = ''; Source = 'none'; Label = '' }
+    }
+    if (-not $configPath -or -not (Test-Path -LiteralPath $configPath -PathType Leaf) -or ($installingMarker -and (Test-Path -LiteralPath $installingMarker -PathType Leaf))) {
+      return [pscustomobject]@{
+        OpenClawInstalled = $false
+        Root              = $root
+        AccountName       = 'emtroly'
+        AssistantName     = 'Trợ lý OpenClaw'
+        BaseUrl           = 'https://codex.anhlaptrinh.vn/v1'
+        Model             = 'gpt-6.2-sol'
+        OwnerIds          = ''
+        GroupId           = ''
+        GatewayPort       = '0'
+        Audience          = ''
+        Addressing        = ''
+        Style             = ''
+        HasTelegramToken  = $false
+        HasProviderSecret = (-not [string]::IsNullOrWhiteSpace($codexInfo.CodexHome))
+        ZaloInstalled     = $false
+        CodexInstalled    = [bool]$codexInfo.Available
+      }
+    }
+    $assistantName = 'Trợ lý OpenClaw'
+    $baseUrl = 'https://codex.anhlaptrinh.vn/v1'
+    $model = 'gpt-6.2-sol'
+    $ownerIds = ''
+    $groupId = ''
+    $gatewayPort = '0'
+    $accountName = 'emtroly'
+    try {
+      $cfg = (Read-EmTroLySharedUtf8File -Path $configPath) | ConvertFrom-Json
+      if ($cfg.agents -and $cfg.agents.entries -and $cfg.agents.entries.main -and $cfg.agents.entries.main.name) {
+        $assistantName = [string]$cfg.agents.entries.main.name
+      }
+      if ($cfg.models -and $cfg.models.providers -and $cfg.models.providers.customer) {
+        if ($cfg.models.providers.customer.baseUrl) {
+          $baseUrl = ([string]$cfg.models.providers.customer.baseUrl).TrimEnd('/')
+        }
+        if ($cfg.models.providers.customer.models -and @($cfg.models.providers.customer.models).Count -gt 0) {
+          $mId = [string]@($cfg.models.providers.customer.models)[0].id
+          if ($mId) { $model = $mId }
+        }
+      }
+      if ($cfg.agents -and $cfg.agents.defaults -and $cfg.agents.defaults.model -and $cfg.agents.defaults.model.primary) {
+        $primary = [string]$cfg.agents.defaults.model.primary
+        if ($primary -match '^customer/(.+)$') { $model = $Matches[1] }
+      }
+      if ($cfg.gateway -and $cfg.gateway.port) { $gatewayPort = [string]$cfg.gateway.port }
+      if ($cfg.channels -and $cfg.channels.telegram) {
+        if ($cfg.channels.telegram.defaultAccount) {
+          $accountName = [string]$cfg.channels.telegram.defaultAccount
+        } elseif ($cfg.channels.telegram.accounts) {
+          $accProps = @($cfg.channels.telegram.accounts.PSObject.Properties | Select-Object -First 1)
+          if ($accProps.Count -gt 0) { $accountName = [string]$accProps[0].Name }
+        }
+        if ($cfg.channels.telegram.accounts -and $cfg.channels.telegram.accounts.$accountName -and $cfg.channels.telegram.accounts.$accountName.groups) {
+          $grpProps = @($cfg.channels.telegram.accounts.$accountName.groups.PSObject.Properties | Where-Object { $_.Name -match '^-[1-9][0-9]*$' } | Select-Object -First 1)
+          if ($grpProps.Count -gt 0) { $groupId = [string]$grpProps[0].Name }
+        }
+      }
+      $ownersList = @()
+      if ($cfg.commands -and $cfg.commands.ownerAllowFrom) {
+        foreach ($item in @($cfg.commands.ownerAllowFrom)) {
+          $txt = [string]$item
+          if ($txt -match '^telegram:([1-9][0-9]*)$' -and $Matches[1] -notin $ownersList) { $ownersList += $Matches[1] }
+        }
+      }
+      if ($ownersList.Count -eq 0 -and $cfg.channels -and $cfg.channels.telegram -and $cfg.channels.telegram.allowFrom) {
+        foreach ($item in @($cfg.channels.telegram.allowFrom)) {
+          $txt = ([string]$item).Trim()
+          if ($txt -match '^[1-9][0-9]*$' -and $txt -notin $ownersList) { $ownersList += $txt }
+        }
+      }
+      $ownerIds = ($ownersList -join ',')
+    } catch { }
+    $tokenFile = Join-Path $root 'telegram.token'
+    $secretFile = Join-Path $root 'member-provider.secret'
+    $hasToken = (Test-Path -LiteralPath $tokenFile -PathType Leaf) -and ((Get-Item -LiteralPath $tokenFile).Length -gt 5)
+    $hasSecret = ((Test-Path -LiteralPath $secretFile -PathType Leaf) -and ((Get-Item -LiteralPath $secretFile).Length -gt 3)) -or
+      (-not [string]::IsNullOrWhiteSpace($codexInfo.CodexHome))
+    $hasZalo = (Test-Path -LiteralPath (Join-Path $root 'workspace\skills\telegram-zalo-owner-login\SKILL.md') -PathType Leaf)
+    return [pscustomobject]@{
+      OpenClawInstalled = $true
+      Root              = $root
+      AccountName       = $accountName
+      AssistantName     = $assistantName
+      BaseUrl           = $baseUrl
+      Model             = $model
+      OwnerIds          = $ownerIds
+      GroupId           = $groupId
+      GatewayPort       = $gatewayPort
+      Audience          = ''
+      Addressing        = ''
+      Style             = ''
+      HasTelegramToken  = [bool]$hasToken
+      HasProviderSecret = [bool]$hasSecret
+      ZaloInstalled     = [bool]$hasZalo
+      CodexInstalled    = [bool]$codexInfo.Available
+    }
+  }
+}
+
 function Get-EmTroLyAppVersion {
   param([string]$PayloadRoot = '')
   $installerVer = '2026.11.21'
@@ -387,7 +566,7 @@ function Test-EmTroLyPreflightChecks {
 }
 
 function Get-EmTroLyLiveDashboardStatus {
-  $st = if (Get-Command Get-EmTroLyInstalledState -ErrorAction SilentlyContinue) {
+  $st = if (Get-Command -Name 'Get-EmTroLyInstalledState' -ErrorAction Ignore) {
     Get-EmTroLyInstalledState
   } else { $null }
   if (-not $st) { return $null }
@@ -404,7 +583,7 @@ function Get-EmTroLyLiveDashboardStatus {
   $progMenu = [Environment]::GetFolderPath('Programs')
   $hasAntigravityShortcut = ($desktopDir -and (Test-Path -LiteralPath (Join-Path $desktopDir 'EmTroLy - Antigravity.lnk') -PathType Leaf)) -or
     ($progMenu -and (Test-Path -LiteralPath (Join-Path $progMenu 'EmTroLy - Antigravity.lnk') -PathType Leaf))
-  $modSt = if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) { Get-EmTroLyModularStatus } else { $null }
+  $modSt = if (Get-Command -Name 'Get-EmTroLyModularStatus' -ErrorAction Ignore) { Get-EmTroLyModularStatus } else { $null }
   $codexCliReady = if ($modSt) { [bool]$modSt.CodexCliInstalled } else { [bool]$st.CodexInstalled }
   $ideReady = if ($modSt) { [bool]$modSt.AntigravityInstalled } else { $hasAntigravityShortcut }
   $codexExtReady = if ($modSt) { [bool]$modSt.CodexExtensionInstalled } else { $hasAntigravityShortcut }
@@ -429,7 +608,7 @@ function Get-EmTroLyLiveDashboardStatus {
   }
 
   $gwUrl = if ($portNum -ge 1024) { "http://127.0.0.1:$portNum/" } else { '' }
-  $ocVerDash = if (Get-Command Get-EmTroLyOpenClawVersionInfo -ErrorAction SilentlyContinue) {
+  $ocVerDash = if (Get-Command -Name 'Get-EmTroLyOpenClawVersionInfo' -ErrorAction Ignore) {
     Get-EmTroLyOpenClawVersionInfo -OpenClawRoot ([string]$st.Root)
   } else { $null }
   return [pscustomobject]@{
@@ -486,13 +665,13 @@ function Export-EmTroLySupportReport {
       } catch { }
     }
   }
-  if (Get-Command Get-EmTroLySavedLicenseKey -ErrorAction SilentlyContinue) {
+  if (Get-Command -Name 'Get-EmTroLySavedLicenseKey' -ErrorAction Ignore) {
     try {
       $savedLicKey = Get-EmTroLySavedLicenseKey
       if ($savedLicKey) { $secrets += $savedLicKey }
     } catch { }
   }
-  if (Get-Command Get-EmTroLySavedSetupDraft -ErrorAction SilentlyContinue) {
+  if (Get-Command -Name 'Get-EmTroLySavedSetupDraft' -ErrorAction Ignore) {
     try {
       $savedDraft = Get-EmTroLySavedSetupDraft
       if ($savedDraft) {
@@ -513,7 +692,7 @@ function Export-EmTroLySupportReport {
   [void]$sb.AppendLine('')
 
   [void]$sb.AppendLine('[1] TRANG THAI CAI DAT')
-  if (Get-Command Get-EmTroLyInstalledState -ErrorAction SilentlyContinue) {
+  if (Get-Command -Name 'Get-EmTroLyInstalledState' -ErrorAction Ignore) {
     $st = Get-EmTroLyInstalledState
     [void]$sb.AppendLine("  OpenClaw da cai : $($st.OpenClawInstalled)")
     [void]$sb.AppendLine("  Ten tro ly      : $($st.AssistantName)")
@@ -528,7 +707,7 @@ function Export-EmTroLySupportReport {
 
   [void]$sb.AppendLine('[2] CONG CU TRONG PATH')
   foreach ($tool in @('node.exe', 'npm.cmd', 'python.exe', 'ffmpeg.exe', 'openclaw.cmd', 'codex.cmd', 'codex.exe')) {
-    $cmd = @(Get-Command $tool -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1)
+    $cmd = @(Get-Command $tool -CommandType Application -ErrorAction Ignore | Select-Object -First 1)
     $loc = if ($cmd.Count -gt 0) { $cmd[0].Source } else { '(khong tim thay)' }
     [void]$sb.AppendLine("  $($tool.PadRight(14)) : $loc")
   }
@@ -563,7 +742,7 @@ function Export-EmTroLySupportReport {
   }
 
   $rawReport = $sb.ToString()
-  $safeReport = if (Get-Command Remove-SensitiveStrings -ErrorAction SilentlyContinue) {
+  $safeReport = if (Get-Command -Name 'Remove-SensitiveStrings' -ErrorAction Ignore) {
     Remove-SensitiveStrings -Text $rawReport -Secrets $secrets
   } else {
     $tmp = $rawReport
@@ -1063,7 +1242,7 @@ function Get-EmTroLyModularStatus {
   $codexInstalled = $false
   $codexDetail = 'Chưa cài đặt — chỉ cần bấm Cài phần này (~20 giây, không cần Telegram)'
   $emBase = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'EmTroLy' } else { '' }
-  if (Get-Command Find-EmTroLyCodexCli -ErrorAction SilentlyContinue) {
+  if (Get-Command -Name 'Find-EmTroLyCodexCli' -ErrorAction Ignore) {
     $cInfo = Find-EmTroLyCodexCli
     $hasCfg = $emBase -and (Test-Path -LiteralPath (Join-Path $emBase 'Codex\config.toml') -PathType Leaf)
     if ($cInfo.Available -and ($cInfo.Source -eq 'emtroly' -or $hasCfg)) {
@@ -1174,10 +1353,10 @@ function Get-EmTroLyModularStatus {
     'Chưa cài đặt — cài tiện ích Codex vào Antigravity riêng & tạo lối tắt Desktop'
   }
 
-  $ocState = if (Get-Command Get-EmTroLyInstalledState -ErrorAction SilentlyContinue) { Get-EmTroLyInstalledState } else { $null }
+  $ocState = if (Get-Command -Name 'Get-EmTroLyInstalledState' -ErrorAction Ignore) { Get-EmTroLyInstalledState } else { $null }
   $ocInstalled = ($ocState -and [bool]$ocState.OpenClawInstalled)
   $zaloInstalled = ($ocState -and [bool]$ocState.ZaloInstalled)
-  $ocVerInfo = if (Get-Command Get-EmTroLyOpenClawVersionInfo -ErrorAction SilentlyContinue) {
+  $ocVerInfo = if (Get-Command -Name 'Get-EmTroLyOpenClawVersionInfo' -ErrorAction Ignore) {
     Get-EmTroLyOpenClawVersionInfo -OpenClawRoot $(if ($ocState) { [string]$ocState.Root } else { '' })
   } else { $null }
   $ocCurVer = if ($ocVerInfo) { [string]$ocVerInfo.InstalledVersion } else { '' }
@@ -1382,7 +1561,7 @@ function Test-EmTroLyCatalogAppInstalled {
   }
   if ($App.PSObject.Properties['detect_command'] -and -not [string]::IsNullOrWhiteSpace([string]$App.detect_command)) {
     $cmdName = ([string]$App.detect_command).Trim()
-    if (@(Get-Command $cmdName -CommandType Application -ErrorAction SilentlyContinue).Count -gt 0) {
+    if (@(Get-Command $cmdName -CommandType Application -ErrorAction Ignore).Count -gt 0) {
       return $true
     }
   }
@@ -1401,8 +1580,8 @@ function Get-EmTroLyAppCatalog {
     } catch { $rawObj = $null }
   }
 
-  $ms = if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) { Get-EmTroLyModularStatus } else { $null }
-  $st = if (Get-Command Get-EmTroLyInstalledState -ErrorAction SilentlyContinue) { Get-EmTroLyInstalledState } else { $null }
+  $ms = if (Get-Command -Name 'Get-EmTroLyModularStatus' -ErrorAction Ignore) { Get-EmTroLyModularStatus } else { $null }
+  $st = if (Get-Command -Name 'Get-EmTroLyInstalledState' -ErrorAction Ignore) { Get-EmTroLyInstalledState } else { $null }
 
   $categories = if ($rawObj -and $rawObj.PSObject.Properties['categories'] -and $rawObj.categories) {
     @($rawObj.categories)
@@ -1779,7 +1958,7 @@ function Install-EmTroLyAppUpdate {
   $writeProgress = {
     param([string]$Txt)
     if (-not [string]::IsNullOrWhiteSpace($StatusFile)) {
-      try { [IO.File]::WriteAllText($StatusFile, $Txt, $utf8NoBom) } catch { }
+      [void](Write-EmTroLySharedStatusFile -Path $StatusFile -Text $Txt)
     }
   }
 
