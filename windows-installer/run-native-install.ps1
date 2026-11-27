@@ -27,6 +27,10 @@ $autoHealScript = Join-Path $PayloadRoot 'windows-installer\auto-heal-codex.ps1'
 if (Test-Path -LiteralPath $autoHealScript -PathType Leaf) {
   . ([ScriptBlock]::Create([IO.File]::ReadAllText($autoHealScript, [System.Text.Encoding]::UTF8)))
 }
+$manageHelperScript = Join-Path $PayloadRoot 'windows-installer\manage-instance.ps1'
+if (Test-Path -LiteralPath $manageHelperScript -PathType Leaf) {
+  . ([ScriptBlock]::Create([IO.File]::ReadAllText($manageHelperScript, [System.Text.Encoding]::UTF8)))
+}
 $wizardHelperScript = Join-Path $PayloadRoot 'windows-installer\wizard-helpers.ps1'
 if (Test-Path -LiteralPath $wizardHelperScript -PathType Leaf) {
   . ([ScriptBlock]::Create([IO.File]::ReadAllText($wizardHelperScript, [System.Text.Encoding]::UTF8)))
@@ -53,7 +57,7 @@ function Format-RedactedLogLine([string]$RawText, [psobject]$SettingsObj = $null
     if ($SettingsObj.PSObject.Properties['ai_api_key'] -and $SettingsObj.ai_api_key) { $secList += [string]$SettingsObj.ai_api_key }
   }
   $clean = [string]$RawText
-  if (Get-Command Remove-SensitiveStrings -ErrorAction SilentlyContinue) {
+  if (Get-Command -Name 'Remove-SensitiveStrings' -ErrorAction Ignore) {
     $clean = Remove-SensitiveStrings -Text $clean -Secrets $secList
   } else {
     foreach ($sec in $secList) {
@@ -89,8 +93,39 @@ function Resolve-SafeCanonicalPath([string]$PathValue) {
   }
 }
 
+function Write-SharedUtf8FileWithRetry([string]$Path, [string]$Content, [int]$MaxAttempts = 12, [int]$RetryDelayMs = 25) {
+  if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Content)
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    $fs = $null
+    try {
+      $parent = Split-Path -Parent $Path
+      if ($parent -and -not (Test-Path -LiteralPath $parent -PathType Container)) {
+        [void][IO.Directory]::CreateDirectory($parent)
+      }
+      $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+      $fs = New-Object System.IO.FileStream($Path, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::Write, $share)
+      $fs.SetLength(0)
+      if ($bytes.Length -gt 0) {
+        $fs.Write($bytes, 0, $bytes.Length)
+      }
+      $fs.Flush()
+      return $true
+    } catch {
+      if ($attempt -lt $MaxAttempts) {
+        Start-Sleep -Milliseconds $RetryDelayMs
+      }
+    } finally {
+      if ($null -ne $fs) {
+        try { $fs.Dispose() } catch { }
+      }
+    }
+  }
+  return $false
+}
+
 function Write-SafeStatus([string]$Text) {
-  [IO.File]::WriteAllText($LogFile, $Text, (New-Object Text.UTF8Encoding($false)))
+  [void](Write-SharedUtf8FileWithRetry -Path $LogFile -Content $Text)
   Write-RedactedInstallLog -Entry ("STATUS: " + $Text)
 }
 
@@ -214,6 +249,9 @@ function Get-SafeRecentErrorTrace([object]$CaughtRecord, [psobject]$SettingsObj)
     }
   }
   foreach ($e in @($global:Error | Select-Object -First 6)) {
+    if ($e -and $e.Exception -is [System.Management.Automation.CommandNotFoundException] -and ($null -eq $CaughtRecord -or $e.Exception -ne $CaughtRecord.Exception)) {
+      continue
+    }
     $txt = ([string]$e).Trim()
     if ($txt -and $lines -notcontains $txt) { $lines += $txt }
   }
@@ -223,7 +261,7 @@ function Get-SafeRecentErrorTrace([object]$CaughtRecord, [psobject]$SettingsObj)
     if ($SettingsObj.PSObject.Properties['telegram_token']) { $secList += [string]$SettingsObj.telegram_token }
     if ($SettingsObj.PSObject.Properties['ai_api_key']) { $secList += [string]$SettingsObj.ai_api_key }
   }
-  if (Get-Command Remove-SensitiveStrings -ErrorAction SilentlyContinue) {
+  if (Get-Command -Name 'Remove-SensitiveStrings' -ErrorAction Ignore) {
     return (Remove-SensitiveStrings -Text $joined -Secrets $secList)
   }
   return $joined
@@ -409,7 +447,7 @@ requires_openai_auth = true
         $psExeReuse = if ($env:OS -eq 'Windows_NT') { Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' } else { Join-Path $PSHOME 'pwsh' }
         & $psExeReuse -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $repairScript *> $null
         if ($LASTEXITCODE -eq 0) {
-          if (Get-Command Register-EmTroLyCodexCli -ErrorAction SilentlyContinue) {
+          if (Get-Command -Name 'Register-EmTroLyCodexCli' -ErrorAction Ignore) {
             [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot)
           }
           return
@@ -433,10 +471,10 @@ requires_openai_auth = true
       $edErr = [string]$_.Exception.Message
       $script:lastTechnicalDetail = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
       Write-RedactedInstallLog -Entry ("EDITOR_ERROR ($edErr): " + $script:lastTechnicalDetail)
-      [IO.File]::WriteAllText($installCaptureFile, $script:lastTechnicalDetail, (New-Object Text.UTF8Encoding($false)))
+      [void](Write-SharedUtf8FileWithRetry -Path $installCaptureFile -Content $script:lastTechnicalDetail)
       $canHealEd = ($edErr -ne 'editor-ide-missing') -and
-        (Get-Command Invoke-CodexAutoHeal -ErrorAction SilentlyContinue) -and
-        (Get-Command Test-IsAutoHealableError -ErrorAction SilentlyContinue) -and
+        (Get-Command -Name 'Invoke-CodexAutoHeal' -ErrorAction Ignore) -and
+        (Get-Command -Name 'Test-IsAutoHealableError' -ErrorAction Ignore) -and
         (Test-IsAutoHealableError -ErrorCode $edErr -Stage 'editor')
       if (-not $canHealEd) { throw }
 
@@ -466,7 +504,7 @@ requires_openai_auth = true
       }
       if (-not $healedEd) { throw $edErr }
     }
-    if (Get-Command Register-EmTroLyCodexCli -ErrorAction SilentlyContinue) {
+    if (Get-Command -Name 'Register-EmTroLyCodexCli' -ErrorAction Ignore) {
       [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot)
     }
   }
@@ -517,7 +555,7 @@ requires_openai_auth = true
           Remove-IncompleteOpenClawDirectory -DirPath $root -AllowBrokenConfig
         }
         if (Test-Path -LiteralPath (Join-Path $root 'openclaw.json') -PathType Leaf) {
-          $ocVerCheck = if (Get-Command Get-EmTroLyOpenClawVersionInfo -ErrorAction SilentlyContinue) {
+          $ocVerCheck = if (Get-Command -Name 'Get-EmTroLyOpenClawVersionInfo' -ErrorAction Ignore) {
             Get-EmTroLyOpenClawVersionInfo -PayloadRoot $PayloadRoot -OpenClawRoot $root
           } else { $null }
           $hasCompleteInstance = (Test-Path -LiteralPath (Join-Path $root 'openclaw-instance.ps1') -PathType Leaf) -and
@@ -545,7 +583,7 @@ requires_openai_auth = true
           $npmRoamingDir = if ($env:APPDATA) { Resolve-SafeCanonicalPath (Join-Path $env:APPDATA 'npm') } else { '' }
           $rootHasComplete = (Test-Path -LiteralPath (Join-Path $root 'openclaw-instance.ps1') -PathType Leaf)
           $foreignLegacyConfigured = (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.openclaw\openclaw.json') -PathType Leaf)
-          foreach ($cmdHit in @(Get-Command openclaw -All -ErrorAction SilentlyContinue)) {
+          foreach ($cmdHit in @(Get-Command openclaw -All -ErrorAction Ignore)) {
             if (-not $cmdHit.Source -or -not (Test-Path -LiteralPath $cmdHit.Source -PathType Leaf)) { continue }
             $cmdSrcDir = Resolve-SafeCanonicalPath (Split-Path -Parent $cmdHit.Source)
             if ($ownShimDir -and $cmdSrcDir -ieq $ownShimDir -and (-not $rootHasComplete)) {
@@ -566,7 +604,7 @@ requires_openai_auth = true
               } catch { }
             }
           }
-          $remainingOpenClawCmd = Get-Command openclaw -ErrorAction SilentlyContinue
+          $remainingOpenClawCmd = Get-Command openclaw -ErrorAction Ignore
           if ($remainingOpenClawCmd) {
             throw 'cli-probe-conflict'
           }
@@ -600,7 +638,7 @@ requires_openai_auth = true
     $matching = @($ids | Where-Object { $_ -ieq [string]$settings.model })
     if ($matching.Count -eq 0) { throw 'provider-model-unavailable' }
     $settings.model = $matching[0]
-    if ($baseUrl -ceq 'https://codex.anhlaptrinh.vn/v1' -and (Get-Command Save-EmTroLyLicenseKey -ErrorAction SilentlyContinue)) {
+    if ($baseUrl -ceq 'https://codex.anhlaptrinh.vn/v1' -and (Get-Command -Name 'Save-EmTroLyLicenseKey' -ErrorAction Ignore)) {
       try { Save-EmTroLyLicenseKey -ApiKey ([string]$settings.ai_api_key) } catch { }
     }
 
@@ -619,9 +657,10 @@ requires_openai_auth = true
     if ($isModularRun) {
       $completedLabels = @()
       $skippedLabels = @()
-      $modSnapNow = if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) { Get-EmTroLyModularStatus } else { $null }
+      $modSnapNow = if (Get-Command -Name 'Get-EmTroLyModularStatus' -ErrorAction Ignore) { Get-EmTroLyModularStatus } else { $null }
 
       if ('codex-cli' -in $requestedComponents) {
+        $stage = 'codex-cli'
         $codexFullyConfigured = ($modSnapNow -and $modSnapNow.CodexCliInstalled -and $env:LOCALAPPDATA -and
           (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex\config.toml') -PathType Leaf) -and
           (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex\auth.json') -PathType Leaf) -and
@@ -630,8 +669,7 @@ requires_openai_auth = true
           Write-SafeStatus '✓ Codex CLI đã cài đặt sẵn — bỏ qua không cài lại.'
           $skippedLabels += 'Codex CLI'
         } else {
-          $stage = 'codex-cli'
-          if (-not (Get-Command Install-EmTroLyCodexCliFirst -ErrorAction SilentlyContinue)) { throw 'editor-module-missing' }
+          if (-not (Get-Command -Name 'Install-EmTroLyCodexCliFirst' -ErrorAction Ignore)) { throw 'editor-module-missing' }
           $codexOnlyRes = Install-EmTroLyCodexCliFirst -Settings $settings -PayloadRoot $PayloadRoot -StatusFile $LogFile -EditorJobId $editorJobId -ForceConfigUpdate
           if (-not $codexOnlyRes.Installed) { throw 'codex-cli-install-failed' }
           $completedLabels += 'Codex CLI'
@@ -640,6 +678,7 @@ requires_openai_auth = true
 
       $wantIde = ('antigravity-ide' -in $requestedComponents)
       $wantExt = ('codex-extension' -in $requestedComponents)
+      if ($wantIde -or $wantExt) { $stage = 'editor' }
       if (-not $forceReinstall -and $modSnapNow) {
         if ($wantIde -and $modSnapNow.AntigravityInstalled) {
           Write-SafeStatus '✓ Antigravity IDE đã cài đặt sẵn — bỏ qua không cài lại.'
@@ -677,13 +716,14 @@ requires_openai_auth = true
       }
 
       if ($wantOpenClaw -and $openClawSkipUpToDate) {
+        $stage = 'install'
         Write-SafeStatus "✓ Trợ lý OpenClaw đã ở phiên bản mới nhất (v$expectedVersion) — bỏ qua không cài lại."
         $skippedLabels += 'OpenClaw'
         $wantOpenClaw = $false
       }
 
       if (-not $wantOpenClaw) {
-        if (Get-Command Install-EmTroLyAppShortcut -ErrorAction SilentlyContinue) {
+        if (Get-Command -Name 'Install-EmTroLyAppShortcut' -ErrorAction Ignore) {
           try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot) } catch { }
         }
         if ($completedLabels.Count -gt 0 -and $skippedLabels.Count -gt 0) {
@@ -725,14 +765,14 @@ requires_openai_auth = true
     # =========================================================================
     if (-not $isModularRun) {
       $stage = 'codex-cli'
-      if (Get-Command Install-EmTroLyCodexCliFirst -ErrorAction SilentlyContinue) {
+      if (Get-Command -Name 'Install-EmTroLyCodexCliFirst' -ErrorAction Ignore) {
         [void](Install-EmTroLyCodexCliFirst -Settings $settings -PayloadRoot $PayloadRoot -StatusFile $LogFile -EditorJobId $editorJobId)
       }
     }
 
     if (-not $settings.skip_editor) {
       $stage = 'editor'
-      $fullModSnap = if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) { Get-EmTroLyModularStatus } else { $null }
+      $fullModSnap = if (Get-Command -Name 'Get-EmTroLyModularStatus' -ErrorAction Ignore) { Get-EmTroLyModularStatus } else { $null }
       $skipFullEditor = ($fullModSnap -and $fullModSnap.AntigravityInstalled -and $fullModSnap.CodexExtensionInstalled)
       $fullEditorMode = if ($fullModSnap -and $fullModSnap.AntigravityInstalled -and -not $fullModSnap.CodexExtensionInstalled) { 'extension-only' } else { 'all' }
       if ($skipFullEditor) {
@@ -801,10 +841,10 @@ requires_openai_auth = true
           Remove-Item -LiteralPath $zaloReqPath -Force -ErrorAction SilentlyContinue
         }
       }
-      if (Get-Command Register-EmTroLyCodexCli -ErrorAction SilentlyContinue) {
+      if (Get-Command -Name 'Register-EmTroLyCodexCli' -ErrorAction Ignore) {
         try { [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot) } catch { }
       }
-      if (Get-Command Install-EmTroLyAppShortcut -ErrorAction SilentlyContinue) {
+      if (Get-Command -Name 'Install-EmTroLyAppShortcut' -ErrorAction Ignore) {
         try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot) } catch { }
       }
       $botReady = $true
@@ -942,9 +982,9 @@ requires_openai_auth = true
           }
         } catch { }
       }
-      [IO.File]::WriteAllText($installCaptureFile, $lastTechnicalDetail, (New-Object Text.UTF8Encoding($false)))
-      $canHeal = (Get-Command Invoke-CodexAutoHeal -ErrorAction SilentlyContinue) -and
-        (Get-Command Test-IsAutoHealableError -ErrorAction SilentlyContinue) -and
+      [void](Write-SharedUtf8FileWithRetry -Path $installCaptureFile -Content $lastTechnicalDetail)
+      $canHeal = (Get-Command -Name 'Invoke-CodexAutoHeal' -ErrorAction Ignore) -and
+        (Get-Command -Name 'Test-IsAutoHealableError' -ErrorAction Ignore) -and
         (Test-IsAutoHealableError -ErrorCode $coreErr -Stage $stage)
       if (-not $canHeal) { throw }
 
@@ -997,10 +1037,10 @@ requires_openai_auth = true
     }
 
     # Re-register Codex CLI shim in %LOCALAPPDATA%\OpenClaw\bin alongside openclaw.cmd & create Desktop shortcut
-    if (Get-Command Register-EmTroLyCodexCli -ErrorAction SilentlyContinue) {
+    if (Get-Command -Name 'Register-EmTroLyCodexCli' -ErrorAction Ignore) {
       try { [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot) } catch { }
     }
-    if (Get-Command Install-EmTroLyAppShortcut -ErrorAction SilentlyContinue) {
+    if (Get-Command -Name 'Install-EmTroLyAppShortcut' -ErrorAction Ignore) {
       try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot) } catch { }
     }
 
@@ -1045,11 +1085,11 @@ requires_openai_auth = true
   if (-not $locked) { throw 'editor-busy' }
   if (-not (Test-Path -LiteralPath $pending)) { throw 'invalid-editor-job' }
   $editorSettings = [pscustomobject]@{ model=$job.model; base_url='https://codex.anhlaptrinh.vn/v1'; ai_api_key=$settings.ai_api_key; job_id=$job.id }
-  if (Get-Command Install-EmTroLyCodexCliFirst -ErrorAction SilentlyContinue) {
+  if (Get-Command -Name 'Install-EmTroLyCodexCliFirst' -ErrorAction Ignore) {
     [void](Install-EmTroLyCodexCliFirst -Settings $editorSettings -PayloadRoot $PayloadRoot -StatusFile $LogFile -EditorJobId $job.id)
   }
   Invoke-EditorStepWithCodexAutoHeal -EditorSettingsObj $editorSettings
-  if (Get-Command Install-EmTroLyAppShortcut -ErrorAction SilentlyContinue) {
+  if (Get-Command -Name 'Install-EmTroLyAppShortcut' -ErrorAction Ignore) {
     try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot) } catch { }
   }
   Remove-Item -LiteralPath $pending -ErrorAction Stop
@@ -1175,7 +1215,7 @@ requires_openai_auth = true
       technicalDetail  = $lastTechnicalDetail
       installLogPath   = $persistentInstallLog
     }
-    [IO.File]::WriteAllText($diagJsonFile, ($diagObj | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
+    [void](Write-SharedUtf8FileWithRetry -Path $diagJsonFile -Content ($diagObj | ConvertTo-Json -Depth 5))
   } catch { }
   if ($botReady) {
     Write-SafeStatus ("Trợ lý đã sẵn sàng. Codex chưa cài xong. " + $message)

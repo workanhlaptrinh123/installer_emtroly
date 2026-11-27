@@ -1675,6 +1675,116 @@ Write-Output 'WPF_UPDATE_BANNER_AND_DOWNLOAD_OK'
         self.assertIn("fallback_ps:", nsi_text)
         self.assertIn("wsh.ok", nsi_text)
 
+    @unittest.skipUnless(SHELL and os.name == "nt", "Requires Windows PowerShell")
+    def test_status_file_lock_resilience_and_modular_installed_state_clean_errors(self):
+        runner = ROOT / "windows-installer/run-native-install.ps1"
+        helpers = ROOT / "windows-installer/wizard-helpers.ps1"
+        with tempfile.TemporaryDirectory(prefix="emtroly-status-lock-") as td:
+            root = Path(td)
+            home = root / "home"
+            local = root / "local"
+            home.mkdir()
+            local.mkdir()
+
+            # Pre-seed installed Codex CLI, Antigravity IDE, and Codex Extension so modular run exercises rapid skip status writes
+            codex_dir = local / "EmTroLy/Codex"
+            ext_dir = local / "EmTroLy/Antigravity/Extensions/openai.chatgpt-26.51111.21308/bin/windows-x86_64"
+            ide_dir = local / "Programs/EmTroLy-Antigravity-IDE-0123456789abcdef0123456789abcdef/resources/app"
+            bin_dir = local / "OpenClaw/bin"
+            desk_dir = root / "desktop"
+            for d in (codex_dir, ext_dir, ide_dir, bin_dir, desk_dir):
+                d.mkdir(parents=True, exist_ok=True)
+            (codex_dir / "config.toml").write_text('model = "gpt-6.2-sol"\n', encoding="utf-8")
+            (codex_dir / "auth.json").write_text('{"OPENAI_API_KEY":"sk-lock-test"}', encoding="utf-8")
+            (bin_dir / "codex-emtroly.cmd").write_text("@echo off\r\n", encoding="ascii")
+            (ext_dir / "codex.exe").write_text("bin", encoding="utf-8")
+            (ext_dir.parents[1] / "package.json").write_text(
+                json.dumps({"publisher": "openai", "name": "chatgpt", "version": "26.51111.21308"}),
+                encoding="utf-8",
+            )
+            (ide_dir.parents[1] / "Antigravity IDE.exe").write_text("exe", encoding="utf-8")
+            (ide_dir / "product.json").write_text(
+                json.dumps({"applicationName": "antigravity-ide", "version": "2.7.0"}),
+                encoding="utf-8",
+            )
+
+            payload = root / "payload"
+            (payload / "windows-installer").mkdir(parents=True)
+            for fname in ("validation.ps1", "codex-cli.ps1", "auto-heal-codex.ps1", "manage-instance.ps1", "wizard-helpers.ps1"):
+                shutil.copy2(ROOT / "windows-installer" / fname, payload / "windows-installer" / fname)
+
+            settings_path = root / "settings.json"
+            status_path = root / "status.txt"
+            status_path.write_text("initial", encoding="utf-8")
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "member": "emtroly",
+                        "components": ["codex-cli", "antigravity-ide", "codex-extension"],
+                        "force_reinstall": False,
+                        "base_url": "https://codex.anhlaptrinh.vn/v1",
+                        "model": "gpt-6.2-sol",
+                        "ai_api_key": "sk-lock-test-key-123456789",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            env = {
+                **os.environ,
+                "USERPROFILE": str(home),
+                "LOCALAPPDATA": str(local),
+                "EMTROLY_TEST_DESKTOP_DIR": str(desk_dir),
+            }
+
+            # 1. Hold an EXCLUSIVE lock (FileShare.None) on status.txt during modular run -> must NEVER crash Write-SafeStatus!
+            with open(status_path, "r+b") as raw_fh:
+                import msvcrt
+
+                msvcrt.locking(raw_fh.fileno(), msvcrt.LK_NBLCK, 1)
+                try:
+                    res_locked = run_ps(
+                        "function global:Invoke-RestMethod {\n"
+                        "  param([switch]$UseBasicParsing, $Method, $Uri, $Headers, $TimeoutSec, $MaximumRedirection)\n"
+                        "  if ($Uri -match '/models$') { return @{ data = @(@{ id = 'gpt-6.2-sol' }) } }\n"
+                        "  throw $Uri\n"
+                        "}\n"
+                        f'& "{runner}" -SettingsFile "{settings_path}" -PayloadRoot "{payload}" -LogFile "{status_path}" -Components "codex-cli,antigravity-ide"\n'
+                        "exit $LASTEXITCODE\n",
+                        env=env,
+                        timeout=40,
+                    )
+                finally:
+                    raw_fh.seek(0)
+                    msvcrt.locking(raw_fh.fileno(), msvcrt.LK_UNLCK, 1)
+
+            self.assertEqual(res_locked.returncode, 0, res_locked.stdout + res_locked.stderr)
+            install_log = (local / "EmTroLyUI/logs/install-latest.log").read_text(encoding="utf-8")
+            self.assertNotIn("Get-EmTroLyInstalledState", install_log)
+            self.assertNotIn("FINAL_ERROR", install_log)
+            self.assertIn("Hoàn tất:", install_log)
+
+            # 2. Verify concurrent Read-EmTroLySharedUtf8File + Write-EmTroLySharedStatusFile never block each other
+            res_shared = run_ps(
+                f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{helpers}", [Text.Encoding]::UTF8)))\n'
+                "$ErrorActionPreference = 'Stop'\n"
+                "$global:Error.Clear()\n"
+                "$st = Get-EmTroLyModularStatus\n"
+                "if ($global:Error.Count -gt 0) { throw ('unexpected-global-error:' + $global:Error[0]) }\n"
+                f"$share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete\n"
+                f"$readerStream = New-Object System.IO.FileStream('{status_path}', [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $share)\n"
+                "try {\n"
+                f"  if (-not (Write-EmTroLySharedStatusFile -Path '{status_path}' -Text 'Hoàn tất: Không xung đột khóa file!')) {{ throw 'shared-write-failed' }}\n"
+                f"  $readBack = Read-EmTroLySharedUtf8File -Path '{status_path}'\n"
+                "  if ($readBack -cne 'Hoàn tất: Không xung đột khóa file!') { throw ('shared-read-mismatch:' + $readBack) }\n"
+                "} finally {\n"
+                "  $readerStream.Dispose()\n"
+                "}\n"
+                "Write-Output 'SHARED_LOCK_AND_CLEAN_ERRORS_OK'\n",
+                env=env,
+            )
+            self.assertEqual(res_shared.returncode, 0, res_shared.stdout + res_shared.stderr)
+            self.assertIn("SHARED_LOCK_AND_CLEAN_ERRORS_OK", res_shared.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

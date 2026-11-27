@@ -4148,6 +4148,31 @@ function Start-Install {
   }
 }
 
+function Read-WizardSharedUtf8File([string]$FilePath) {
+  if ([string]::IsNullOrWhiteSpace($FilePath) -or -not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
+    return ''
+  }
+  if (Get-Command -Name 'Read-EmTroLySharedUtf8File' -ErrorAction Ignore) {
+    return (Read-EmTroLySharedUtf8File -Path $FilePath)
+  }
+  for ($attempt = 1; $attempt -le 5; $attempt++) {
+    $fs = $null
+    $sr = $null
+    try {
+      $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+      $fs = New-Object System.IO.FileStream($FilePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $share)
+      $sr = New-Object System.IO.StreamReader($fs, [System.Text.Encoding]::UTF8, $true)
+      return $sr.ReadToEnd()
+    } catch {
+      if ($attempt -lt 5) { Start-Sleep -Milliseconds 20 }
+    } finally {
+      if ($null -ne $sr) { try { $sr.Dispose() } catch { } }
+      elseif ($null -ne $fs) { try { $fs.Dispose() } catch { } }
+    }
+  }
+  return ''
+}
+
 $installTimer = New-Object System.Windows.Threading.DispatcherTimer
 $installTimer.Interval = [TimeSpan]::FromMilliseconds(700)
 $installTimer.Add_Tick({
@@ -4162,7 +4187,7 @@ $installTimer.Add_Tick({
   }
   if ($script:safeLog -and (Test-Path -LiteralPath $script:safeLog -PathType Leaf)) {
     try {
-      $msg = [IO.File]::ReadAllText($script:safeLog, [System.Text.Encoding]::UTF8)
+      $msg = Read-WizardSharedUtf8File $script:safeLog
       if ($msg) {
         if ($msg -match '^Đang tải (Codex Extension|Antigravity IDE)' -and $msg -notmatch '\d+%') {
           try {
@@ -4194,12 +4219,16 @@ $installTimer.Add_Tick({
     $script:runnerProcess.Dispose()
     $script:runnerProcess = $null
     if ($script:safeLog -and (Test-Path -LiteralPath $script:safeLog -PathType Leaf)) {
-      try { $statusText.Text = [IO.File]::ReadAllText($script:safeLog, [System.Text.Encoding]::UTF8) } catch { }
+      try {
+        $finalMsg = Read-WizardSharedUtf8File $script:safeLog
+        if ($finalMsg) { $statusText.Text = $finalMsg }
+      } catch { }
     }
     $diagPayload = $null
     if ($script:safeLog -and (Test-Path -LiteralPath "$($script:safeLog).diag.json" -PathType Leaf)) {
       try {
-        $diagPayload = [IO.File]::ReadAllText("$($script:safeLog).diag.json", [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        $diagRaw = Read-WizardSharedUtf8File "$($script:safeLog).diag.json"
+        if ($diagRaw) { $diagPayload = $diagRaw | ConvertFrom-Json }
       } catch { }
     }
     $detail = $statusText.Text
@@ -4702,7 +4731,7 @@ $codexTimer.Add_Tick({
   if (-not $script:codexRunning) { return }
   if ($script:codexLogFile -and (Test-Path -LiteralPath $script:codexLogFile -PathType Leaf)) {
     try {
-      $fullText = [IO.File]::ReadAllText($script:codexLogFile, [System.Text.Encoding]::UTF8)
+      $fullText = Read-WizardSharedUtf8File $script:codexLogFile
       if ($fullText.Length -gt $script:codexLogOffset) {
         $codexOutputBox.AppendText($fullText.Substring($script:codexLogOffset))
         $script:codexLogOffset = $fullText.Length
@@ -4714,7 +4743,7 @@ $codexTimer.Add_Tick({
     $codexTimer.Stop()
     if ($script:codexLogFile -and (Test-Path -LiteralPath $script:codexLogFile -PathType Leaf)) {
       try {
-        $fullText = [IO.File]::ReadAllText($script:codexLogFile, [System.Text.Encoding]::UTF8)
+        $fullText = Read-WizardSharedUtf8File $script:codexLogFile
         if ($fullText.Length -gt $script:codexLogOffset) {
           $codexOutputBox.AppendText($fullText.Substring($script:codexLogOffset))
           $script:codexLogOffset = $fullText.Length

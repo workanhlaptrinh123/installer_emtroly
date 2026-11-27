@@ -52,7 +52,7 @@ function Get-EmTroLyInstalledState {
   $root = if ($env:USERPROFILE) { Join-Path $env:USERPROFILE 'openclaw' } else { '' }
   $configPath = if ($root) { Join-Path $root 'openclaw.json' } else { '' }
   $installingMarker = if ($root) { Join-Path $root '.emtroly-installing.json' } else { '' }
-  $codexInfo = if (Get-Command Find-EmTroLyCodexCli -ErrorAction SilentlyContinue) {
+  $codexInfo = if (Get-Command -Name 'Find-EmTroLyCodexCli' -ErrorAction Ignore) {
     Find-EmTroLyCodexCli
   } else {
     [pscustomobject]@{ Available = $false; Executable = ''; CodexHome = ''; Source = 'none'; Label = '' }
@@ -169,8 +169,22 @@ function Get-EmTroLyInstalledState {
 }
 
 function Write-ManageStatus([string]$Path, [string]$Text) {
-  if ($Path) {
-    [IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false)))
+  if ([string]::IsNullOrWhiteSpace($Path)) { return }
+  $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Text)
+  for ($attempt = 1; $attempt -le 12; $attempt++) {
+    $fs = $null
+    try {
+      $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+      $fs = New-Object System.IO.FileStream($Path, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::Write, $share)
+      $fs.SetLength(0)
+      if ($bytes.Length -gt 0) { $fs.Write($bytes, 0, $bytes.Length) }
+      $fs.Flush()
+      return
+    } catch {
+      if ($attempt -lt 12) { Start-Sleep -Milliseconds 25 }
+    } finally {
+      if ($null -ne $fs) { try { $fs.Dispose() } catch { } }
+    }
   }
 }
 
@@ -1369,7 +1383,7 @@ try {
           try { $sv = ([IO.File]::ReadAllText($sf, [System.Text.Encoding]::UTF8)).Trim(); if ($sv) { $secretsToScrub += $sv } } catch { }
         }
       }
-      if (Get-Command Get-EmTroLySavedLicenseKey -ErrorAction SilentlyContinue) {
+      if (Get-Command -Name 'Get-EmTroLySavedLicenseKey' -ErrorAction Ignore) {
         try { $sl = Get-EmTroLySavedLicenseKey; if ($sl) { $secretsToScrub += $sl } } catch { }
       }
       $rawTech = ($techCombined -join "`r`n")

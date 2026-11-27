@@ -188,7 +188,22 @@ function Install-EmTroLyCodexCliFirst {
   $writeMsg = {
     param([string]$Msg)
     if ($StatusFile) {
-      try { [IO.File]::WriteAllText($StatusFile, $Msg, $utf8NoBom) } catch { }
+      $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Msg)
+      for ($attempt = 1; $attempt -le 8; $attempt++) {
+        $fs = $null
+        try {
+          $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+          $fs = New-Object System.IO.FileStream($StatusFile, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::Write, $share)
+          $fs.SetLength(0)
+          if ($bytes.Length -gt 0) { $fs.Write($bytes, 0, $bytes.Length) }
+          $fs.Flush()
+          break
+        } catch {
+          if ($attempt -lt 8) { Start-Sleep -Milliseconds 20 }
+        } finally {
+          if ($null -ne $fs) { try { $fs.Dispose() } catch { } }
+        }
+      }
     }
   }
 
