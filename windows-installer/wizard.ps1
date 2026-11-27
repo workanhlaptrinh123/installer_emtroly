@@ -5514,6 +5514,9 @@ $installedSnapshot = Get-EmTroLyInstalledState
 $hasExistingInstall = $installedSnapshot.OpenClawInstalled -or
   ($env:LOCALAPPDATA -and (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'EmTroLy\Codex\auth.json') -PathType Leaf))
 
+if ((Test-Path -LiteralPath $pending -PathType Leaf) -and (-not $installedSnapshot.OpenClawInstalled)) {
+  Remove-Item -LiteralPath $pending -Force -ErrorAction SilentlyContinue
+}
 if (Test-Path -LiteralPath $pending -PathType Leaf) {
   $script:retryEditor = $true
   $script:resultCode = 3

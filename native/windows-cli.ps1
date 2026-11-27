@@ -1,6 +1,27 @@
-﻿function Install-UserOpenClawCli {
+﻿function Resolve-WindowsCliPython {
+  $candidates = @()
+  if ($env:LOCALAPPDATA) {
+    $candidates += (Join-Path $env:LOCALAPPDATA 'MemberInstaller\dependencies\python313\python.exe')
+    $candidates += (Join-Path $env:LOCALAPPDATA 'MemberInstaller\dependencies\python312\python.exe')
+  }
+  foreach ($c in @(Get-Command python.exe -All -CommandType Application -ErrorAction SilentlyContinue)) {
+    if ($c.Source -and $c.Source -notlike '*\WindowsApps\*') { $candidates += $c.Source }
+  }
+  if ($env:LOCALAPPDATA) {
+    $candidates += @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs\Python\*\python.exe') -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -ExpandProperty FullName)
+  }
+  if ($env:ProgramFiles) {
+    $candidates += @(Get-ChildItem (Join-Path $env:ProgramFiles 'Python*\python.exe') -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -ExpandProperty FullName)
+  }
+  foreach ($exe in @($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+    if ($exe -notlike '*\WindowsApps\*' -and (Test-Path -LiteralPath $exe -PathType Leaf)) { return $exe }
+  }
+  throw 'Python executable outside WindowsApps was not found.'
+}
+
+function Install-UserOpenClawCli {
   param([string]$Root, [string]$CliEntry, [int]$Port, [string]$Profile, [string]$ExpectedVersion,
-        [string]$Python = (Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source,
+        [string]$Python = (Resolve-WindowsCliPython),
         [string]$Node = (Get-Command node.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source)
   $helper = Join-Path $PSScriptRoot 'skills\tao-tro-ly-openclaw-windows-macos-linux\scripts\install_windows_cli.py'
   if (-not (Test-Path -LiteralPath $helper)) { throw 'OpenClaw CLI PATH helper is missing.' }

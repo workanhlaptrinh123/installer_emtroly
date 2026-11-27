@@ -183,11 +183,43 @@ function Test-IsRecoverableIncompleteOpenClawDir([string]$DirPath) {
   if (Test-Path -LiteralPath (Join-Path $DirPath 'openclaw.json')) { return $false }
 
   $children = @(Get-ChildItem -LiteralPath $DirPath -Force -ErrorAction SilentlyContinue)
-  if ($children.Count -eq 0) { return $false }
-  $knownPartial = @('runtime', 'workspace', 'npm-cache', 'logs')
+  if ($children.Count -eq 0) { return $true }
+  $knownPartial = @(
+    'runtime', 'workspace', 'npm-cache', 'logs', 'backups',
+    'telegram.token', 'member-provider.secret', 'installation-credentials.json',
+    'modules.json', 'module-manager.ps1', 'windows-instance.ps1',
+    'user-gateway.ps1', 'user-gateway.cjs', 'user-gateway.log',
+    'user-gateway.pid.json', 'user-gateway.stop', 'installer-codex-pending.json',
+    'agents', 'sessions', 'credentials', 'devices', 'cron', 'canvas', '.codex'
+  )
   foreach ($ch in $children) {
     if ($ch.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
     if ($ch.Name -notin $knownPartial) { return $false }
+  }
+  return $true
+}
+
+function Test-IsBrokenHalfInstalledOpenClawDir([string]$DirPath) {
+  if ([string]::IsNullOrWhiteSpace($DirPath) -or -not (Test-Path -LiteralPath $DirPath -PathType Container)) { return $false }
+  try {
+    $item = Get-Item -LiteralPath $DirPath -Force -ErrorAction Stop
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+  } catch { return $false }
+  if (-not (Test-Path -LiteralPath (Join-Path $DirPath 'openclaw.json') -PathType Leaf)) { return $false }
+  $hasLaunchers = (Test-Path -LiteralPath (Join-Path $DirPath 'openclaw-instance.ps1') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $DirPath 'installer-instance.json') -PathType Leaf)
+  if ($hasLaunchers) { return $false }
+  $knownHalfItems = @(
+    'openclaw.json', '.emtroly-installing.json', 'runtime', 'workspace', 'npm-cache', 'logs', 'backups',
+    'telegram.token', 'member-provider.secret', 'installation-credentials.json',
+    'modules.json', 'module-manager.ps1', 'windows-instance.ps1', 'windows-cli.json',
+    'user-gateway.ps1', 'user-gateway.cjs', 'user-gateway.log',
+    'user-gateway.pid.json', 'user-gateway.stop', 'installer-codex-pending.json',
+    'agents', 'sessions', 'credentials', 'devices', 'cron', 'canvas', '.codex'
+  )
+  foreach ($ch in @(Get-ChildItem -LiteralPath $DirPath -Force -ErrorAction SilentlyContinue)) {
+    if ($ch.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+    if ($ch.Name -notin $knownHalfItems) { return $false }
   }
   return $true
 }
@@ -219,10 +251,10 @@ function Test-InstallDiskFreeSpace([string]$TargetPath, [bool]$SkipEditor) {
   }
 }
 
-function Remove-IncompleteOpenClawDirectory([string]$DirPath) {
+function Remove-IncompleteOpenClawDirectory([string]$DirPath, [switch]$AllowBrokenConfig) {
   if ([string]::IsNullOrWhiteSpace($DirPath) -or -not (Test-Path -LiteralPath $DirPath -PathType Container)) { return }
   $hasMarker = Test-Path -LiteralPath (Join-Path $DirPath '.emtroly-installing.json') -PathType Leaf
-  if ((Test-Path -LiteralPath (Join-Path $DirPath 'openclaw.json') -PathType Leaf) -and (-not $hasMarker)) { return }
+  if (-not $AllowBrokenConfig -and (Test-Path -LiteralPath (Join-Path $DirPath 'openclaw.json') -PathType Leaf) -and (-not $hasMarker)) { return }
   try {
     $strayNodes = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue | Where-Object {
       $_.CommandLine -and $_.CommandLine.IndexOf($DirPath, [StringComparison]::OrdinalIgnoreCase) -ge 0
@@ -231,8 +263,26 @@ function Remove-IncompleteOpenClawDirectory([string]$DirPath) {
       if ($sn.ProcessId) { Stop-Process -Id ([int]$sn.ProcessId) -Force -ErrorAction SilentlyContinue }
     }
   } catch { }
+  $cmdExe = Join-Path $env:SystemRoot 'System32\cmd.exe'
+  foreach ($ch in @(Get-ChildItem -LiteralPath $DirPath -Force -ErrorAction SilentlyContinue)) {
+    if ($ch.PSIsContainer -and (Test-Path -LiteralPath $cmdExe -PathType Leaf)) {
+      try {
+        $psiCh = New-Object System.Diagnostics.ProcessStartInfo
+        $psiCh.FileName = $cmdExe
+        $psiCh.Arguments = '/d /s /c "rmdir /s /q "' + $ch.FullName + '""'
+        $psiCh.UseShellExecute = $false
+        $psiCh.CreateNoWindow = $true
+        $psiCh.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+        $pCh = [System.Diagnostics.Process]::Start($psiCh)
+        [void]$pCh.WaitForExit(20000)
+        $pCh.Dispose()
+      } catch { }
+    }
+    if (Test-Path -LiteralPath $ch.FullName) {
+      Remove-Item -LiteralPath $ch.FullName -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
   try {
-    $cmdExe = Join-Path $env:SystemRoot 'System32\cmd.exe'
     if (Test-Path -LiteralPath $cmdExe -PathType Leaf) {
       $psi = New-Object System.Diagnostics.ProcessStartInfo
       $psi.FileName = $cmdExe
@@ -394,28 +444,41 @@ requires_openai_auth = true
     $wantOpenClaw = (-not $isModularRun) -or ('openclaw' -in $requestedComponents)
     $openClawUpgradeMode = $false
     $openClawSkipUpToDate = $false
+    $openClawSyncExistingMode = $false
     if ($wantOpenClaw) {
+      if ((Test-Path -LiteralPath $pending -PathType Leaf) -and -not (Test-Path -LiteralPath (Join-Path $root 'openclaw-instance.ps1') -PathType Leaf)) {
+        Remove-Item -LiteralPath $pending -Force -ErrorAction SilentlyContinue
+      }
       if (Test-Path -LiteralPath $root) {
         if (Test-IsRecoverableIncompleteOpenClawDir -DirPath $root) {
-          Write-SafeStatus 'Phát hiện thư mục OpenClaw cài dở từ lần trước — đang tự động dọn sạch để cài mới...'
+          Write-SafeStatus 'Phát hiện thư mục OpenClaw trống hoặc cài dở từ lần trước — đang tự động dọn sạch để cài mới...'
           Remove-IncompleteOpenClawDirectory -DirPath $root
+        } elseif (Test-IsBrokenHalfInstalledOpenClawDir -DirPath $root) {
+          Write-SafeStatus 'Phát hiện thư mục OpenClaw thiếu tệp khởi chạy từ lần cài dở trước — đang làm sạch để cài lại...'
+          Remove-IncompleteOpenClawDirectory -DirPath $root -AllowBrokenConfig
         }
         if (Test-Path -LiteralPath (Join-Path $root 'openclaw.json') -PathType Leaf) {
           $ocVerCheck = if (Get-Command Get-EmTroLyOpenClawVersionInfo -ErrorAction SilentlyContinue) {
             Get-EmTroLyOpenClawVersionInfo -PayloadRoot $PayloadRoot -OpenClawRoot $root
           } else { $null }
-          if ($ocVerCheck -and $ocVerCheck.NeedsUpgrade) {
+          $hasCompleteInstance = (Test-Path -LiteralPath (Join-Path $root 'openclaw-instance.ps1') -PathType Leaf) -and
+            (Test-Path -LiteralPath (Join-Path $root 'installer-instance.json') -PathType Leaf)
+          if ($ocVerCheck -and $ocVerCheck.NeedsUpgrade -and $hasCompleteInstance) {
             $openClawUpgradeMode = $true
-          } elseif ($ocVerCheck -and $ocVerCheck.IsUpToDate -and $isModularRun) {
-            $openClawSkipUpToDate = $true
+          } elseif ($ocVerCheck -and $ocVerCheck.IsUpToDate -and $hasCompleteInstance) {
+            if ($isModularRun) {
+              $openClawSkipUpToDate = $true
+            } else {
+              $openClawSyncExistingMode = $true
+            }
           } else {
             throw 'instance-exists'
           }
-        } elseif (Test-Path -LiteralPath $root) {
+        } elseif ((Test-Path -LiteralPath $root) -and @(Get-ChildItem -LiteralPath $root -Force -ErrorAction SilentlyContinue).Count -gt 0) {
           throw 'instance-exists'
         }
       }
-      if (-not $openClawUpgradeMode -and -not $openClawSkipUpToDate) {
+      if (-not $openClawUpgradeMode -and -not $openClawSkipUpToDate -and -not $openClawSyncExistingMode) {
         Test-MemberInstallerSettings $settings
         Test-InstallDiskFreeSpace -TargetPath $env:USERPROFILE -SkipEditor ([bool]$settings.skip_editor -or ($isModularRun -and 'antigravity-ide' -notin $requestedComponents -and 'codex-extension' -notin $requestedComponents))
         if ($env:OS -eq 'Windows_NT') {
@@ -423,13 +486,16 @@ requires_openai_auth = true
           if ($existingOpenClawCmd) {
             $ownShimDir = if ($env:LOCALAPPDATA) { (Join-Path $env:LOCALAPPDATA 'OpenClaw\bin').TrimEnd('\') } else { '' }
             $cmdSrcDir = if ($existingOpenClawCmd.Source) { (Split-Path -Parent $existingOpenClawCmd.Source).TrimEnd('\') } else { '' }
-            if ($ownShimDir -and $cmdSrcDir -ieq $ownShimDir -and -not (Test-Path -LiteralPath $root)) {
+            $rootHasComplete = (Test-Path -LiteralPath (Join-Path $root 'openclaw-instance.ps1') -PathType Leaf)
+            if ($ownShimDir -and $cmdSrcDir -ieq $ownShimDir -and (-not $rootHasComplete)) {
               Remove-Item -LiteralPath $existingOpenClawCmd.Source -Force -ErrorAction SilentlyContinue
             } else {
               throw 'cli-probe-conflict'
             }
           }
         }
+      } elseif ($openClawSyncExistingMode) {
+        Test-MemberInstallerSettings $settings
       }
     } else {
       # Modular run without OpenClaw: validate AI provider fields only (no Telegram / Owner / Group required!)
@@ -620,6 +686,63 @@ requires_openai_auth = true
     }
 
     $stage = 'install'
+    if ($openClawSyncExistingMode) {
+      Write-SafeStatus 'Phát hiện OpenClaw đã cài sẵn trên máy — đang đồng bộ cấu hình Telegram, Model và khởi động lại Gateway...'
+      $manageSyncScript = Join-Path $PayloadRoot 'windows-installer\manage-instance.ps1'
+      if (-not (Test-Path -LiteralPath $manageSyncScript -PathType Leaf)) { throw 'missing-payload' }
+      $syncReqPath = Join-Path $env:TEMP ('openclaw-sync-req-' + [guid]::NewGuid().ToString('N') + '.json')
+      $syncPayload = [ordered]@{
+        action         = 'update-config'
+        assistant_name = [string]$settings.assistant_name
+        base_url       = $baseUrl
+        model          = [string]$settings.model
+        owner_ids      = [string]$settings.owner_ids
+        group_id       = [string]$settings.group_id
+        gateway_port   = [string]$settings.gateway_port
+        audience       = [string]$settings.audience
+        addressing     = [string]$settings.addressing
+        style          = [string]$settings.style
+        qr_owner_id    = [string]$settings.qr_owner_id
+        telegram_token = [string]$settings.telegram_token
+        ai_api_key     = [string]$settings.ai_api_key
+      }
+      [IO.File]::WriteAllText($syncReqPath, ($syncPayload | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
+      try {
+        & $manageSyncScript -RunManageWorker -WorkerRequestFile $syncReqPath -WorkerPayloadRoot $PayloadRoot -WorkerLogFile $LogFile
+        if ($LASTEXITCODE -ne 0) { throw 'installer-failed' }
+      } finally {
+        Remove-Item -LiteralPath $syncReqPath -Force -ErrorAction SilentlyContinue
+      }
+      $zaloSkillReady = Test-Path -LiteralPath (Join-Path $root 'workspace\skills\telegram-zalo-owner-login\SKILL.md') -PathType Leaf
+      if ([bool]$settings.configure_zalo -and -not $zaloSkillReady) {
+        $zaloReqPath = Join-Path $env:TEMP ('openclaw-zalo-req-' + [guid]::NewGuid().ToString('N') + '.json')
+        [IO.File]::WriteAllText($zaloReqPath, (@{ action = 'install-zalo'; qr_owner_id = [string]$settings.qr_owner_id } | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
+        try {
+          & $manageSyncScript -RunManageWorker -WorkerRequestFile $zaloReqPath -WorkerPayloadRoot $PayloadRoot -WorkerLogFile $LogFile
+          if ($LASTEXITCODE -ne 0) { throw 'zalo-plugin-not-loaded' }
+        } finally {
+          Remove-Item -LiteralPath $zaloReqPath -Force -ErrorAction SilentlyContinue
+        }
+      }
+      if (Get-Command Register-EmTroLyCodexCli -ErrorAction SilentlyContinue) {
+        try { [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot) } catch { }
+      }
+      if (Get-Command Install-EmTroLyAppShortcut -ErrorAction SilentlyContinue) {
+        try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot) } catch { }
+      }
+      $botReady = $true
+      if (-not [string]::IsNullOrWhiteSpace($deferredEditorError)) {
+        $job = @{ id = $editorJobId; model = $settings.model }
+        $tmp = "$pending.$($job.id).tmp"
+        [IO.File]::WriteAllText($tmp, ($job | ConvertTo-Json -Compress))
+        [IO.File]::Move($tmp, $pending)
+        $stage = 'editor'
+        if ($deferredEditorTechDetail) { $lastTechnicalDetail = $deferredEditorTechDetail }
+        throw $deferredEditorError
+      }
+      Write-SafeStatus 'Hoàn tất: Đã cài đặt & đồng bộ trọn gói từ A–Z (giữ nguyên dữ liệu OpenClaw sẵn có trên máy).'
+      exit 0
+    }
     Write-SafeStatus 'Đang cài môi trường, module OpenClaw và Gateway. Vui lòng đợi...'
     $installer = Join-Path $PayloadRoot 'install-native-windows.ps1'
     if (-not (Test-Path -LiteralPath $installer)) { throw 'missing-payload' }

@@ -31,6 +31,147 @@ function Write-NativeInstallStatus([string]$Text) {
   }
 }
 
+function Optimize-NativeProcessPath {
+  $priority = New-Object System.Collections.Generic.List[string]
+  $depBase = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'MemberInstaller\dependencies' } else { '' }
+  if ($depBase -and (Test-Path -LiteralPath $depBase -PathType Container)) {
+    foreach ($d in @(Get-ChildItem -LiteralPath $depBase -Directory -ErrorAction SilentlyContinue)) {
+      if ($d.Name -like 'node-v*' -or $d.Name -like 'python*') { [void]$priority.Add($d.FullName) }
+      elseif ($d.Name -like 'ffmpeg-*') {
+        $fb = Join-Path $d.FullName 'bin'
+        if (Test-Path -LiteralPath $fb -PathType Container) { [void]$priority.Add($fb) }
+      }
+    }
+  }
+  foreach ($cand in @(
+    $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles 'nodejs' }),
+    $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'Programs\nodejs' })
+  )) {
+    if ($cand -and (Test-Path -LiteralPath $cand -PathType Container)) { [void]$priority.Add($cand) }
+  }
+  foreach ($pyRoot in @(
+    $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'Programs\Python' }),
+    $env:ProgramFiles
+  )) {
+    if ($pyRoot -and (Test-Path -LiteralPath $pyRoot -PathType Container)) {
+      foreach ($pd in @(Get-ChildItem -LiteralPath $pyRoot -Directory -Filter 'Python3*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending)) {
+        if (Test-Path -LiteralPath (Join-Path $pd.FullName 'python.exe') -PathType Leaf) { [void]$priority.Add($pd.FullName) }
+      }
+    }
+  }
+  $uPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+  $mPath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+  $allRaw = @($priority)
+  if ($env:Path) { $allRaw += ($env:Path -split ';') }
+  if ($uPath) { $allRaw += ($uPath -split ';') }
+  if ($mPath) { $allRaw += ($mPath -split ';') }
+  $normal = New-Object System.Collections.Generic.List[string]
+  $winApps = New-Object System.Collections.Generic.List[string]
+  $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+  foreach ($item in $allRaw) {
+    if ([string]::IsNullOrWhiteSpace($item)) { continue }
+    $norm = $item.Trim().Trim('"').TrimEnd('\')
+    if ([string]::IsNullOrWhiteSpace($norm) -or (-not $seen.Add($norm))) { continue }
+    if ($norm -like '*\WindowsApps*') { [void]$winApps.Add($item.Trim()) } else { [void]$normal.Add($item.Trim()) }
+  }
+  $env:Path = (@($normal) + @($winApps)) -join ';'
+}
+
+function Resolve-VerifiedPythonExe {
+  $candidates = @()
+  $depBase = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'MemberInstaller\dependencies' } else { '' }
+  if ($depBase) {
+    $candidates += (Join-Path $depBase 'python313\python.exe')
+    $candidates += (Join-Path $depBase 'python312\python.exe')
+  }
+  foreach ($cmd in @(Get-Command python.exe -All -CommandType Application -ErrorAction SilentlyContinue)) {
+    if ($cmd.Source -and $cmd.Source -notlike '*\WindowsApps\*') { $candidates += $cmd.Source }
+  }
+  if ($env:LOCALAPPDATA) {
+    $candidates += @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs\Python\*\python.exe') -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -ExpandProperty FullName)
+  }
+  if ($env:ProgramFiles) {
+    $candidates += @(Get-ChildItem (Join-Path $env:ProgramFiles 'Python*\python.exe') -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -ExpandProperty FullName)
+  }
+  foreach ($exe in @($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+    if ($exe -like '*\WindowsApps\*' -or -not (Test-Path -LiteralPath $exe -PathType Leaf)) { continue }
+    try {
+      & $exe -c 'import json,sqlite3,sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' *> $null
+      if ($LASTEXITCODE -eq 0) { return $exe }
+    } catch { }
+  }
+  return ''
+}
+
+function Test-CanResetIncompleteRoot([string]$DirPath) {
+  if ([string]::IsNullOrWhiteSpace($DirPath) -or -not (Test-Path -LiteralPath $DirPath -PathType Container)) { return $false }
+  try {
+    $rootItem = Get-Item -LiteralPath $DirPath -Force -ErrorAction Stop
+    if ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+  } catch { return $false }
+  $children = @(Get-ChildItem -LiteralPath $DirPath -Force -ErrorAction SilentlyContinue)
+  if ($children.Count -eq 0) { return $true }
+  $markerFile = Join-Path $DirPath '.emtroly-installing.json'
+  if (Test-Path -LiteralPath $markerFile -PathType Leaf) {
+    try {
+      $mObj = [IO.File]::ReadAllText($markerFile, [Text.Encoding]::UTF8) | ConvertFrom-Json
+      if ($mObj -and $mObj.pid -and ([int]$mObj.pid -ne $PID)) {
+        $liveProc = Get-Process -Id ([int]$mObj.pid) -ErrorAction SilentlyContinue
+        if ($liveProc -and $liveProc.ProcessName -match '^(?i)(powershell|pwsh|emtroly)$') { return $false }
+      }
+    } catch { }
+    return $true
+  }
+  $hasCompletedLauncher = (Test-Path -LiteralPath (Join-Path $DirPath 'openclaw-instance.ps1') -PathType Leaf) -and
+    (Test-Path -LiteralPath (Join-Path $DirPath 'installer-instance.json') -PathType Leaf)
+  if ($hasCompletedLauncher) { return $false }
+  $knownItems = @(
+    'runtime', 'workspace', 'npm-cache', 'logs', 'backups',
+    'openclaw.json', 'telegram.token', 'member-provider.secret',
+    'installation-credentials.json', 'modules.json', 'module-manager.ps1',
+    'windows-instance.ps1', 'user-gateway.ps1', 'user-gateway.cjs',
+    'user-gateway.log', 'user-gateway.pid.json', 'user-gateway.stop',
+    'installer-codex-pending.json', 'agents', 'sessions', 'credentials',
+    'devices', 'cron', 'canvas', '.codex'
+  )
+  foreach ($ch in $children) {
+    if ($ch.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+    if ($ch.Name -notin $knownItems) { return $false }
+  }
+  return $true
+}
+
+function Clear-IncompleteRootInPlace([string]$DirPath) {
+  if (-not (Test-Path -LiteralPath $DirPath -PathType Container)) { return }
+  try {
+    $strayNodes = @(Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue | Where-Object {
+      $_.CommandLine -and $_.CommandLine.IndexOf($DirPath, [StringComparison]::OrdinalIgnoreCase) -ge 0
+    })
+    foreach ($sn in $strayNodes) {
+      if ($sn.ProcessId) { Stop-Process -Id ([int]$sn.ProcessId) -Force -ErrorAction SilentlyContinue }
+    }
+  } catch { }
+  $cmdExe = Join-Path $env:SystemRoot 'System32\cmd.exe'
+  foreach ($ch in @(Get-ChildItem -LiteralPath $DirPath -Force -ErrorAction SilentlyContinue)) {
+    if ($ch.PSIsContainer -and (Test-Path -LiteralPath $cmdExe -PathType Leaf)) {
+      try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $cmdExe
+        $psi.Arguments = '/d /s /c "rmdir /s /q "' + $ch.FullName + '""'
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+        $p = [System.Diagnostics.Process]::Start($psi)
+        [void]$p.WaitForExit(20000)
+        $p.Dispose()
+      } catch { }
+    }
+    if (Test-Path -LiteralPath $ch.FullName) {
+      Remove-Item -LiteralPath $ch.FullName -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
 if (-not $UserInstall -and -not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'System-service mode requires Administrator; new web installations use UserInstall.' }
 if ($Name -notmatch '^[a-z][a-z0-9_-]{0,63}$') { throw 'Name must use lowercase letters, numbers, underscore or hyphen.' }
 . (Join-Path $PSScriptRoot 'native\windows-instance.ps1')
@@ -65,7 +206,14 @@ if ($InstallRoot) {
 }
 $workspace = Join-Path $root 'workspace'
 $configPath = Join-Path $root 'openclaw.json'
-if (Test-Path $root) { throw "Independent install already exists at $root. Choose Upgrade or another Name. No existing files were changed." }
+if (Test-Path -LiteralPath $root) {
+  if (Test-CanResetIncompleteRoot -DirPath $root) {
+    Write-NativeInstallStatus 'Phát hiện thư mục OpenClaw trống hoặc cài dở từ lần trước — đang làm sạch để tiếp tục cài đặt…'
+    Clear-IncompleteRootInPlace -DirPath $root
+  } else {
+    throw "Independent install already exists at $root. Choose Upgrade or another Name. No existing files were changed."
+  }
+}
 $env:OPENCLAW_PROFILE = 'member-' + $Name
 $env:OPENCLAW_STATE_DIR = $root
 $env:OPENCLAW_ROOT = $root
@@ -101,33 +249,53 @@ if ($CredentialData) {
   $key = Unprotect (Read-Host 'Provider API Key' -AsSecureString)
 }
 if ([string]::IsNullOrWhiteSpace($tg) -or [string]::IsNullOrWhiteSpace($key)) { throw 'Telegram token and API key must not be empty.' }
-New-Item -ItemType Directory -Force -Path $root,$workspace,(Join-Path $workspace 'skills') | Out-Null
-$installingMarkerPath = Join-Path $root '.emtroly-installing.json'
-[IO.File]::WriteAllText($installingMarkerPath, (@{ pid = $PID; startedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); name = $Name } | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
 $status = 'Đang kiểm tra và cài Node.js, Python, FFmpeg nếu máy còn thiếu…'
 Write-NativeInstallStatus $status
-$currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-& icacls $root /inheritance:r /grant:r "${currentUser}:(OI)(CI)(F)" '*S-1-5-18:(OI)(CI)(F)' *> $null
-if ($LASTEXITCODE -ne 0) { throw 'Unable to protect the private instance directory.' }
+Optimize-NativeProcessPath
 if ($UserInstall) {
   . (Join-Path $PSScriptRoot 'native\user-dependencies.ps1')
   Initialize-UserDependencies
+  Optimize-NativeProcessPath
 }
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-  if (Get-Command winget -ErrorAction SilentlyContinue) { winget install --id OpenJS.NodeJS.LTS --exact --silent --accept-package-agreements --accept-source-agreements }
-  else { throw 'Node.js is missing and winget is unavailable.' }
+if (-not (Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue)) {
+  if (Get-Command winget -ErrorAction SilentlyContinue) {
+    & winget install --id OpenJS.NodeJS.LTS --exact --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
+    Optimize-NativeProcessPath
+  } else {
+    throw 'Node.js is missing and winget is unavailable.'
+  }
 }
-if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
-  if (Get-Command winget -ErrorAction SilentlyContinue) { winget install --id Python.Python.3.12 --exact --silent --accept-package-agreements --accept-source-agreements }
-  else { throw 'Python is missing and winget is unavailable.' }
+$verifiedPythonExe = Resolve-VerifiedPythonExe
+if (-not $verifiedPythonExe) {
+  if (Get-Command winget -ErrorAction SilentlyContinue) {
+    & winget install --id Python.Python.3.12 --scope user --exact --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
+    Optimize-NativeProcessPath
+    $verifiedPythonExe = Resolve-VerifiedPythonExe
+    if (-not $verifiedPythonExe) {
+      & winget install --id Python.Python.3.12 --exact --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
+      Optimize-NativeProcessPath
+      $verifiedPythonExe = Resolve-VerifiedPythonExe
+    }
+  } else {
+    throw 'Python is missing and winget is unavailable.'
+  }
 }
 if (-not $UserInstall -and -not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
-  if (Get-Command winget -ErrorAction SilentlyContinue) { winget install --id Gyan.FFmpeg.Shared --exact --silent --accept-package-agreements --accept-source-agreements }
+  if (Get-Command winget -ErrorAction SilentlyContinue) { winget install --id Gyan.FFmpeg.Shared --exact --silent --disable-interactivity --accept-package-agreements --accept-source-agreements }
   else { Write-Warning 'FFmpeg is missing; media modules will need FFmpeg installed later.' }
 }
-$env:Path = $env:Path + ';' + [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+Optimize-NativeProcessPath
 if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { throw 'npm is unavailable after Node.js installation.' }
-if (-not (Get-Command python.exe -ErrorAction SilentlyContinue)) { throw 'Python is unavailable. Reopen PowerShell as Administrator and retry.' }
+if (-not $verifiedPythonExe) { $verifiedPythonExe = Resolve-VerifiedPythonExe }
+if (-not $verifiedPythonExe) { throw 'Python is unavailable. Reopen PowerShell as Administrator and retry.' }
+$env:Path = (Split-Path -Parent $verifiedPythonExe) + ';' + $env:Path
+
+New-Item -ItemType Directory -Force -Path $root,$workspace,(Join-Path $workspace 'skills') | Out-Null
+$installingMarkerPath = Join-Path $root '.emtroly-installing.json'
+[IO.File]::WriteAllText($installingMarkerPath, (@{ pid = $PID; startedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); name = $Name } | ConvertTo-Json -Compress), [Text.UTF8Encoding]::new($false))
+$currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+& icacls $root /inheritance:r /grant:r "${currentUser}:(OI)(CI)(F)" '*S-1-5-18:(OI)(CI)(F)' *> $null
+if ($LASTEXITCODE -ne 0) { throw 'Unable to protect the private instance directory.' }
 $runtime = Join-Path $root ('runtime\' + $OpenClawVersion)
 New-Item -ItemType Directory -Force -Path $runtime | Out-Null
 $status = 'Đang tải và cài OpenClaw ' + $OpenClawVersion + '. Bước này có thể mất vài phút…'
@@ -228,11 +396,11 @@ $ownerBackup = Join-Path $backup 'owner'
 $trainingBackup = Join-Path $backup 'training'
 $ownerArgs = @('--openclaw-root',$root,'--account-id',$Name,'--agent-id','main','--apply','--backup-dir',$ownerBackup)
 foreach ($owner in $owners) { $ownerArgs += @('--owner-id',$owner) }
-& python $ensure @ownerArgs
+& $verifiedPythonExe $ensure @ownerArgs
 if ($LASTEXITCODE -ne 0) { throw 'Owner configuration failed.' }
-& python $training --openclaw-root $root --workspace $workspace --apply --backup-dir $trainingBackup
+& $verifiedPythonExe $training --openclaw-root $root --workspace $workspace --apply --backup-dir $trainingBackup
 if ($LASTEXITCODE -ne 0) { throw 'Owner training configuration failed.' }
-& python (Join-Path $PSScriptRoot 'native\finalize_permissions.py') --config $configPath --owners ($owners -join ',')
+& $verifiedPythonExe (Join-Path $PSScriptRoot 'native\finalize_permissions.py') --config $configPath --owners ($owners -join ',')
 if ($LASTEXITCODE -ne 0) { throw 'Permission configuration failed.' }
 $status = 'Đang cấu hình quyền Full Exec cho chủ bot Telegram…'
 Write-NativeInstallStatus $status
@@ -257,7 +425,7 @@ if ($LASTEXITCODE -ne 0) { throw 'OpenClaw skills check failed.' }
 Save-OpenClawInstanceLauncher -Root $root -InstanceProfile $env:OPENCLAW_PROFILE -CliEntry $cliEntry -Port $GatewayPort
 if ($UserInstall) {
   Write-NativeInstallStatus 'Đang đăng ký lệnh openclaw vào PATH của tài khoản Windows…'
-  Install-UserOpenClawCli -Root $root -CliEntry $cliEntry -Port $GatewayPort -Profile $env:OPENCLAW_PROFILE -ExpectedVersion $OpenClawVersion
+  Install-UserOpenClawCli -Root $root -CliEntry $cliEntry -Port $GatewayPort -Profile $env:OPENCLAW_PROFILE -ExpectedVersion $OpenClawVersion -Python $verifiedPythonExe
   Install-UserGateway -Root $root -CliEntry $cliEntry -Port $GatewayPort
 }
 if ($zaloSelected) {

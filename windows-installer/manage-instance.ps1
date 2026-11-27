@@ -22,16 +22,43 @@ function Read-EmTroLyProfileFields([string]$ProfilePath) {
   return $result
 }
 
+function Resolve-EmTroLyPythonExe {
+  $candidates = @()
+  if ($env:LOCALAPPDATA) {
+    $candidates += (Join-Path $env:LOCALAPPDATA 'MemberInstaller\dependencies\python313\python.exe')
+    $candidates += (Join-Path $env:LOCALAPPDATA 'MemberInstaller\dependencies\python312\python.exe')
+  }
+  foreach ($cmd in @(Get-Command python.exe -All -CommandType Application -ErrorAction SilentlyContinue)) {
+    if ($cmd.Source -and $cmd.Source -notlike '*\WindowsApps\*') { $candidates += $cmd.Source }
+  }
+  if ($env:LOCALAPPDATA) {
+    $candidates += @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs\Python\*\python.exe') -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -ExpandProperty FullName)
+  }
+  if ($env:ProgramFiles) {
+    $candidates += @(Get-ChildItem (Join-Path $env:ProgramFiles 'Python*\python.exe') -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -ExpandProperty FullName)
+  }
+  foreach ($exe in @($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+    if ($exe -notlike '*\WindowsApps\*' -and (Test-Path -LiteralPath $exe -PathType Leaf)) {
+      try {
+        & $exe -c 'import sys; sys.exit(0)' *> $null
+        if ($LASTEXITCODE -eq 0) { return $exe }
+      } catch { }
+    }
+  }
+  return 'python'
+}
+
 function Get-EmTroLyInstalledState {
   $root = if ($env:USERPROFILE) { Join-Path $env:USERPROFILE 'openclaw' } else { '' }
   $configPath = if ($root) { Join-Path $root 'openclaw.json' } else { '' }
+  $installingMarker = if ($root) { Join-Path $root '.emtroly-installing.json' } else { '' }
   $codexInfo = if (Get-Command Find-EmTroLyCodexCli -ErrorAction SilentlyContinue) {
     Find-EmTroLyCodexCli
   } else {
     [pscustomobject]@{ Available = $false; Executable = ''; CodexHome = ''; Source = 'none'; Label = '' }
   }
 
-  if (-not $configPath -or -not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+  if (-not $configPath -or -not (Test-Path -LiteralPath $configPath -PathType Leaf) -or ($installingMarker -and (Test-Path -LiteralPath $installingMarker -PathType Leaf))) {
     return [pscustomobject]@{
       OpenClawInstalled = $false
       Root              = $root
@@ -828,8 +855,9 @@ print(account_name)
 '@
       [IO.File]::WriteAllText($pyScript, $pyCode, $utf8NoBom)
       $groupArg = if ([string]::IsNullOrWhiteSpace($groupId)) { '__NONE__' } else { $groupId }
+      $pyExeManage = Resolve-EmTroLyPythonExe
       try {
-        $accountOut = (& python $pyScript $configPath $assistantName $baseUrl $resolvedModel ($owners -join ',') $groupArg ([string]$port) | Out-String).Trim()
+        $accountOut = (& $pyExeManage $pyScript $configPath $assistantName $baseUrl $resolvedModel ($owners -join ',') $groupArg ([string]$port) | Out-String).Trim()
         if ($LASTEXITCODE -ne 0) { throw 'config-patch-failed' }
       } finally {
         Remove-Item -LiteralPath $pyScript -Force -ErrorAction SilentlyContinue
@@ -847,11 +875,11 @@ print(account_name)
       if (Test-Path -LiteralPath $ensurePy -PathType Leaf) {
         $ownerArgs = @('--openclaw-root', $root, '--account-id', $accountName, '--agent-id', 'main', '--apply', '--backup-dir', (Join-Path $backupDir 'owner'))
         foreach ($o in $owners) { $ownerArgs += @('--owner-id', $o) }
-        & python $ensurePy @ownerArgs *> $null
+        & $pyExeManage $ensurePy @ownerArgs *> $null
         if ($LASTEXITCODE -ne 0) { throw 'owner-sync-failed' }
       }
       if (Test-Path -LiteralPath $finalizePy -PathType Leaf) {
-        & python $finalizePy --config $configPath --owners ($owners -join ',') *> $null
+        & $pyExeManage $finalizePy --config $configPath --owners ($owners -join ',') *> $null
         if ($LASTEXITCODE -ne 0) { throw 'permission-sync-failed' }
       }
 
