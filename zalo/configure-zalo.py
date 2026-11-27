@@ -77,7 +77,8 @@ def main():
             output.write('\n')
         env = dict(os.environ, OPENCLAW_CONFIG_PATH=str(candidate_path))
         cli_entry = env.get('OPENCLAW_CLI_ENTRY')
-        command = ['node', cli_entry] if os.name == 'nt' and cli_entry else ['openclaw']
+        node_bin = env.get('OPENCLAW_NODE_EXE') or 'node'
+        command = [node_bin, cli_entry] if os.name == 'nt' and cli_entry else ['openclaw']
         subprocess.run(command + ['config', 'validate'], env=env, check=True)
         if config.read_bytes() != original:
             raise RuntimeError('Config changed during validation')

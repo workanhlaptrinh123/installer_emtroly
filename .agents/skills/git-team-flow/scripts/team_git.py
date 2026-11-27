@@ -74,6 +74,7 @@ def normalize_repo_encodings() -> list[str]:
     bom_targets = (
         list((ROOT / "windows-installer").glob("*.ps1"))
         + list((ROOT / "native").glob("*.ps1"))
+        + list((ROOT / "zalo").glob("*.ps1"))
         + [ROOT / "install-native-windows.ps1"]
     )
     for p in bom_targets:

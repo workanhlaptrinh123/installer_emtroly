@@ -1469,6 +1469,212 @@ Write-Output 'WPF_UPDATE_BANNER_AND_DOWNLOAD_OK'
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
             self.assertIn("GIANGLE_4_BUGS_FIXED_OK", res.stdout)
 
+    @unittest.skipUnless(SHELL and os.name == "nt", "Requires Windows PowerShell")
+    def test_clean_pc_8point_hardening_8dot3_paths_portable_toolchains_and_blackbox_log(self):
+        import ctypes
+        from unittest.mock import MagicMock, patch
+
+        # 1. Windows 8.3 short paths (~1) & mixed-case drive letters in install_windows_cli.py
+        scripts_dir = ROOT / "native/skills/tao-tro-ly-openclaw-windows-macos-linux/scripts"
+        sys.path.insert(0, str(scripts_dir))
+        try:
+            import install_windows_cli
+        finally:
+            sys.path.pop(0)
+
+        def to_short_or_mixed_case(p: Path) -> str:
+            buf = ctypes.create_unicode_buffer(1024)
+            n = ctypes.windll.kernel32.GetShortPathNameW(str(p), buf, 1024)
+            candidate = buf.value if n > 0 and buf.value else str(p)
+            if len(candidate) >= 2 and candidate[1] == ":":
+                candidate = candidate[0].swapcase() + candidate[1:]
+            return candidate
+
+        with tempfile.TemporaryDirectory(prefix="emtroly-8dot3-") as td:
+            long_home = Path(td).resolve() / "Nguyễn Văn Ánh Công Ty TNHH"
+            long_state = long_home / "openclaw"
+            long_local = long_home / "AppData/Local"
+            long_node_dir = long_local / "MemberInstaller/dependencies/node-v24.21.0-win-x64"
+            for d in (long_state, long_local, long_node_dir):
+                d.mkdir(parents=True, exist_ok=True)
+            long_node = long_node_dir / "node.exe"
+            long_node.write_text("fixture-node", encoding="utf-8")
+            long_entry = long_state / "openclaw.mjs"
+            long_entry.write_text("fixture-entry", encoding="utf-8")
+            (long_state / "openclaw.json").write_text(json.dumps({"gateway": {"port": 19789}}), encoding="utf-8")
+
+            short_home = to_short_or_mixed_case(long_home)
+            short_state = to_short_or_mixed_case(long_state)
+            short_local = to_short_or_mixed_case(long_local)
+            short_node = to_short_or_mixed_case(long_node)
+            short_entry = to_short_or_mixed_case(long_entry)
+
+            mock_reg = MagicMock()
+            mock_reg.REG_SZ, mock_reg.REG_EXPAND_SZ = 1, 2
+            mock_reg.KEY_QUERY_VALUE, mock_reg.KEY_SET_VALUE = 1, 2
+            mock_reg.QueryValueEx.return_value = (r"C:\Windows\System32", 2)
+            with (
+                patch.dict(os.environ, {"USERPROFILE": short_home, "LOCALAPPDATA": short_local, "PATH": r"C:\Windows\System32"}),
+                patch.dict(sys.modules, {"winreg": mock_reg}),
+                patch.object(install_windows_cli.shutil, "which", return_value=None),
+                patch.object(install_windows_cli, "broadcast_environment", return_value=True),
+                patch.object(
+                    install_windows_cli.subprocess,
+                    "run",
+                    return_value=subprocess.CompletedProcess([], 0, "OpenClaw 2026.11.4\n", ""),
+                ),
+            ):
+                cli_res = install_windows_cli.install(short_state, short_home, short_node, short_entry, 19789)
+                self.assertTrue(cli_res["default_cli"])
+                self.assertEqual(Path(cli_res["environment"]["OPENCLAW_STATE_DIR"]), long_state)
+                self.assertTrue((long_local / "OpenClaw/bin/openclaw.cmd").is_file())
+
+        # 2. Portable Python/Node resolution in module-manager.ps1 when System PATH only has WindowsApps\python.exe stub
+        with tempfile.TemporaryDirectory(prefix="emtroly-modmgr-cleanpc-") as td2:
+            temp2 = Path(td2)
+            fake_winapps = temp2 / "Microsoft/WindowsApps"
+            fake_winapps.mkdir(parents=True)
+            (fake_winapps / "python.exe").write_bytes(b"")
+
+            oc_dir = temp2 / "openclaw"
+            oc_dir.mkdir()
+            shutil.copy2(ROOT / "native/module-manager.ps1", oc_dir / "module-manager.ps1")
+            shutil.copy2(ROOT / "native/windows-instance.ps1", oc_dir / "windows-instance.ps1")
+            (oc_dir / "module-manager.py").write_text(
+                "import sys; print('MODMGR_REAL_PY_OK:' + sys.argv[1])\n",
+                encoding="utf-8",
+            )
+            real_node = NODE or str(Path(sys.executable))
+            (oc_dir / "installer-instance.json").write_text(
+                json.dumps(
+                    {
+                        "root": str(oc_dir),
+                        "profile": "member-emtroly",
+                        "cli_entry": str(oc_dir / "cli.mjs"),
+                        "port": 19789,
+                        "python": sys.executable,
+                        "node": real_node,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            sys32 = str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32")
+            stripped_env = {
+                **os.environ,
+                "USERPROFILE": str(temp2),
+                "LOCALAPPDATA": str(temp2 / "local"),
+                "PATH": str(fake_winapps) + ";" + sys32,
+            }
+            mm_res = run_ps(f'& "{oc_dir / "module-manager.ps1"}" -Command list\nexit $LASTEXITCODE\n', env=stripped_env)
+            self.assertEqual(mm_res.returncode, 0, mm_res.stdout + mm_res.stderr)
+            self.assertIn("MODMGR_REAL_PY_OK:list", mm_res.stdout)
+
+        # 3. Unconfigured %APPDATA%\npm\openclaw.cmd auto-backup + persistent redacted install-latest.log + Support Report [6]
+        runner = ROOT / "windows-installer/run-native-install.ps1"
+        helpers = ROOT / "windows-installer/wizard-helpers.ps1"
+        secret_tok = "888999:CLEANPC_SECRET_TOKEN_ABCDEFGHIJKLMNO"
+        secret_key = "sk-cleanpc-secret-api-key-987654321"
+        with tempfile.TemporaryDirectory(prefix="emtroly-npmshim-log-") as td3:
+            root3 = Path(td3)
+            home3 = root3 / "home"
+            local3 = root3 / "local"
+            roaming3 = root3 / "roaming"
+            npm_global = roaming3 / "npm"
+            for d in (home3, local3, npm_global):
+                d.mkdir(parents=True)
+            # Seed leftover manual `npm i -g openclaw` shims in %APPDATA%\npm (with NO ~/.openclaw/openclaw.json)
+            (npm_global / "openclaw.cmd").write_text("@echo off\r\necho broken-global-openclaw\r\nexit /b 1\r\n", encoding="ascii")
+            (npm_global / "openclaw.ps1").write_text("exit 1\n", encoding="utf-8")
+
+            payload3 = root3 / "payload"
+            (payload3 / "windows-installer").mkdir(parents=True)
+            shutil.copy2(ROOT / "windows-installer/validation.ps1", payload3 / "windows-installer")
+            shutil.copy2(ROOT / "windows-installer/wizard-helpers.ps1", payload3 / "windows-installer")
+            (payload3 / "windows-installer/verify-openclaw-command.ps1").write_text("exit 0\n", encoding="utf-8-sig")
+            (payload3 / "install-native-windows.ps1").write_text(
+                "param($Name,$OwnerIds,$GroupId,$AssistantName,$BaseUrl,$Model,$Profile,$Modules,$QrOwnerId,$OpenClawVersion,$InstallMode,$InstallRoot,$GatewayPort,$Audience,$Addressing,$Style,[switch]$UserInstall,$CredentialData)\n"
+                f"if ($env:EMTROLY_INSTALL_LOG_FILE) {{ [IO.File]::AppendAllText($env:EMTROLY_INSTALL_LOG_FILE, \"[step] token={secret_tok} key={secret_key}`r`n\") }}\n"
+                "throw 'Private OpenClaw installation failed.'\n",
+                encoding="utf-8-sig",
+            )
+            settings_path = root3 / "settings.json"
+            status_path = root3 / "status.txt"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "member": "emtroly",
+                        "assistant_name": "Em Tro Ly",
+                        "base_url": "https://provider.example/v1",
+                        "model": "gpt-6.2-sol",
+                        "owner_ids": "123456789",
+                        "group_id": "",
+                        "gateway_port": "0",
+                        "audience": "",
+                        "addressing": "",
+                        "style": "",
+                        "accept_full_access": True,
+                        "configure_zalo": False,
+                        "skip_editor": True,
+                        "qr_owner_id": "",
+                        "telegram_token": secret_tok,
+                        "ai_api_key": secret_key,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            clean_sys_path = os.pathsep.join(
+                p for p in os.environ.get("PATH", "").split(os.pathsep) if "openclaw" not in p.lower()
+            )
+            env3 = {
+                **os.environ,
+                "USERPROFILE": str(home3),
+                "LOCALAPPDATA": str(local3),
+                "APPDATA": str(roaming3),
+                "PATH": str(npm_global) + os.pathsep + clean_sys_path,
+                "TEST_MODE": "cleanpc-log-test",
+            }
+            r3 = run_ps(
+                "function global:Invoke-RestMethod {\n"
+                "  param([switch]$UseBasicParsing, $Method, $Uri, $Headers, $TimeoutSec, $MaximumRedirection)\n"
+                "  if ($Uri -match '/models$') { return @{ data = @(@{ id = 'gpt-6.2-sol' }) } }\n"
+                "  if ($Uri -match '/getMe$') { return @{ ok = $true; result = @{ is_bot = $true } } }\n"
+                "  throw $Uri\n"
+                "}\n"
+                f'& "{runner}" -SettingsFile "{settings_path}" -PayloadRoot "{payload3}" -LogFile "{status_path}"\n'
+                "exit $LASTEXITCODE\n",
+                env=env3,
+            )
+            self.assertNotEqual(r3.returncode, 0)
+            # Leftover %APPDATA%\npm\openclaw.cmd must have been quarantined instead of causing cli-probe-conflict!
+            self.assertFalse((npm_global / "openclaw.cmd").exists(), "Stale npm global openclaw.cmd was not backed up")
+            self.assertEqual(len(list(npm_global.glob("backup-openclaw-shims-*/openclaw.cmd"))), 1)
+            self.assertNotIn("cli-probe-conflict", status_path.read_text(encoding="utf-8"))
+
+            # Persistent black-box log must exist and scrub all secrets in .diag.json & Export-EmTroLySupportReport
+            latest_log = local3 / "EmTroLyUI/logs/install-latest.log"
+            self.assertTrue(latest_log.is_file(), "Missing persistent EmTroLyUI/logs/install-latest.log")
+            diag_data = json.loads(Path(str(status_path) + ".diag.json").read_text(encoding="utf-8"))
+            self.assertNotIn(secret_tok, diag_data["technicalDetail"])
+            self.assertNotIn(secret_key, diag_data["technicalDetail"])
+            self.assertIn("Private OpenClaw installation failed.", diag_data["technicalDetail"])
+
+            report_out = root3 / "support-report.txt"
+            rep_res = run_ps(
+                f'. ([ScriptBlock]::Create([IO.File]::ReadAllText("{helpers}", [Text.Encoding]::UTF8)))\n'
+                f'Export-EmTroLySupportReport -OutputPath "{report_out}" -PayloadRoot "{ROOT}" | Out-Null\n',
+                env=env3,
+            )
+            self.assertEqual(rep_res.returncode, 0, rep_res.stdout + rep_res.stderr)
+            rep_text = report_out.read_text(encoding="utf-8")
+            self.assertIn("[6] NHAT KY CAI DAT GAN NHAT", rep_text)
+            self.assertNotIn(secret_tok, rep_text)
+            self.assertNotIn(secret_key, rep_text)
+
+        # 4. Static & WSH fallback check in member-vps-installer.nsi & launch-wizard.vbs
+        nsi_text = (ROOT / "windows-installer/member-vps-installer.nsi").read_text(encoding="utf-8")
+        self.assertIn("fallback_ps:", nsi_text)
+        self.assertIn("wsh.ok", nsi_text)
+
 
 if __name__ == "__main__":
     unittest.main()

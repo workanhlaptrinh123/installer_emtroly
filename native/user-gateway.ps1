@@ -1,9 +1,48 @@
-﻿function Install-UserGateway {
-  param([string]$Root, [string]$CliEntry, [int]$Port)
+﻿function Resolve-UserGatewayNodeExe {
+  param([string]$Root = '')
+  if ($Root) {
+    $instPath = Join-Path $Root 'installer-instance.json'
+    if (Test-Path -LiteralPath $instPath -PathType Leaf) {
+      try {
+        $instObj = Get-Content -LiteralPath $instPath -Encoding UTF8 -Raw | ConvertFrom-Json
+        if ($instObj.PSObject.Properties['node'] -and $instObj.node -and (Test-Path -LiteralPath $instObj.node -PathType Leaf)) {
+          return [string]$instObj.node
+        }
+      } catch { }
+    }
+  }
+  if ($env:LOCALAPPDATA) {
+    $depDir = Join-Path $env:LOCALAPPDATA 'MemberInstaller\dependencies'
+    if (Test-Path -LiteralPath $depDir -PathType Container) {
+      $portNode = @(Get-ChildItem -LiteralPath $depDir -Directory -Filter 'node-v*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName 'node.exe' } | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1)
+      if ($portNode.Count -gt 0) { return [string]$portNode[0] }
+    }
+  }
+  $cmdNode = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $cmdNode) { $cmdNode = Get-Command node -ErrorAction SilentlyContinue | Select-Object -First 1 }
+  if ($cmdNode -and $cmdNode.Source) { return [string]$cmdNode.Source }
+  return 'node'
+}
+
+function Test-UserGatewayWshDisabled {
+  foreach ($regKey in @('HKCU:\Software\Microsoft\Windows Script Host\Settings', 'HKLM:\Software\Microsoft\Windows Script Host\Settings')) {
+    try {
+      $prop = Get-ItemProperty -Path $regKey -Name 'Enabled' -ErrorAction SilentlyContinue
+      if ($null -ne $prop -and [int]$prop.Enabled -eq 0) { return $true }
+    } catch { }
+  }
+  return $false
+}
+
+function Install-UserGateway {
+  param([string]$Root, [string]$CliEntry, [int]$Port, [string]$Python = '')
   $manifestPath = Join-Path $Root 'installer-instance.json'
   $manifest = Get-Content -LiteralPath $manifestPath -Encoding UTF8 -Raw | ConvertFrom-Json
+  $resolvedNode = Resolve-UserGatewayNodeExe -Root $Root
+  if ($resolvedNode -eq 'node') { $resolvedNode = (Get-Command node -ErrorAction Stop).Source }
   $manifest | Add-Member -NotePropertyName mode -NotePropertyValue 'user' -Force
-  $manifest | Add-Member -NotePropertyName node -NotePropertyValue (Get-Command node).Source -Force
+  $manifest | Add-Member -NotePropertyName node -NotePropertyValue $resolvedNode -Force
+  if ($Python) { $manifest | Add-Member -NotePropertyName python -NotePropertyValue $Python -Force }
   $manifest | Add-Member -NotePropertyName home -NotePropertyValue $env:USERPROFILE -Force
   $manifest | Add-Member -NotePropertyName path -NotePropertyValue $env:Path -Force
   [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
@@ -26,6 +65,11 @@ exit $LASTEXITCODE
   $command = '"' + (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') + '" -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + (Join-Path $Root 'openclaw-instance.ps1') + '" gateway start'
   $body = 'CreateObject("WScript.Shell").Run "' + $command.Replace('"','""') + '", 0, False'
   [IO.File]::WriteAllText($startupFile, $body, [Text.Encoding]::Unicode)
+  if (Test-UserGatewayWshDisabled) {
+    $startupCmdFile = Join-Path $startup ("OpenClaw-$($manifest.profile).cmd")
+    $cmdBody = "@echo off`r`nstart `"`" /min $command`r`n"
+    [IO.File]::WriteAllText($startupCmdFile, $cmdBody, [Text.UTF8Encoding]::new($false))
+  }
 }
 
 function Test-StaleGatewayPidRecord {
@@ -52,15 +96,20 @@ function Test-StaleGatewayPidRecord {
 
 function Invoke-InstanceCli {
   param([string]$Root, [string]$CliEntry, [Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
+  $nodeExe = Resolve-UserGatewayNodeExe -Root $Root
+  if ($nodeExe -ne 'node' -and (Test-Path -LiteralPath $nodeExe -PathType Leaf)) {
+    $nodeDir = Split-Path -Parent $nodeExe
+    if ($nodeDir -and (($env:Path -split ';') -notcontains $nodeDir)) { $env:Path = "$nodeDir;$env:Path" }
+  }
   if ($Arguments.Count -lt 2 -or $Arguments[0] -ne 'gateway' -or $Arguments[1] -notin @('install','start','stop','restart','status')) {
-    & node $CliEntry @Arguments
+    & $nodeExe $CliEntry @Arguments
     $global:LASTEXITCODE = $LASTEXITCODE
     return
   }
   $action = $Arguments[1]
   if ($action -eq 'install') { $global:LASTEXITCODE = 0; return }
   if ($action -eq 'status') {
-    & node $CliEntry gateway health --json
+    & $nodeExe $CliEntry gateway health --json
     $global:LASTEXITCODE = $LASTEXITCODE
     return
   }
@@ -131,11 +180,11 @@ function Invoke-InstanceCli {
     $supervisorProc = $null
   }
   if ($action -in @('start','restart') -and -not $target) {
-    & node (Join-Path $Root 'user-gateway.cjs') start
+    & $nodeExe (Join-Path $Root 'user-gateway.cjs') start
     if ($LASTEXITCODE -ne 0) { throw 'User gateway start failed.' }
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
       Start-Sleep -Seconds 2
-      & node $CliEntry gateway health --json *> $null
+      & $nodeExe $CliEntry gateway health --json *> $null
       if ($LASTEXITCODE -eq 0) { $global:LASTEXITCODE = 0; return }
     }
     throw 'User gateway did not become healthy. Inspect user-gateway.log; do not start another gateway.'

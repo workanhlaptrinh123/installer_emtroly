@@ -543,14 +543,16 @@ function Export-EmTroLySupportReport {
 
   $gwLogPath = if ($root) { Join-Path $root 'user-gateway.log' } else { '' }
   $healLogPath = if ($root) { Join-Path $root 'logs\codex-autoheal.log' } else { '' }
+  $instLogPath = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'EmTroLyUI\logs\install-latest.log' } else { '' }
   foreach ($logInfo in @(
-    @{ Title = '[4] NHAT KY GATEWAY (40 DONG CUOI)'; Path = $gwLogPath },
-    @{ Title = '[5] NHAT KY CODEX AUTO-HEAL (30 DONG CUOI)'; Path = $healLogPath }
+    @{ Title = '[4] NHAT KY GATEWAY (40 DONG CUOI)'; Path = $gwLogPath; Tail = 40 },
+    @{ Title = '[5] NHAT KY CODEX AUTO-HEAL (30 DONG CUOI)'; Path = $healLogPath; Tail = 30 },
+    @{ Title = '[6] NHAT KY CAI DAT GAN NHAT (60 DONG CUOI)'; Path = $instLogPath; Tail = 60 }
   )) {
     [void]$sb.AppendLine($logInfo.Title)
     if ($logInfo.Path -and (Test-Path -LiteralPath $logInfo.Path -PathType Leaf)) {
       try {
-        $lines = @(Get-Content -LiteralPath $logInfo.Path -Tail 40 -ErrorAction SilentlyContinue)
+        $lines = @(Get-Content -LiteralPath $logInfo.Path -Tail $logInfo.Tail -ErrorAction SilentlyContinue)
         if ($lines.Count -eq 0) { [void]$sb.AppendLine('  (trong)') }
         foreach ($l in $lines) { [void]$sb.AppendLine('  ' + $l) }
       } catch { [void]$sb.AppendLine('  (khong doc duoc tep)') }
@@ -649,10 +651,19 @@ function Install-EmTroLyAppShortcut {
 
   $hasAnyTargetDir = ($desktopDir -and (Test-Path -LiteralPath $desktopDir -PathType Container)) -or
     ($programsBase -and (Test-Path -LiteralPath $programsBase -PathType Container))
-
-  if ((Test-Path -LiteralPath $wizardDst -PathType Leaf) -and (Test-Path -LiteralPath $wscriptExe -PathType Leaf) -and $hasAnyTargetDir) {
+  $wshDisabled = $false
+  foreach ($wshReg in @('HKCU:\Software\Microsoft\Windows Script Host\Settings', 'HKLM:\Software\Microsoft\Windows Script Host\Settings')) {
     try {
-      $vbsBody = @"
+      $wshProp = Get-ItemProperty -Path $wshReg -Name 'Enabled' -ErrorAction SilentlyContinue
+      if ($null -ne $wshProp -and [int]$wshProp.Enabled -eq 0) { $wshDisabled = $true; break }
+    } catch { }
+  }
+
+  if ((Test-Path -LiteralPath $wizardDst -PathType Leaf) -and ((Test-Path -LiteralPath $wscriptExe -PathType Leaf) -or (Test-Path -LiteralPath $psExe -PathType Leaf)) -and $hasAnyTargetDir) {
+    try {
+      $useVbsLauncher = (-not $wshDisabled) -and (Test-Path -LiteralPath $wscriptExe -PathType Leaf)
+      if ($useVbsLauncher) {
+        $vbsBody = @"
 Option Explicit
 Dim shell, command
 Set shell = CreateObject("WScript.Shell")
@@ -661,7 +672,8 @@ command = Chr(34) & "$($psExe.Replace('"','""'))" & Chr(34) & " -STA -NoLogo -No
 shell.Run command, 0, False
 Set shell = Nothing
 "@
-      [IO.File]::WriteAllText($vbsPath, $vbsBody, [System.Text.Encoding]::Unicode)
+        [IO.File]::WriteAllText($vbsPath, $vbsBody, [System.Text.Encoding]::Unicode)
+      }
 
       $wsh = New-Object -ComObject WScript.Shell
       $targets = @()
@@ -676,8 +688,13 @@ Set shell = Nothing
         for ($scTry = 1; $scTry -le 3; $scTry++) {
           try {
             $sc = $wsh.CreateShortcut($lnkPath)
-            $sc.TargetPath = $wscriptExe
-            $sc.Arguments = '//B //Nologo "' + $vbsPath + '"'
+            if ($useVbsLauncher) {
+              $sc.TargetPath = $wscriptExe
+              $sc.Arguments = '//B //Nologo "' + $vbsPath + '"'
+            } else {
+              $sc.TargetPath = $psExe
+              $sc.Arguments = '-STA -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $wizardDst + '" -PayloadRoot "' + $emUiDir + '"'
+            }
             $sc.WorkingDirectory = $emUiDir
             $sc.Description = 'Anh Lap Trinh - Em Tro Ly (Quan ly, Cau hinh & Codex CLI)'
             if (Test-Path -LiteralPath $icoDst -PathType Leaf) {

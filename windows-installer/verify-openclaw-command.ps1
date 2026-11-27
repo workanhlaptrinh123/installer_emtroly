@@ -18,8 +18,13 @@ try {
       -not [string]::Equals([IO.Path]::GetFullPath($command.Source), $expectedPath, [StringComparison]::OrdinalIgnoreCase)) { exit 12 }
   $version = (& $command.Source --version | Out-String).Trim()
   if ($LASTEXITCODE -ne 0 -or $version -notmatch [regex]::Escape($expectedVersion)) { exit 13 }
-  & $command.Source status *> $null
-  if ($LASTEXITCODE -ne 0) { exit 14 }
+  $statusOk = $false
+  for ($probeTry = 1; $probeTry -le 4; $probeTry++) {
+    & $command.Source status *> $null
+    if ($LASTEXITCODE -eq 0) { $statusOk = $true; break }
+    if ($probeTry -lt 4) { Start-Sleep -Seconds 2 }
+  }
+  if (-not $statusOk) { exit 14 }
   exit 0
 } catch {
   exit 12

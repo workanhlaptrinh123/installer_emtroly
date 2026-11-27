@@ -104,8 +104,16 @@ function Set-OpenClawInstanceEnvironment {
 }
 
 function Save-OpenClawInstanceLauncher {
-  param([string]$Root, [string]$InstanceProfile, [string]$CliEntry, [int]$Port)
-  $manifest = @{ root=$Root; profile=$InstanceProfile; cli_entry=$CliEntry; port=$Port }
+  param([string]$Root, [string]$InstanceProfile, [string]$CliEntry, [int]$Port, [string]$Node = '', [string]$Python = '')
+  if (-not $Node) {
+    $nodeCmd = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $nodeCmd) { $nodeCmd = Get-Command node -ErrorAction SilentlyContinue | Select-Object -First 1 }
+    if ($nodeCmd -and $nodeCmd.Source) { $Node = $nodeCmd.Source }
+  }
+  $manifest = [ordered]@{ root=$Root; profile=$InstanceProfile; cli_entry=$CliEntry; port=$Port }
+  if ($Node) { $manifest['node'] = $Node }
+  if ($Python) { $manifest['python'] = $Python }
+  if ($env:Path) { $manifest['path'] = $env:Path }
   [IO.File]::WriteAllText((Join-Path $Root 'installer-instance.json'), ($manifest | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
   Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'windows-instance.ps1') -Destination (Join-Path $Root 'windows-instance.ps1') -Force
   $launcher = @'
@@ -113,7 +121,9 @@ $ErrorActionPreference = 'Stop'
 $instance = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'installer-instance.json') -Encoding UTF8 -Raw | ConvertFrom-Json
 . (Join-Path $PSScriptRoot 'windows-instance.ps1')
 Set-OpenClawInstanceEnvironment -Root $instance.root -InstanceProfile $instance.profile -CliEntry $instance.cli_entry
-& node $instance.cli_entry @args
+if ($instance.PSObject.Properties['path'] -and $instance.path) { $env:Path = $instance.path + ';' + $env:Path }
+$nodeExe = if ($instance.PSObject.Properties['node'] -and $instance.node -and (Test-Path -LiteralPath $instance.node -PathType Leaf)) { $instance.node } else { 'node' }
+& $nodeExe $instance.cli_entry @args
 exit $LASTEXITCODE
 '@
   [IO.File]::WriteAllText((Join-Path $Root 'openclaw-instance.ps1'), $launcher, [Text.UTF8Encoding]::new($false))

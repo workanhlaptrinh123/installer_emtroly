@@ -10,7 +10,7 @@ import plistlib
 import subprocess
 import time
 
-from local_install import atomic_write
+from local_install import atomic_write, has_reparse_point
 
 
 def startup_payload(system, node, launcher, config):
@@ -36,8 +36,13 @@ def install(root, home, node, cli_entry, port, expected_os=None):
         raise ValueError("Installer OS does not match the customer form; no files changed")
     root, home, node, cli_entry = (Path(item) for item in (root, home, node, cli_entry))
     for item in (root, home, node, cli_entry):
-        if not item.is_absolute() or item.resolve() != item or not item.exists() or any(character in str(item) for character in "\n\r\x00"):
+        if (not item.is_absolute() or not item.exists()
+                or has_reparse_point(item, stop_at=item.parent)
+                or (system != "Windows" and item.resolve() != item)
+                or any(character in str(item) for character in "\n\r\x00")):
             raise ValueError("Require absolute real paths without control characters")
+    if (has_reparse_point(root, stop_at=home) or has_reparse_point(cli_entry, stop_at=root)):
+        raise ValueError("Require absolute real paths without control characters")
     config_path = root / "openclaw.json"
     if not config_path.is_file() or config_path.is_symlink():
         raise ValueError("Existing selected-instance config required")
@@ -49,7 +54,7 @@ def install(root, home, node, cli_entry, port, expected_os=None):
     settings = {"root": str(root), "home": str(home), "node": str(node), "cli_entry": str(cli_entry),
                 "port": port, "path": os.environ.get("PATH", "")}
     tools = root / "tools" / "native-launcher"
-    if tools.resolve() != tools:
+    if has_reparse_point(tools, stop_at=root) or (system != "Windows" and tools.resolve() != tools):
         raise ValueError("Refusing symlinked launcher directory")
     launcher, manifest = tools / "native_launcher.cjs", tools / "instance.json"
     old_launcher = tools / "instance.json"
@@ -61,14 +66,17 @@ def install(root, home, node, cli_entry, port, expected_os=None):
     identifier = hashlib.sha256(str(root).encode()).hexdigest()[:12]
     if system == "Windows":
         appdata = Path(os.environ.get("APPDATA", ""))
-        if not appdata.is_absolute() or not appdata.is_dir():
+        if not appdata.is_absolute() or not appdata.is_dir() or has_reparse_point(appdata, stop_at=appdata.parent):
             raise ValueError("Current user's APPDATA is unavailable")
+        startup_base = appdata
         target = appdata / "Microsoft/Windows/Start Menu/Programs/Startup" / ("OpenClaw-" + identifier + ".vbs")
     elif system == "Darwin":
+        startup_base = home
         target = home / "Library/LaunchAgents" / ("online.emtroly.openclaw." + hashlib.sha256(str(manifest).encode()).hexdigest()[:12] + ".plist")
     else:
+        startup_base = home
         target = home / ".config/systemd/user" / ("openclaw-" + identifier + ".service")
-    if target.resolve() != target or target.is_symlink():
+    if has_reparse_point(target, stop_at=startup_base) or (system != "Windows" and target.resolve() != target) or target.is_symlink():
         raise ValueError("Refusing redirected startup entry")
     source = Path(__file__).with_name("native_launcher.cjs")
     for destination, body in ((launcher, source.read_bytes()), (manifest, json.dumps(settings, ensure_ascii=False, indent=2).encode()), (target, payload)):

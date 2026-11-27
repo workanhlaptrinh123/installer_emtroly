@@ -25,10 +25,30 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
+function Write-NativeInstallLog([string]$Entry, [string[]]$Secrets = @()) {
+  if (-not $env:EMTROLY_INSTALL_LOG_FILE) { return }
+  try {
+    $safe = [string]$Entry
+    foreach ($s in $Secrets) {
+      if ($s -and $s.Length -ge 6) { $safe = $safe.Replace($s, '[REDACTED_SECRET]') }
+    }
+    $safe = [regex]::Replace($safe, '[0-9]{5,}:[A-Za-z0-9_-]{20,}', '[REDACTED_TELEGRAM_TOKEN]')
+    $safe = [regex]::Replace($safe, 'sk-[A-Za-z0-9_-]{12,}', '[REDACTED_API_KEY]')
+    $safe = [regex]::Replace($safe, '("token"\s*:\s*")[0-9a-fA-F]{24,}(")', '$1[REDACTED_GATEWAY_TOKEN]$2')
+    $logParent = Split-Path -Parent $env:EMTROLY_INSTALL_LOG_FILE
+    if ($logParent -and -not (Test-Path -LiteralPath $logParent -PathType Container)) {
+      [void][IO.Directory]::CreateDirectory($logParent)
+    }
+    $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    [IO.File]::AppendAllText($env:EMTROLY_INSTALL_LOG_FILE, "[$stamp] [native] $safe`r`n", (New-Object Text.UTF8Encoding($false)))
+  } catch { }
+}
+
 function Write-NativeInstallStatus([string]$Text) {
   if ($env:MEMBER_INSTALL_STATUS_FILE) {
     [IO.File]::WriteAllText($env:MEMBER_INSTALL_STATUS_FILE, $Text, (New-Object Text.UTF8Encoding($false)))
   }
+  Write-NativeInstallLog -Entry ("STATUS: " + $Text)
 }
 
 function Optimize-NativeProcessPath {
@@ -297,22 +317,71 @@ $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 & icacls $root /inheritance:r /grant:r "${currentUser}:(OI)(CI)(F)" '*S-1-5-18:(OI)(CI)(F)' *> $null
 if ($LASTEXITCODE -ne 0) { throw 'Unable to protect the private instance directory.' }
 $runtime = Join-Path $root ('runtime\' + $OpenClawVersion)
-New-Item -ItemType Directory -Force -Path $runtime | Out-Null
+$logsDir = Join-Path $root 'logs'
+New-Item -ItemType Directory -Force -Path $runtime,$logsDir | Out-Null
 $status = 'Đang tải và cài OpenClaw ' + $OpenClawVersion + '. Bước này có thể mất vài phút…'
 Write-NativeInstallStatus $status
 $runtimePackage = @{ name='member-openclaw-runtime'; version='1.0.0'; private=$true; allowScripts=@{ '@google/genai'=$true; esbuild=$true; koffi=$true; openclaw=$true; protobufjs=$true; 'tree-sitter-bash'=$true } }
 [IO.File]::WriteAllText((Join-Path $runtime 'package.json'), ($runtimePackage | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
+$isolatedNpmrc = Join-Path $runtime '.npmrc.emtroly'
+[IO.File]::WriteAllText($isolatedNpmrc, "registry=https://registry.npmjs.org/`nfetch-retries=5`nfetch-retry-mintimeout=2000`nfetch-retry-maxtimeout=15000`naudit=false`nfund=false`n", [Text.UTF8Encoding]::new($false))
+$npmCacheDir = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'MemberInstaller\npm-cache' } else { Join-Path $root 'npm-cache' }
+New-Item -ItemType Directory -Force -Path $npmCacheDir | Out-Null
+$npmLogFile = Join-Path $logsDir 'npm-install.log'
 $previousErrorAction = $ErrorActionPreference
+$oldNpmCache = $env:NPM_CONFIG_CACHE
+$oldNpmUserCfg = $env:NPM_CONFIG_USERCONFIG
+$oldNpmPrefix = $env:NPM_CONFIG_PREFIX
+$oldNodeOptions = $env:NODE_OPTIONS
+$npmExitCode = 1
 try {
-  $ErrorActionPreference = 'Continue'
-  & npm.cmd install --prefix $runtime "openclaw@$OpenClawVersion" --no-audit --no-fund --prefer-offline --loglevel=error
-  $npmExitCode = $LASTEXITCODE
-} finally { $ErrorActionPreference = $previousErrorAction }
+  $env:NPM_CONFIG_CACHE = $npmCacheDir
+  $env:NPM_CONFIG_USERCONFIG = $isolatedNpmrc
+  Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue
+  Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue
+  for ($npmTry = 1; $npmTry -le 3; $npmTry++) {
+    $ErrorActionPreference = 'Continue'
+    & npm.cmd install --prefix $runtime "openclaw@$OpenClawVersion" --no-audit --no-fund --prefer-offline --loglevel=error *> $npmLogFile
+    $npmExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $previousErrorAction
+    if ($npmExitCode -eq 0) { break }
+    $npmTail = if (Test-Path -LiteralPath $npmLogFile -PathType Leaf) { (@(Get-Content -LiteralPath $npmLogFile -Tail 20 -ErrorAction SilentlyContinue) -join ' | ') } else { '' }
+    Write-NativeInstallLog -Entry ("npm install attempt $npmTry/3 failed (exit=$npmExitCode): $npmTail") -Secrets @($tg, $key)
+    if ($npmTry -lt 3) {
+      Write-NativeInstallStatus "Windows đang quét tệp hoặc mạng chập chờn — đang tự động thử cài lại OpenClaw (lần $($npmTry + 1)/3)..."
+      $partialModules = Join-Path $runtime 'node_modules'
+      if (Test-Path -LiteralPath $partialModules) {
+        $cmdClean = Join-Path $env:SystemRoot 'System32\cmd.exe'
+        if (Test-Path -LiteralPath $cmdClean -PathType Leaf) {
+          try {
+            $psiNpm = New-Object System.Diagnostics.ProcessStartInfo($cmdClean, '/d /s /c "rmdir /s /q "' + $partialModules + '""')
+            $psiNpm.UseShellExecute = $false; $psiNpm.CreateNoWindow = $true
+            $pNpm = [System.Diagnostics.Process]::Start($psiNpm); [void]$pNpm.WaitForExit(15000); $pNpm.Dispose()
+          } catch { }
+        }
+        Remove-Item -LiteralPath $partialModules -Recurse -Force -ErrorAction SilentlyContinue
+      }
+      Start-Sleep -Seconds (3 * $npmTry)
+    }
+  }
+} finally {
+  $ErrorActionPreference = $previousErrorAction
+  if ($null -ne $oldNpmCache) { $env:NPM_CONFIG_CACHE = $oldNpmCache } else { Remove-Item Env:NPM_CONFIG_CACHE -ErrorAction SilentlyContinue }
+  if ($null -ne $oldNpmUserCfg) { $env:NPM_CONFIG_USERCONFIG = $oldNpmUserCfg } else { Remove-Item Env:NPM_CONFIG_USERCONFIG -ErrorAction SilentlyContinue }
+  if ($null -ne $oldNpmPrefix) { $env:NPM_CONFIG_PREFIX = $oldNpmPrefix } else { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
+  if ($null -ne $oldNodeOptions) { $env:NODE_OPTIONS = $oldNodeOptions } else { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
+  Remove-Item -LiteralPath $isolatedNpmrc -Force -ErrorAction SilentlyContinue
+}
 if ($npmExitCode -ne 0) { throw 'Private OpenClaw installation failed.' }
 $bundledPostinstall = Join-Path $runtime 'node_modules\openclaw\scripts\postinstall-bundled-plugins.mjs'
 if (-not (Test-Path -LiteralPath $bundledPostinstall)) { throw 'Bundled plugin installer was not found.' }
-& node $bundledPostinstall
-if ($LASTEXITCODE -ne 0) { throw 'Bundled OpenClaw plugin installation failed.' }
+$postinstallOk = $false
+for ($piTry = 1; $piTry -le 2; $piTry++) {
+  & node $bundledPostinstall
+  if ($LASTEXITCODE -eq 0) { $postinstallOk = $true; break }
+  if ($piTry -lt 2) { Start-Sleep -Seconds 2 }
+}
+if (-not $postinstallOk) { throw 'Bundled OpenClaw plugin installation failed.' }
 $cliEntry = Join-Path $runtime 'node_modules\openclaw\openclaw.mjs'
 if (-not (Test-Path $cliEntry)) { throw "Private OpenClaw CLI was not found: $cliEntry" }
 $env:OPENCLAW_CLI_ENTRY = $cliEntry
@@ -422,19 +491,29 @@ Invoke-OpenClaw config validate --json
 if ($LASTEXITCODE -ne 0) { throw 'OpenClaw configuration is invalid.' }
 Invoke-OpenClaw skills check
 if ($LASTEXITCODE -ne 0) { throw 'OpenClaw skills check failed.' }
-Save-OpenClawInstanceLauncher -Root $root -InstanceProfile $env:OPENCLAW_PROFILE -CliEntry $cliEntry -Port $GatewayPort
+Save-OpenClawInstanceLauncher -Root $root -InstanceProfile $env:OPENCLAW_PROFILE -CliEntry $cliEntry -Port $GatewayPort -Python $verifiedPythonExe
 if ($UserInstall) {
   Write-NativeInstallStatus 'Đang đăng ký lệnh openclaw vào PATH của tài khoản Windows…'
   Install-UserOpenClawCli -Root $root -CliEntry $cliEntry -Port $GatewayPort -Profile $env:OPENCLAW_PROFILE -ExpectedVersion $OpenClawVersion -Python $verifiedPythonExe
-  Install-UserGateway -Root $root -CliEntry $cliEntry -Port $GatewayPort
+  Install-UserGateway -Root $root -CliEntry $cliEntry -Port $GatewayPort -Python $verifiedPythonExe
 }
 if ($zaloSelected) {
   Write-NativeInstallStatus 'Đang cài plugin Zalo và đăng ký /zaloqr, /zalostatus (chưa đăng nhập Zalo)…'
   $zaloOnboard = Join-Path $PSScriptRoot 'zalo\onboard-zalouser-windows.ps1'
   $zaloConfigure = Join-Path $PSScriptRoot 'zalo\configure-zalo.py'
   $zaloQr = Join-Path $workspace 'skills\openclaw-zalo-qr-login\scripts\send_zalo_qr_to_telegram_owner.mjs'
-  & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $zaloOnboard -Root $root -TelegramAccount $Name -OwnerId $QrOwnerId -ConfigureScript $zaloConfigure -QrScript $zaloQr -Quick -PreGateway
-  if ($LASTEXITCODE -ne 0) { throw 'Windows Zalo QR plugin installation failed. Telegram remains installed; inspect the error before retrying.' }
+  $zaloLogFile = Join-Path $logsDir 'zalo-onboard.log'
+  $prevErrZ = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $zaloOnboard -Root $root -TelegramAccount $Name -OwnerId $QrOwnerId -ConfigureScript $zaloConfigure -QrScript $zaloQr -Quick -PreGateway *> $zaloLogFile
+    $zaloExit = $LASTEXITCODE
+  } finally { $ErrorActionPreference = $prevErrZ }
+  if ($zaloExit -ne 0) {
+    $zaloTail = if (Test-Path -LiteralPath $zaloLogFile -PathType Leaf) { (@(Get-Content -LiteralPath $zaloLogFile -Tail 20 -ErrorAction SilentlyContinue) -join ' | ') } else { '' }
+    Write-NativeInstallLog -Entry ("zalo onboard failed (exit=$zaloExit): $zaloTail") -Secrets @($tg, $key)
+    throw 'Windows Zalo QR plugin installation failed. Telegram remains installed; inspect the error before retrying.'
+  }
 }
 $status = 'Đang khởi động Gateway và kiểm tra kết nối…'
 Write-NativeInstallStatus $status

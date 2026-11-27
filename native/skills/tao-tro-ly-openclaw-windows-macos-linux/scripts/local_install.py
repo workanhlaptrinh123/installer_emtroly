@@ -64,9 +64,43 @@ def fetch(url, maximum, cancelled=None):
             time.sleep(attempt + 1)
 
 
+def has_reparse_point(path, stop_at=None):
+    current = Path(path)
+    stop_resolved = None
+    if stop_at is not None and Path(stop_at).exists():
+        try:
+            stop_resolved = Path(stop_at).resolve()
+        except OSError:
+            stop_resolved = None
+    while True:
+        if current.is_symlink():
+            return True
+        if current.exists():
+            try:
+                if getattr(os.lstat(current), "st_file_attributes", 0) & 0x400:
+                    return True
+            except OSError:
+                return True
+        if stop_resolved is not None and current.exists():
+            try:
+                if current.resolve() == stop_resolved:
+                    break
+            except OSError:
+                pass
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return False
+
+
 def sync_skills(manifest_url, source_url, workspace, cache_dir, expected_count, workers=6, manifest_file=None):
-    workspace, cache_dir = Path(workspace).absolute(), Path(cache_dir).absolute()
-    if workspace.resolve() != workspace or cache_dir.resolve() != cache_dir:
+    raw_workspace, raw_cache_dir = Path(workspace).absolute(), Path(cache_dir).absolute()
+    if (has_reparse_point(raw_workspace, stop_at=raw_workspace.parent)
+            or has_reparse_point(raw_cache_dir, stop_at=raw_cache_dir.parent)):
+        raise ValueError("Workspace/cache must use real paths")
+    workspace, cache_dir = raw_workspace.resolve(), raw_cache_dir.resolve()
+    if has_reparse_point(workspace, stop_at=raw_workspace.parent) or has_reparse_point(cache_dir, stop_at=raw_cache_dir.parent):
         raise ValueError("Workspace/cache must use real paths")
     source = urllib.parse.urlsplit(source_url)
     if urllib.parse.urlsplit(manifest_url).netloc != source.netloc:

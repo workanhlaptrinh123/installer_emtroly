@@ -587,17 +587,38 @@ requires_openai_auth = true
 
     Write-EditorStatus 'Đang kiểm tra Codex và API bằng một yêu cầu thử...'
     $probeArgs = 'exec --skip-git-repo-check --sandbox read-only ' + (Quote-Cmd 'Reply with OK only.')
-    if ((Invoke-HiddenProcess $codex $probeArgs 180) -ne 0) { throw 'editor-codex-probe-failed' }
+    $codexProbeOk = $false
+    $codexProbeDelayMs = if ($env:TEST_FAIL_CODEX) { 100 } else { 2000 }
+    for ($probeAttempt = 1; $probeAttempt -le 3; $probeAttempt++) {
+      if ((Invoke-HiddenProcess $codex $probeArgs 180) -eq 0) {
+        $codexProbeOk = $true
+        break
+      }
+      if ($probeAttempt -lt 3) { Start-Sleep -Milliseconds ($codexProbeDelayMs * $probeAttempt) }
+    }
+    if (-not $codexProbeOk) { throw 'editor-codex-probe-failed' }
 
     Write-EditorStatus 'Đang kiểm tra Codex Extension trong Antigravity IDE...'
     $activationMarker = Join-Path $downloadDir 'activation.ok'
     $env:EMTROLY_CODEX_ACTIVATION_MARKER = $activationMarker
-    $activationArgs = '--skip-welcome --disable-workspace-trust --user-data-dir ' + (Quote-Cmd $userData) +
-      ' --extensions-dir ' + (Quote-Cmd $extensions) + ' --extensionDevelopmentPath ' + (Quote-Cmd $activationProbe) +
-      ' --extensionTestsPath ' + (Quote-Cmd $activationTest) + ' ' + (Quote-Cmd $downloadDir)
-    if ((Invoke-HiddenProcess $editor $activationArgs 180) -ne 0 -or
-        -not (Test-Path -LiteralPath $activationMarker -PathType Leaf) -or
-        [IO.File]::ReadAllText($activationMarker) -cne 'ok') { throw 'editor-activation-failed' }
+    $activationOk = $false
+    $gpuFlagsList = @('--disable-gpu', '--disable-gpu --disable-software-rasterizer')
+    for ($actAttempt = 0; $actAttempt -lt $gpuFlagsList.Count; $actAttempt++) {
+      if (Test-Path -LiteralPath $activationMarker -PathType Leaf) {
+        Remove-Item -LiteralPath $activationMarker -Force -ErrorAction SilentlyContinue
+      }
+      $activationArgs = $gpuFlagsList[$actAttempt] + ' --skip-welcome --disable-workspace-trust --user-data-dir ' + (Quote-Cmd $userData) +
+        ' --extensions-dir ' + (Quote-Cmd $extensions) + ' --extensionDevelopmentPath ' + (Quote-Cmd $activationProbe) +
+        ' --extensionTestsPath ' + (Quote-Cmd $activationTest) + ' ' + (Quote-Cmd $downloadDir)
+      if ((Invoke-HiddenProcess $editor $activationArgs 180) -eq 0 -and
+          (Test-Path -LiteralPath $activationMarker -PathType Leaf) -and
+          ([IO.File]::ReadAllText($activationMarker) -ceq 'ok')) {
+        $activationOk = $true
+        break
+      }
+      if ($actAttempt -lt ($gpuFlagsList.Count - 1)) { Start-Sleep -Seconds 2 }
+    }
+    if (-not $activationOk) { throw 'editor-activation-failed' }
   }
 
   $hasInstalledCodexExt = @(Get-ChildItem -LiteralPath $extensions -Directory -Filter 'openai.chatgpt-*' -ErrorAction SilentlyContinue).Count -gt 0

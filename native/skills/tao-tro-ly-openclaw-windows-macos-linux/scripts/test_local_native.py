@@ -95,7 +95,12 @@ class LocalNativeTests(unittest.TestCase):
         workspace.mkdir()
         external = self.root / "outside"
         external.mkdir()
-        (workspace / "skills").symlink_to(external, target_is_directory=True)
+        try:
+            (workspace / "skills").symlink_to(external, target_is_directory=True)
+        except OSError as error:
+            if getattr(error, "winerror", None) != 1314:
+                raise
+            self.skipTest("directory symlink creation requires Windows symlink privilege")
         with self.assertRaises(ValueError):
             self.sync()
         self.assertEqual(list(external.iterdir()), [])
