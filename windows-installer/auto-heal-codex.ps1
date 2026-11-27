@@ -173,7 +173,7 @@ NGUYÊN TẮC BẮT BUỘC:
 2. Tuyệt đối KHÔNG in nội dung tệp telegram.token hoặc member-provider.secret hoặc auth.json ra màn hình.
 3. Bạn có thể đọc và gọi các công cụ chuẩn có sẵn trong $PayloadRoot (như native\windows-cli.ps1, native\user-gateway.ps1, native\finalize_permissions.py, zalo\onboard-zalouser-windows.ps1, windows-installer\repair-antigravity-shortcut.ps1).
 4. Nếu sự cố ở bước `editor` (cài Antigravity IDE / Codex Extension / lối tắt Desktop): kiểm tra tiến trình `Antigravity IDE.exe` bị treo, kiểm tra thư mục `$env:LOCALAPPDATA\EmTroLy` (xử lý khóa tệp hoặc thư mục dở dang nếu bị kẹt), cài lại tiện ích từ tệp `.vsix` sẵn có trong `$env:LOCALAPPDATA\EmTroLy` bằng `antigravity-ide.cmd --user-data-dir ... --extensions-dir ... --install-extension ... --force`, hoặc chạy `windows-installer\repair-antigravity-shortcut.ps1` nếu thiếu shortcut.
-5. Nếu sự cố ở bước tải/chuẩn bị môi trường (`Node.js`, `Python`, `FFmpeg`, `npm`): kiểm tra `$env:LOCALAPPDATA\MemberInstaller\dependencies`, xóa tệp tải dở bị hỏng và chạy lại `Initialize-UserDependencies` từ `$PayloadRoot\native\user-dependencies.ps1`.
+5. Nếu sự cố ở bước tải/chuẩn bị môi trường (`Node.js`, `Python`, `FFmpeg`, `npm`): kiểm tra `$env:LOCALAPPDATA\MemberInstaller\dependencies`, xóa tệp `.part` tải dở bị hỏng và chạy lại `Initialize-UserDependencies` từ `$PayloadRoot\native\user-dependencies.ps1`. Lưu ý quan trọng trên Windows: KHÔNG dùng `--scope user` với `winget install --id OpenJS.NodeJS.LTS` (bộ cài Node.js MSI chỉ hỗ trợ machine scope; ưu tiên dùng bản giải nén độc lập trong `MemberInstaller\dependencies` hoặc bỏ `--scope user`); luôn loại trừ alias rỗng `WindowsApps\python.exe` (đặt đường dẫn Python thật lên trước `WindowsApps` trong User PATH, không sửa Machine PATH); nếu thấy tệp `.emtroly-installing.json` hoặc `installer-codex-pending.json` mồ côi khi tiến trình cài đã dừng thì dọn sạch để bước tiếp theo không bị kẹt.
 6. Nếu lỗi liên quan Gateway chưa chạy hoặc kẹt cổng: kiểm tra tiến trình cũ, cổng trống trong openclaw.json và khởi động lại bằng openclaw-instance.ps1 gateway restart rồi kiểm tra gateway health --json.
 7. Nếu lỗi liên quan lệnh openclaw trong PATH (cli-probe-*): kiểm tra windows-cli.json và %LOCALAPPDATA%\OpenClaw\bin\openclaw.cmd và biến môi trường User Path.
 8. Nếu lỗi liên quan plugin Zalo: kiểm tra plugins list / plugins enable zalouser và telegram-zalo-owner-login rồi khởi động lại Gateway.
@@ -276,7 +276,8 @@ requires_openai_auth = true
     [IO.File]::WriteAllText((Join-Path $codexHome 'auth.json'), (@{ OPENAI_API_KEY = $apiKey } | ConvertTo-Json -Compress), $utf8NoBom)
 
     $emTroLyDir = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'EmTroLy' } else { '' }
-    $workDir = if ($OpenClawRoot -and (Test-Path -LiteralPath $OpenClawRoot -PathType Container)) {
+    $ocHasLauncher = $OpenClawRoot -and (Test-Path -LiteralPath (Join-Path $OpenClawRoot 'openclaw-instance.ps1') -PathType Leaf)
+    $workDir = if ($ocHasLauncher -and (Test-Path -LiteralPath $OpenClawRoot -PathType Container)) {
       $OpenClawRoot
     } elseif ($Stage -in @('editor', 'codex-cli') -and $emTroLyDir -and (Test-Path -LiteralPath $emTroLyDir -PathType Container)) {
       $emTroLyDir
@@ -321,6 +322,26 @@ requires_openai_auth = true
     $psi.EnvironmentVariables['CODEX_HOME'] = $codexHome
     $psi.EnvironmentVariables['NO_COLOR'] = '1'
     $psi.EnvironmentVariables['PYTHONUTF8'] = '1'
+    try {
+      $healPriority = @()
+      if ($env:LOCALAPPDATA) {
+        $depRootHeal = Join-Path $env:LOCALAPPDATA 'MemberInstaller\dependencies'
+        if (Test-Path -LiteralPath $depRootHeal -PathType Container) {
+          foreach ($dd in @(Get-ChildItem -LiteralPath $depRootHeal -Directory -ErrorAction SilentlyContinue)) {
+            if ($dd.Name -like 'node-v*' -or $dd.Name -like 'python*') { $healPriority += $dd.FullName }
+          }
+        }
+        $healPriority += @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs\Python\*') -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+      }
+      if ($env:ProgramFiles) { $healPriority += (Join-Path $env:ProgramFiles 'nodejs') }
+      $rawHealPath = @($healPriority) + @(($env:Path -split ';'))
+      $normHeal = @(); $waHeal = @()
+      foreach ($hp in $rawHealPath) {
+        if ([string]::IsNullOrWhiteSpace($hp)) { continue }
+        if ($hp -like '*\WindowsApps*') { $waHeal += $hp } else { $normHeal += $hp }
+      }
+      $psi.EnvironmentVariables['PATH'] = (@($normHeal) + @($waHeal)) -join ';'
+    } catch { }
     foreach ($rmName in @('OPENAI_API_KEY', 'ELECTRON_RUN_AS_NODE', 'VSCODE_IPC_HOOK_CLI', 'NODE_OPTIONS', 'VSCODE_DEV')) {
       [void]$psi.EnvironmentVariables.Remove($rmName)
     }

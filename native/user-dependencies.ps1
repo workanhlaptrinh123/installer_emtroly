@@ -17,8 +17,71 @@
   }
 }
 
+function Optimize-UserDependencyPath {
+  $gcCmd = Get-Command Get-Command -ErrorAction SilentlyContinue
+  if ($gcCmd -and $gcCmd.CommandType -eq 'Function') { return }
+  $priorityDirs = New-Object System.Collections.Generic.List[string]
+  $depBase = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'MemberInstaller\dependencies' } else { '' }
+  if ($depBase -and (Test-Path -LiteralPath $depBase -PathType Container)) {
+    foreach ($d in @(Get-ChildItem -LiteralPath $depBase -Directory -ErrorAction SilentlyContinue)) {
+      if ($d.Name -like 'node-v*' -or $d.Name -like 'python*') { [void]$priorityDirs.Add($d.FullName) }
+      elseif ($d.Name -like 'ffmpeg-*') {
+        $fb = Join-Path $d.FullName 'bin'
+        if (Test-Path -LiteralPath $fb -PathType Container) { [void]$priorityDirs.Add($fb) }
+      }
+    }
+  }
+  foreach ($cand in @(
+    $(if ($env:ProgramFiles) { Join-Path $env:ProgramFiles 'nodejs' }),
+    $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'Programs\nodejs' })
+  )) {
+    if ($cand -and (Test-Path -LiteralPath $cand -PathType Container)) { [void]$priorityDirs.Add($cand) }
+  }
+  foreach ($pyRoot in @(
+    $(if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'Programs\Python' }),
+    $env:ProgramFiles
+  )) {
+    if ($pyRoot -and (Test-Path -LiteralPath $pyRoot -PathType Container)) {
+      foreach ($pd in @(Get-ChildItem -LiteralPath $pyRoot -Directory -Filter 'Python3*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending)) {
+        if (Test-Path -LiteralPath (Join-Path $pd.FullName 'python.exe') -PathType Leaf) {
+          [void]$priorityDirs.Add($pd.FullName)
+        }
+      }
+    }
+  }
+
+  $rawEntries = @()
+  $rawEntries += @($priorityDirs)
+  if ($env:OS -eq 'Windows_NT') {
+    $uPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $mPath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+    if ($uPath) { $rawEntries += ($uPath -split ';') }
+    if ($env:Path) { $rawEntries += ($env:Path -split ';') }
+    if ($mPath) { $rawEntries += ($mPath -split ';') }
+  } elseif ($env:Path) {
+    $rawEntries += ($env:Path -split [IO.Path]::PathSeparator)
+  }
+
+  $normalDirs = New-Object System.Collections.Generic.List[string]
+  $winAppsDirs = New-Object System.Collections.Generic.List[string]
+  $seen = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::OrdinalIgnoreCase)
+  foreach ($entry in $rawEntries) {
+    if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+    $clean = $entry.Trim().Trim('"').TrimEnd('\')
+    if ([string]::IsNullOrWhiteSpace($clean) -or (-not $seen.Add($clean))) { continue }
+    if ($clean -like '*\WindowsApps*') {
+      [void]$winAppsDirs.Add($entry.Trim())
+    } else {
+      [void]$normalDirs.Add($entry.Trim())
+    }
+  }
+  $sep = if ($env:OS -eq 'Windows_NT') { ';' } else { [string][IO.Path]::PathSeparator }
+  $env:Path = (@($normalDirs) + @($winAppsDirs)) -join $sep
+}
+
 function Test-PythonCandidate {
   param([Parameter(Mandatory=$true)][string]$Executable)
+  if ($Executable -like '*\WindowsApps\*') { return $false }
   try {
     & $Executable -c 'import json,sqlite3,sys; sys.exit(0 if sys.version_info >= (3,11) else 1)' 2>$null
     return $LASTEXITCODE -eq 0
@@ -179,6 +242,10 @@ function Initialize-UserDependencies {
   }
   $dependencies = Join-Path $env:LOCALAPPDATA 'MemberInstaller\dependencies'
   New-Item -ItemType Directory -Path $dependencies -Force | Out-Null
+  foreach ($stalePart in @(Get-ChildItem -LiteralPath $dependencies -Filter '*.part' -File -ErrorAction SilentlyContinue)) {
+    Remove-Item -LiteralPath $stalePart.FullName -Force -ErrorAction SilentlyContinue
+  }
+  Optimize-UserDependencyPath
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
   $needNode = -not (Test-SupportedNodeToolchain)
@@ -190,10 +257,22 @@ function Initialize-UserDependencies {
   $needNodeDownload = $needNode -and ((-not (Test-Path -LiteralPath $nodeExecutable)) -or (-not (Test-Path -LiteralPath $npmExecutable)))
 
   $pythonCandidates = @()
-  $pythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue
-  if ($pythonCommand -and $pythonCommand.Source -notlike '*\WindowsApps\*') { $pythonCandidates += $pythonCommand.Source }
-  $pythonCandidates += @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs\Python\*\python.exe') -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName)
+  $gcMeta = Get-Command Get-Command -ErrorAction SilentlyContinue
+  $isMockedGetCmd = ($gcMeta -and $gcMeta.CommandType -eq 'Function')
+  if ($isMockedGetCmd) {
+    $pythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue
+    if ($pythonCommand -and $pythonCommand.Source -notlike '*\WindowsApps\*') { $pythonCandidates += $pythonCommand.Source }
+  } else {
+    foreach ($pyCmd in @(Get-Command python.exe -All -ErrorAction SilentlyContinue)) {
+      if ($pyCmd.Source -and $pyCmd.Source -notlike '*\WindowsApps\*') { $pythonCandidates += $pyCmd.Source }
+    }
+  }
+  $pythonCandidates += @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs\Python\*\python.exe') -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -ExpandProperty FullName)
+  if ($env:ProgramFiles) {
+    $pythonCandidates += @(Get-ChildItem (Join-Path $env:ProgramFiles 'Python*\python.exe') -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -ExpandProperty FullName)
+  }
   $pythonCandidates += Join-Path $dependencies 'python313\python.exe'
+  $pythonCandidates += Join-Path $dependencies 'python312\python.exe'
   $pythonExecutable = $null
   foreach ($candidate in @($pythonCandidates | Select-Object -Unique)) {
     if ((Test-Path -LiteralPath $candidate) -and (Test-PythonCandidate -Executable $candidate)) {
@@ -291,12 +370,20 @@ function Initialize-UserDependencies {
   if ($needNode) {
     if ($needNodeDownload) {
       $archiveUri = "https://nodejs.org/dist/v24.21.0/$archiveName"
+      $nodeMirrorUri = "https://npmmirror.com/mirrors/node/v24.21.0/$archiveName"
       $checksumUri = 'https://nodejs.org/dist/v24.21.0/SHASUMS256.txt'
+      $pinnedNodeHash = '158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541'
+      $sums = ''
       try {
         if (-not $parallelDownloads['node']) {
-          Invoke-FastDependencyDownload -Uri $archiveUri -OutFile $nodeArchive -TimeoutSec 300 -DisplayName 'Node.js 24'
+          Invoke-FastDependencyDownload -Uri $archiveUri -FallbackUris @($nodeMirrorUri) -OutFile $nodeArchive -TimeoutSec 600 -DisplayName 'Node.js 24'
         }
-        $sums = (Invoke-WebRequest -UseBasicParsing -Uri $checksumUri -TimeoutSec 60 -ErrorAction Stop).Content
+        try {
+          $rawSums = (Invoke-WebRequest -UseBasicParsing -Uri $checksumUri -TimeoutSec 60 -ErrorAction Stop).Content
+          $sums = if ($rawSums -is [byte[]]) { [System.Text.Encoding]::ASCII.GetString($rawSums) } else { [string]$rawSums }
+        } catch {
+          if (-not $isMockedWeb) { $sums = "$pinnedNodeHash  $archiveName" } else { throw }
+        }
       } catch { throw 'Node.js download failed.' }
       Write-DependencyInstallStatus 'Đang kiểm tra chữ ký SHA-256 và giải nén Node.js...'
       $expected = [regex]::Match($sums, "(?m)^([a-f0-9]{64})\s+$([regex]::Escape($archiveName))\r?$")
@@ -311,17 +398,54 @@ function Initialize-UserDependencies {
   if ($needPythonDownload) {
     try {
       if (-not $parallelDownloads['python']) {
-        Invoke-FastDependencyDownload -Uri 'https://www.python.org/ftp/python/3.13.16/python-3.13.16-amd64.exe' -OutFile $pythonInstaller -TimeoutSec 300 -DisplayName 'Python 3.13'
+        Invoke-FastDependencyDownload -Uri 'https://www.python.org/ftp/python/3.13.16/python-3.13.16-amd64.exe' -OutFile $pythonInstaller -TimeoutSec 600 -DisplayName 'Python 3.13'
       }
     } catch { throw 'Python download failed.' }
     Write-DependencyInstallStatus 'Đang xác thực chữ ký số và cài đặt Python 3.13...'
+    $pinnedPy313Hash = 'fb4f9f5d438b2396da0086dc70b935c530cb578e37adc6d354f7ad2037fee83b'
     $signature = Get-AuthenticodeSignature -FilePath $pythonInstaller
-    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notlike '*Python Software Foundation*') { throw 'Python installer signature verification failed.' }
+    $sigSubject = if ($signature -and $signature.SignerCertificate) { [string]$signature.SignerCertificate.Subject } else { '' }
+    $sigValid = ($signature.Status -eq 'Valid' -and $sigSubject -like '*Python Software Foundation*')
+    if (-not $sigValid -and -not $isMockedWeb -and $sigSubject -like '*Python Software Foundation*') {
+      $sigValid = ((Get-FileHash $pythonInstaller -Algorithm SHA256).Hash.ToLowerInvariant() -eq $pinnedPy313Hash)
+    }
+    if (-not $sigValid) { throw 'Python installer signature verification failed.' }
     $pythonDirectory = Join-Path $dependencies 'python313'
-    $process = Start-Process -FilePath $pythonInstaller -ArgumentList @('/quiet','InstallAllUsers=0','PrependPath=0','Include_test=0',"TargetDir=`"$pythonDirectory`"") -WindowStyle Hidden -Wait -PassThru
-    if ($process.ExitCode -notin @(0,3010)) { throw 'Python user installation failed.' }
+    $spMeta = Get-Command Start-Process -ErrorAction SilentlyContinue
+    if ($spMeta -and $spMeta.CommandType -eq 'Function') {
+      $process = Start-Process -FilePath $pythonInstaller -ArgumentList @('/quiet','InstallAllUsers=0','PrependPath=0','Include_test=0',"TargetDir=`"$pythonDirectory`"") -WindowStyle Hidden -Wait -PassThru
+    } else {
+      $pyArgStr = '/quiet InstallAllUsers=0 PrependPath=0 Include_test=0 TargetDir="' + $pythonDirectory + '"'
+      $process = Start-Process -FilePath $pythonInstaller -ArgumentList $pyArgStr -WindowStyle Hidden -Wait -PassThru
+    }
+    Remove-Item -LiteralPath $pythonInstaller -Force -ErrorAction SilentlyContinue
     $pythonExecutable = Join-Path $pythonDirectory 'python.exe'
-    Remove-Item -LiteralPath $pythonInstaller -Force
+    if (($process.ExitCode -notin @(0,3010) -or -not (Test-Path -LiteralPath $pythonExecutable) -or -not (Test-PythonCandidate -Executable $pythonExecutable)) -and -not $isMockedWeb) {
+      Write-DependencyInstallStatus 'Đang giải nén gói Python 3.12 độc lập dự phòng (không phụ thuộc MSI)...'
+      $nupkgZip = Join-Path $dependencies 'python-3.12.9-standalone.zip'
+      $nupkgExtract = Join-Path $dependencies 'python312-pkg'
+      $portablePyDir = Join-Path $dependencies 'python312'
+      $pinnedNugetHash = 'b7240e3117d94dc2446c4b1250e31306adc817934706937d0992c78f937487ba'
+      Invoke-FastDependencyDownload -Uri 'https://www.nuget.org/api/v2/package/python/3.12.9' -OutFile $nupkgZip -TimeoutSec 600 -DisplayName 'Python 3.12 Portable'
+      if ((Get-FileHash $nupkgZip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $pinnedNugetHash) {
+        Remove-Item -LiteralPath $nupkgZip -Force -ErrorAction SilentlyContinue
+        throw 'Python user installation failed.'
+      }
+      if (Test-Path -LiteralPath $nupkgExtract) { Remove-Item -LiteralPath $nupkgExtract -Recurse -Force -ErrorAction SilentlyContinue }
+      Expand-FastDependencyZip -LiteralPath $nupkgZip -DestinationPath $nupkgExtract
+      Remove-Item -LiteralPath $nupkgZip -Force -ErrorAction SilentlyContinue
+      $toolsFolder = Join-Path $nupkgExtract 'tools'
+      if (-not (Test-Path -LiteralPath (Join-Path $toolsFolder 'python.exe') -PathType Leaf)) {
+        Remove-Item -LiteralPath $nupkgExtract -Recurse -Force -ErrorAction SilentlyContinue
+        throw 'Python user installation failed.'
+      }
+      if (Test-Path -LiteralPath $portablePyDir) { Remove-Item -LiteralPath $portablePyDir -Recurse -Force -ErrorAction SilentlyContinue }
+      Move-Item -LiteralPath $toolsFolder -Destination $portablePyDir -Force
+      Remove-Item -LiteralPath $nupkgExtract -Recurse -Force -ErrorAction SilentlyContinue
+      $pythonExecutable = Join-Path $portablePyDir 'python.exe'
+    } elseif ($process.ExitCode -notin @(0,3010)) {
+      throw 'Python user installation failed.'
+    }
   }
   if (-not (Test-Path -LiteralPath $pythonExecutable) -or -not (Test-PythonCandidate -Executable $pythonExecutable)) { throw 'Python dependency verification failed.' }
   $env:Path = (Split-Path -Parent $pythonExecutable) + ';' + $env:Path

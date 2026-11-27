@@ -1378,6 +1378,97 @@ Write-Output 'WPF_UPDATE_BANNER_AND_DOWNLOAD_OK'
             srv.shutdown()
             srv.server_close()
 
+    @unittest.skipUnless(SHELL and os.name == "nt", "Requires Windows PowerShell")
+    def test_windowsapps_python_shadow_orphaned_markers_and_existing_openclaw_recovery(self):
+        # 1. Static guard: winget OpenJS.NodeJS.LTS must NEVER use --scope user (MSI is machine-scope only)
+        native_win_txt = (ROOT / "install-native-windows.ps1").read_text(encoding="utf-8-sig")
+        for line in native_win_txt.splitlines():
+            if "OpenJS.NodeJS.LTS" in line:
+                self.assertNotIn("--scope user", line)
+
+        # 2. WindowsApps\python.exe shadowing User Python in PATH + orphaned Step 3/4 markers + existing openclaw dir
+        with tempfile.TemporaryDirectory(prefix="emtroly-giangle-") as td:
+            temp = Path(td)
+            home = temp / "home"
+            local = temp / "local"
+            fake_winapps = temp / "Microsoft/WindowsApps"
+            home.mkdir(parents=True)
+            local.mkdir(parents=True)
+            fake_winapps.mkdir(parents=True)
+
+            # Create a dummy broken stub at ...\Microsoft\WindowsApps\python.exe (simulating MS Store alias)
+            stub_py = fake_winapps / "python.exe"
+            stub_py.write_bytes(b"")
+
+            runner_txt = (ROOT / "windows-installer/run-native-install.ps1").read_text(encoding="utf-8-sig")
+            fn_end = runner_txt.index("try {\n  try {") if "try {\n  try {" in runner_txt else runner_txt.index("try {\r\n  try {")
+            fn_start = runner_txt.index("function Test-IsRecoverableIncompleteOpenClawDir")
+            runner_fns = temp / "runner-fns.ps1"
+            runner_fns.write_text(runner_txt[fn_start:fn_end], encoding="utf-8-sig")
+
+            inst_lines = native_win_txt.splitlines()
+            helper_start = next(i for i, l in enumerate(inst_lines) if l.startswith("function Optimize-NativeProcessPath"))
+            helper_end = next(i for i, l in enumerate(inst_lines) if l.startswith("if (-not $UserInstall -and"))
+            inst_fns = temp / "inst-fns.ps1"
+            inst_fns.write_text("\n".join(inst_lines[helper_start:helper_end]), encoding="utf-8-sig")
+
+            env = {
+                **os.environ,
+                "USERPROFILE": str(home),
+                "LOCALAPPDATA": str(local),
+                # Put Microsoft\WindowsApps FIRST in PATH to simulate Machine PATH shadowing User Python!
+                "PATH": str(fake_winapps) + ";" + os.environ.get("PATH", ""),
+            }
+            res = run_ps(
+                f'. "{ROOT / "native/user-dependencies.ps1"}"\n'
+                f'. "{ROOT / "windows-installer/manage-instance.ps1"}"\n'
+                f'. "{runner_fns}"\n'
+                f'. "{inst_fns}"\n'
+                "$ErrorActionPreference = 'Stop'\n"
+                f"if (Test-PythonCandidate '{stub_py}') {{ throw 'windowsapps-stub-accepted' }}\n"
+                "Optimize-UserDependencyPath\n"
+                "$parts = @($env:Path -split ';' | Where-Object { $_ })\n"
+                "if ($parts[0] -like '*\\WindowsApps*') { throw 'windowsapps-not-demoted-userdeps' }\n"
+                "Optimize-NativeProcessPath\n"
+                "$parts2 = @($env:Path -split ';' | Where-Object { $_ })\n"
+                "if ($parts2[0] -like '*\\WindowsApps*') { throw 'windowsapps-not-demoted-native' }\n"
+                "$realPy = Resolve-VerifiedPythonExe\n"
+                "if (-not $realPy -or $realPy -like '*\\WindowsApps\\*') { throw ('bad-resolved-py:' + $realPy) }\n"
+                "$managePy = Resolve-EmTroLyPythonExe\n"
+                "if (-not $managePy -or $managePy -like '*\\WindowsApps\\*') { throw ('bad-manage-py:' + $managePy) }\n"
+                "\n"
+                "# Case A: Empty openclaw directory must be recoverable (not block Step 4!)\n"
+                "$oc = Join-Path $env:USERPROFILE 'openclaw'\n"
+                "[void][IO.Directory]::CreateDirectory($oc)\n"
+                "if (-not (Test-IsRecoverableIncompleteOpenClawDir $oc)) { throw 'empty-openclaw-not-recoverable' }\n"
+                "if (-not (Test-CanResetIncompleteRoot $oc)) { throw 'empty-openclaw-not-resettable' }\n"
+                "\n"
+                "# Case B: Half-installed openclaw (has openclaw.json + telegram.token, missing launchers, no marker)\n"
+                "[IO.File]::WriteAllText((Join-Path $oc 'openclaw.json'), '{}')\n"
+                "[IO.File]::WriteAllText((Join-Path $oc 'telegram.token'), 'tok')\n"
+                "[void][IO.Directory]::CreateDirectory((Join-Path $oc 'workspace'))\n"
+                "if (-not (Test-IsBrokenHalfInstalledOpenClawDir $oc)) { throw 'half-installed-not-detected' }\n"
+                "if (-not (Test-CanResetIncompleteRoot $oc)) { throw 'half-installed-not-resettable' }\n"
+                "\n"
+                "# Case C: Orphaned Step 3/4 marker (.emtroly-installing.json with dead PID 999999) makes OpenClawInstalled=false\n"
+                "[IO.File]::WriteAllText((Join-Path $oc '.emtroly-installing.json'), '{\"pid\":999999,\"name\":\"emtroly\"}')\n"
+                "$stOrphan = Get-EmTroLyInstalledState\n"
+                "if ($stOrphan.OpenClawInstalled) { throw 'orphaned-marker-treated-as-installed' }\n"
+                "Remove-IncompleteOpenClawDirectory -DirPath $oc -AllowBrokenConfig\n"
+                "if ((Test-Path -LiteralPath $oc) -and @(Get-ChildItem -LiteralPath $oc -Force).Count -gt 0) { throw 'incomplete-not-cleaned' }\n"
+                "\n"
+                "# Case D: Foreign user file inside openclaw is STILL strictly protected\n"
+                "[void][IO.Directory]::CreateDirectory($oc)\n"
+                "[IO.File]::WriteAllText((Join-Path $oc 'my-important-notes.docx'), 'keep')\n"
+                "if (Test-IsRecoverableIncompleteOpenClawDir $oc) { throw 'foreign-file-not-protected-1' }\n"
+                "if (Test-IsBrokenHalfInstalledOpenClawDir $oc) { throw 'foreign-file-not-protected-2' }\n"
+                "if (Test-CanResetIncompleteRoot $oc) { throw 'foreign-file-not-protected-3' }\n"
+                "Write-Output 'GIANGLE_4_BUGS_FIXED_OK'\n",
+                env=env,
+            )
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertIn("GIANGLE_4_BUGS_FIXED_OK", res.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

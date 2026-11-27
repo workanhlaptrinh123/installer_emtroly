@@ -24,7 +24,17 @@ function Refresh-Path {
   $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
   $user = [Environment]::GetEnvironmentVariable("Path", "User")
   $npmBin = Join-Path $env:APPDATA "npm"
-  $env:Path = "$machine;$user;$npmBin"
+  $allParts = @()
+  if ($user) { $allParts += ($user -split ";") }
+  if ($npmBin) { $allParts += $npmBin }
+  if ($machine) { $allParts += ($machine -split ";") }
+  $normal = @()
+  $winApps = @()
+  foreach ($p in $allParts) {
+    if ([string]::IsNullOrWhiteSpace($p)) { continue }
+    if ($p -like "*\WindowsApps*") { $winApps += $p } else { $normal += $p }
+  }
+  $env:Path = (@($normal) + @($winApps)) -join ";"
 }
 
 function Add-UserPath {
@@ -71,13 +81,20 @@ function Ensure-Node {
 
 function Get-PythonCommand {
   Refresh-Path
-  $python = Get-Command python -ErrorAction SilentlyContinue
-  if ($python) {
-    return "python"
+  foreach ($cand in @(Get-Command python.exe -All -CommandType Application -ErrorAction SilentlyContinue)) {
+    if ($cand.Source -and $cand.Source -notlike "*\WindowsApps\*") {
+      try {
+        & $cand.Source -c "import sys; sys.exit(0)" *> $null
+        if ($LASTEXITCODE -eq 0) { return ('& "' + $cand.Source + '"') }
+      } catch { }
+    }
   }
-  $py = Get-Command py -ErrorAction SilentlyContinue
-  if ($py) {
-    return "py -3"
+  $py = Get-Command py.exe -CommandType Application -ErrorAction SilentlyContinue
+  if ($py -and $py.Source -notlike "*\WindowsApps\*") {
+    try {
+      & $py.Source -3 -c "import sys; sys.exit(0)" *> $null
+      if ($LASTEXITCODE -eq 0) { return "py -3" }
+    } catch { }
   }
   return $null
 }
