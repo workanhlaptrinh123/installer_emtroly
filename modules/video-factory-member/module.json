@@ -1,11 +1,11 @@
 {
   "id": "video-factory-member",
-  "version": "1.0.0",
-  "description": "Member-facing video production workflow skills",
+  "version": "2.0.0",
+  "description": "Xưởng Video AI: Tạo video 9:16/16:9/1:1 Full HD, lồng tiếng AI & tự động đăng Google Sheet/Drive/Facebook/YouTube gắn thẳng vào OpenClaw đang có",
   "tier": "optional",
   "requires": ["basic-assistant", "audio-media-basic", "member-health-recovery"],
   "conflicts": [],
-  "platforms": ["docker", "linux"],
+  "platforms": ["windows", "macos", "linux", "docker"],
   "restart": ["openclaw-gateway"],
   "healthcheck": "builtin",
   "requires_external_credentials": true

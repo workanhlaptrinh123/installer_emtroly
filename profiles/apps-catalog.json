@@ -75,14 +75,17 @@
       "id": "video-factory-ai",
       "name": "Xưởng Video AI",
       "category": "media",
-      "badge": "SẮP RA MẮT",
-      "description": "Tạo video, kịch bản & lồng tiếng tự động",
-      "version": "Mở rộng",
+      "badge": "MỚI",
+      "description": "Tạo video 9:16/16:9/1:1 Full HD, lồng tiếng AI & tự đăng Sheet/FB/YouTube",
+      "version": "v2.0",
       "icon_bg": "#FFF1F2",
       "icon_fg": "#E11D48",
       "icon_path": "M 5,5 L 19,12 L 5,19 Z",
-      "action_type": "coming_soon",
-      "note": "Sẵn sàng gắn gói mở rộng Xưởng Video AI thông qua profiles/apps-catalog.json mà không cần sửa lại giao diện."
+      "action_type": "script",
+      "install_script": "modules\\video-factory-member\\launch-video-factory.ps1",
+      "unix_script": "modules/video-factory-member/installer/app_gui.py",
+      "detect_path": "%USERPROFILE%\\openclaw\\video-factory\\make_reel.py",
+      "note": "Gắn trực tiếp Xưởng Video AI vào trợ lý OpenClaw đang có trên máy, hỗ trợ cài từng phần (Video, Google Sheet/Drive, Facebook Fanpage, YouTube Shorts)."
     },
     {
       "id": "fanpage-auto-reply",

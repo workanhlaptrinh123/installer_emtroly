@@ -1140,6 +1140,11 @@ def main():
         if act_type == "zalo-plugin":
             inst_root = find_installed_instance_root(variables["member"].get().strip() or "emtroly")
             return bool(inst_root and (inst_root / "workspace/skills/telegram-zalo-owner-login/SKILL.md").is_file())
+        detect_path = (app_item.get("detect_path") or "").strip()
+        if detect_path:
+            dp_norm = detect_path.replace("%USERPROFILE%", str(Path.home())).replace("\\", "/")
+            if Path(os.path.expanduser(dp_norm)).exists():
+                return True
         detect_cmd = (app_item.get("detect_command") or "").strip()
         if detect_cmd and shutil.which(detect_cmd):
             return True
@@ -1169,6 +1174,16 @@ def main():
         if act_type == "zalo-plugin":
             notebook.select(tab_zalo_qr)
             start_qr_session()
+            return
+        if act_type == "script":
+            rel_script = (app_item.get("unix_script") or app_item.get("install_script") or "").strip().replace("\\", "/")
+            script_path = source / rel_script if rel_script else None
+            if script_path and script_path.is_file():
+                env_copy = os.environ.copy()
+                env_copy["PYTHONPATH"] = str(script_path.parent)
+                subprocess.Popen([sys.executable, str(script_path)], cwd=str(script_path.parent.parent), env=env_copy)
+            else:
+                messagebox.showerror("Không tìm thấy module", f"Không tìm thấy tệp khởi chạy: {rel_script}")
 
     def refresh_store_view(*_args):
         catalog = load_store_catalog()

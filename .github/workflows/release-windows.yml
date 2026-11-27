@@ -60,6 +60,29 @@ jobs:
           python -m unittest discover -s windows-installer -p 'test_*.py'
           python native/skills/tao-tro-ly-openclaw-windows-macos-linux/scripts/test_local_native.py WindowsCliTests
 
+      - name: Inject optional Video Factory OAuth config from Repository Secrets
+        shell: powershell
+        env:
+          GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          FB_APP_ID: ${{ secrets.FB_APP_ID }}
+          FB_APP_SECRET: ${{ secrets.FB_APP_SECRET }}
+        run: |
+          if ($env:GOOGLE_OAUTH_CLIENT_ID -or $env:FB_APP_ID) {
+            $cfg = @{
+              google = @{
+                client_id = if ($env:GOOGLE_OAUTH_CLIENT_ID) { $env:GOOGLE_OAUTH_CLIENT_ID } else { "" }
+                client_secret = if ($env:GOOGLE_OAUTH_CLIENT_SECRET) { $env:GOOGLE_OAUTH_CLIENT_SECRET } else { "" }
+              }
+              facebook = @{
+                app_id = if ($env:FB_APP_ID) { $env:FB_APP_ID } else { "" }
+                app_secret = if ($env:FB_APP_SECRET) { $env:FB_APP_SECRET } else { "" }
+              }
+            }
+            $cfg | ConvertTo-Json -Depth 4 | Set-Content -Path "modules\video-factory-member\installer\app_oauth_config.json" -Encoding utf8
+            Write-Host "Injected Video Factory OAuth config from GitHub Secrets."
+          }
+
       - name: Build native bundle
         run: PYTHON_BIN="$PYTHON_BIN" ./build-native-bundle.sh
 

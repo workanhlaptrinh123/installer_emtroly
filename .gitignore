@@ -23,6 +23,7 @@ __pycache__/
 *.sqlite3
 *.db
 customer_history/
+modules/video-factory-member/installer/app_oauth_config.json
 
 # Local build output
 .native-full-bundle.*.tar.gz

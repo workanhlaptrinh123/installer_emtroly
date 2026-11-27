@@ -3813,8 +3813,8 @@ function Invoke-StoreAppAction($App, [switch]$ForceReinstall) {
     }
     try {
       $psExe = Join-Path $PSHOME 'powershell.exe'
-      Start-Process -FilePath $psExe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $scriptPath) | Out-Null
-      Show-Info "Đã khởi chạy bộ cài đặt cho $($App.Name). Sau khi cài xong, bấm Làm mới để cập nhật trạng thái." $App.Name
+      Start-Process -FilePath $psExe -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', $scriptPath) -WindowStyle Hidden | Out-Null
+      Show-Info "Đã mở trình cấu hình & cài đặt $($App.Name). Sau khi hoàn tất, bấm Làm mới để cập nhật trạng thái." $App.Name
     } catch {
       Show-Error "Không thể chạy bộ cài đặt cho $($App.Name)."
     }
