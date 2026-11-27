@@ -1204,6 +1204,12 @@ requires_openai_auth = true
   if ([string]::IsNullOrWhiteSpace($lastTechnicalDetail)) {
     $lastTechnicalDetail = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
   }
+  if ($stage -eq 'install') {
+    $depErrBlob = ($code + "`n" + $message + "`n" + $lastTechnicalDetail)
+    if ($depErrBlob -match 'Node\.js|Portable Node|Python|FFmpeg|dependency verification failed|download failed|checksum verification failed|signature verification failed') {
+      $stage = 'dependencies'
+    }
+  }
   Write-RedactedInstallLog -Entry ("FINAL_ERROR [$code]: " + $message + " | " + $lastTechnicalDetail)
   try {
     $diagObj = [ordered]@{

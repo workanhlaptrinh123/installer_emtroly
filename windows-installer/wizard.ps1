@@ -2392,10 +2392,16 @@ function Update-ProgressFromStatus([string]$Message) {
   } elseif ($Message -match 'OpenClaw|kỹ năng|Full Exec|Gateway|lệnh openclaw') {
     $activeStep = 4
     $pct = 74
-  } elseif ($Message -match 'Node\.js|Python|FFmpeg|môi trường|gói môi trường|tải song song') {
+  } elseif ($Message -match 'Node\.js|Python|FFmpeg|môi trường|gói môi trường|tải song song|NuGet') {
     $activeStep = 3
     $pct = if ($subPct -ge 0) { 46 + [int][Math]::Round($subPct * 0.16) } else { 54 }
-    if ($subPct -ge 0) { $activeBadge = "Đang tải $subPct%" }
+    if ($subPct -ge 0) {
+      $activeBadge = "Đang tải $subPct%"
+    } elseif ($Message -match 'cài đặt|giải nén|xác thực') {
+      $activeBadge = 'Đang cài đặt...'
+    } else {
+      $activeBadge = 'Đang kiểm tra...'
+    }
   } elseif ($Message -match 'Antigravity|Codex Extension|gói Codex CLI|giải nén và kích hoạt Codex|khóa API cho Codex|cài Codex|kiểm tra Codex|Codex CLI|lối tắt|Thử lại bước Codex') {
     $activeStep = 2
     $pct = if ($subPct -ge 0) { 20 + [int][Math]::Round($subPct * 0.22) } else { 30 }
@@ -3547,10 +3553,19 @@ function Show-RichFailureDiagnostics([string]$SummaryMessage, [object]$DiagPaylo
     'telegram' = 'Bước 1 · Kiểm tra Telegram Bot Token'
     'codex-cli' = 'Bước 2 · Cài đặt ưu tiên Codex CLI'
     'editor' = 'Bước 2 · Cài Antigravity IDE & Codex Extension'
+    'codex' = 'Bước 2 · Cài đặt ưu tiên Codex CLI & Extension'
+    'dependencies' = 'Bước 3 · Chuẩn bị môi trường (Node.js, Python, FFmpeg)'
     'install' = 'Bước 4 · Cài đặt OpenClaw & Gateway'
+    'openclaw' = 'Bước 4 · Cài đặt OpenClaw & Gateway'
     'command' = 'Bước 4 · Đăng ký lệnh openclaw vào PATH'
     'zalo-verify' = 'Bước 5 · Kích hoạt plugin Zalo & /zaloqr'
+    'zalo' = 'Bước 5 · Cài đặt Zalo cá nhân & /zaloqr'
     'telegram-menu' = 'Bước 5 · Đồng bộ menu lệnh Telegram'
+    'step1' = 'Bước 1 · Kiểm tra kết nối API & Bot Telegram'
+    'step2' = 'Bước 2 · Cài Codex CLI & Antigravity IDE'
+    'step3' = 'Bước 3 · Chuẩn bị môi trường (Node.js, Python, FFmpeg)'
+    'step4' = 'Bước 4 · Cài OpenClaw & Gateway'
+    'step5' = 'Bước 5 · Cài đặt Zalo cá nhân & /zaloqr'
     'auto-heal' = 'Tự động chẩn đoán & sửa lỗi (Codex CLI)'
     'reinstall-codex' = 'Cài / Sửa Antigravity IDE & Codex CLI'
     'install-zalo' = 'Cài / Đồng bộ Zalo cá nhân'
@@ -4330,8 +4345,9 @@ $installTimer.Add_Tick({
           Show-LicenseGate $detail
           return
         }
-        $statusText.Text = "Chưa hoàn tất: $detail"
-        Show-RichFailureDiagnostics -SummaryMessage $detail -DiagPayload $diagPayload -IsManageFailure $true
+        $safeManageDetail = Sanitize-WizardFailureSummary -Summary $detail -ExitCode $code -LastStepIndex $script:lastActiveStepIndex
+        $statusText.Text = "Chưa hoàn tất: $safeManageDetail"
+        Show-RichFailureDiagnostics -SummaryMessage $safeManageDetail -DiagPayload $diagPayload -IsManageFailure $true
         $viewDashboard.Visibility   = [System.Windows.Visibility]::Collapsed
         $viewSetupForm.Visibility   = [System.Windows.Visibility]::Collapsed
         $viewModular.Visibility     = [System.Windows.Visibility]::Collapsed
@@ -4375,9 +4391,14 @@ $installTimer.Add_Tick({
       $statusText.Text = if ($code -eq 3) { $detail } else { 'Bước cài Antigravity/Codex bị gián đoạn. Nhập khóa API bên dưới rồi bấm Thử lại bước Codex.' }
       $retryEditorPanel.Visibility = [System.Windows.Visibility]::Visible
       $script:lastActiveStepIndex = 2
-      Show-RichFailureDiagnostics -SummaryMessage $statusText.Text -DiagPayload $diagPayload -IsManageFailure $false
+      $safeRetrySummary = Sanitize-WizardFailureSummary -Summary $statusText.Text -ExitCode $code -LastStepIndex 2
+      Show-RichFailureDiagnostics -SummaryMessage $safeRetrySummary -DiagPayload $diagPayload -IsManageFailure $false
       Set-Buttons
     } else {
+      $detail = Sanitize-WizardFailureSummary -Summary $detail -ExitCode $code -LastStepIndex $script:lastActiveStepIndex
+      if ($null -eq $diagPayload) {
+        $diagPayload = New-UnexpectedExitDiagnosticPayload -Summary $detail -ExitCode $code -LastStepIndex $script:lastActiveStepIndex
+      }
       $statusText.Text = "Cài đặt chưa hoàn tất — xem chi tiết nguyên nhân ngay bên dưới."
       Show-RichFailureDiagnostics -SummaryMessage $detail -DiagPayload $diagPayload -IsManageFailure $false
       Set-Buttons

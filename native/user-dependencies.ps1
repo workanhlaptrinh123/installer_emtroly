@@ -326,28 +326,83 @@ function Initialize-UserDependencies {
     if ($jobs.Count -ge 2) {
       $active = @()
       $progressMap = [hashtable]::Synchronized(@{})
+      $labelsJoined = (@($jobs | ForEach-Object { $_.Label }) -join ', ')
+      Write-DependencyInstallStatus ("Đang tải và cài đặt tự động ($labelsJoined)... 0% (đang kết nối máy chủ)")
+      $workerScript = {
+        param([string]$Uri, [string]$PartOut, [string]$Key, [hashtable]$ProgressMap)
+        try {
+          try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+          } catch { }
+          try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls13
+          } catch { }
+          [Net.ServicePointManager]::DefaultConnectionLimit = 16
+          [Net.ServicePointManager]::Expect100Continue = $false
+          $webReq = [System.Net.WebRequest]::Create($Uri)
+          $webReq.Timeout = 25000
+          if ($webReq -is [System.Net.HttpWebRequest]) {
+            $webReq.Method = 'GET'
+            $webReq.AllowAutoRedirect = $true
+            $webReq.MaximumAutomaticRedirections = 10
+            $webReq.ReadWriteTimeout = 45000
+            $webReq.UserAgent = 'AnhLapTrinh-EmTroLy-Installer/1.0'
+          }
+          $resp = $webReq.GetResponse()
+          try {
+            $total = [long]$resp.ContentLength
+            $entry = $ProgressMap[$Key]
+            if ($entry -and $total -gt 0) { $entry.Total = $total }
+            $inStream = $resp.GetResponseStream()
+            try {
+              $outStream = [System.IO.File]::Open($PartOut, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read)
+              try {
+                $buffer = New-Object byte[] 262144
+                [long]$received = 0
+                while (($read = $inStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                  $outStream.Write($buffer, 0, $read)
+                  $received += $read
+                  if ($entry) { $entry.Received = $received }
+                }
+                $outStream.Flush()
+              } finally {
+                $outStream.Dispose()
+              }
+            } finally {
+              $inStream.Dispose()
+            }
+          } finally {
+            $resp.Close()
+          }
+          return $true
+        } catch {
+          $entry = $ProgressMap[$Key]
+          if ($entry) { $entry.Error = $_.Exception.Message }
+          return $false
+        }
+      }
       foreach ($job in $jobs) {
         $partOut = "$($job.Out).part"
         if (Test-Path -LiteralPath $partOut -PathType Leaf) { Remove-Item -LiteralPath $partOut -Force -ErrorAction SilentlyContinue }
-        $progressMap[$job.Key] = @{ Received = 0L; Total = [long]$job.ApproxBytes }
-        $wc = New-Object System.Net.WebClient
-        $wc.Headers.Add('User-Agent', 'AnhLapTrinh-EmTroLy-Installer/1.0')
-        $jobKeyLocal = $job.Key
-        $mapRef = $progressMap
-        $wc.add_DownloadProgressChanged(({
-          param($s, $e)
-          $entry = $mapRef[$jobKeyLocal]
-          if ($entry) {
-            $entry.Received = [long]$e.BytesReceived
-            if ($e.TotalBytesToReceive -gt 0) { $entry.Total = [long]$e.TotalBytesToReceive }
-          }
-        }).GetNewClosure())
-        $t = $wc.DownloadFileTaskAsync([uri]$job.Uri, $partOut)
-        $active += [pscustomobject]@{ Key = $job.Key; Label = $job.Label; Client = $wc; Task = $t; PartOut = $partOut; Out = $job.Out }
+        $progressMap[$job.Key] = [hashtable]::Synchronized(@{ Received = 0L; Total = [long]$job.ApproxBytes; Error = '' })
+        $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace()
+        $rs.Open()
+        $ps = [System.Management.Automation.PowerShell]::Create()
+        $ps.Runspace = $rs
+        [void]$ps.AddScript($workerScript).AddArgument([string]$job.Uri).AddArgument([string]$partOut).AddArgument([string]$job.Key).AddArgument($progressMap)
+        $handle = $ps.BeginInvoke()
+        $active += [pscustomobject]@{
+          Key = $job.Key
+          Label = $job.Label
+          PowerShell = $ps
+          Runspace = $rs
+          Handle = $handle
+          PartOut = $partOut
+          Out = $job.Out
+        }
       }
-      $labelsJoined = (@($jobs | ForEach-Object { $_.Label }) -join ', ')
       $parSw = [Diagnostics.Stopwatch]::StartNew()
-      while (@($active | Where-Object { -not $_.Task.IsCompleted }).Count -gt 0 -and $parSw.Elapsed.TotalSeconds -lt 900) {
+      while (@($active | Where-Object { -not $_.Handle.IsCompleted }).Count -gt 0 -and $parSw.Elapsed.TotalSeconds -lt 900) {
         Start-Sleep -Milliseconds 550
         $sumRecv = 0L
         $sumTotal = 0L
@@ -364,8 +419,18 @@ function Initialize-UserDependencies {
         }
       }
       foreach ($item in $active) {
-        if (-not $item.Task.IsCompleted) { try { $item.Client.CancelAsync() } catch { } }
-        $ok = ($item.Task.IsCompleted -and -not $item.Task.IsFaulted -and -not $item.Task.IsCanceled -and (Test-Path -LiteralPath $item.PartOut -PathType Leaf))
+        $workerOk = $false
+        try {
+          if (-not $item.Handle.IsCompleted) {
+            try { $item.PowerShell.Stop() } catch { }
+          } else {
+            $res = $item.PowerShell.EndInvoke($item.Handle)
+            if ($res -and ($res | Select-Object -Last 1) -eq $true) { $workerOk = $true }
+          }
+        } catch {
+          $workerOk = $false
+        }
+        $ok = ($workerOk -and (Test-Path -LiteralPath $item.PartOut -PathType Leaf))
         if ($ok) {
           try {
             Move-Item -LiteralPath $item.PartOut -Destination $item.Out -Force
@@ -375,7 +440,9 @@ function Initialize-UserDependencies {
           Remove-Item -LiteralPath $item.PartOut -Force -ErrorAction SilentlyContinue
         }
         $parallelDownloads[$item.Key] = $ok
-        try { $item.Client.Dispose() } catch { }
+        try { $item.PowerShell.Dispose() } catch { }
+        try { $item.Runspace.Close() } catch { }
+        try { $item.Runspace.Dispose() } catch { }
       }
     }
   }
@@ -445,6 +512,7 @@ function Initialize-UserDependencies {
         throw 'Python user installation failed.'
       }
       if (Test-Path -LiteralPath $nupkgExtract) { Remove-Item -LiteralPath $nupkgExtract -Recurse -Force -ErrorAction SilentlyContinue }
+      Write-DependencyInstallStatus 'Đang kiểm tra SHA-256 và giải nén Python 3.12 độc lập...'
       Expand-FastDependencyZip -LiteralPath $nupkgZip -DestinationPath $nupkgExtract
       Remove-Item -LiteralPath $nupkgZip -Force -ErrorAction SilentlyContinue
       $toolsFolder = Join-Path $nupkgExtract 'tools'
@@ -484,4 +552,5 @@ function Initialize-UserDependencies {
     & $ffmpegCommand.Source -version *> $null
     if ($LASTEXITCODE -ne 0) { throw 'FFmpeg dependency verification failed.' }
   } catch { throw 'FFmpeg dependency verification failed.' }
+  Write-DependencyInstallStatus 'Đang hoàn tất cấu hình Node.js, Python, FFmpeg để chuyển sang cài đặt OpenClaw...'
 }

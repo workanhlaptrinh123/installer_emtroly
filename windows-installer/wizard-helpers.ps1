@@ -2140,3 +2140,69 @@ function Sync-EmTroLyInstalledUiIfNewer {
   } catch { }
   return $false
 }
+
+function Sanitize-WizardFailureSummary {
+  param(
+    [string]$Summary = '',
+    [int]$ExitCode = 1,
+    [int]$LastStepIndex = 0
+  )
+  $text = if ($Summary) { $Summary.Trim() } else { '' }
+  if (-not $text -or $text -match '^(?i)Đang(\s|\.\.\.|…|$)') {
+    $stepLabel = if ($LastStepIndex -gt 0) { "Bước $LastStepIndex" } else { 'quá trình cài đặt' }
+    if ($text) {
+      return "Quá trình thực hiện ở $stepLabel bị gián đoạn trước khi hoàn tất (mã thoát $ExitCode) trong lúc: $text"
+    }
+    return "Quá trình thực hiện ở $stepLabel bị gián đoạn bất thường (mã thoát $ExitCode)."
+  }
+  return $text
+}
+
+function New-UnexpectedExitDiagnosticPayload {
+  param(
+    [string]$Summary = '',
+    [int]$ExitCode = 1,
+    [int]$LastStepIndex = 0
+  )
+  $cleanSummary = Sanitize-WizardFailureSummary -Summary $Summary -ExitCode $ExitCode -LastStepIndex $LastStepIndex
+  $stageName = switch ($LastStepIndex) {
+    1 { 'telegram' }
+    2 { 'editor' }
+    3 { 'dependencies' }
+    4 { 'install' }
+    5 { 'zalo-verify' }
+    default { 'install' }
+  }
+  $tailText = ''
+  $latestLog = ''
+  try {
+    if ($env:LOCALAPPDATA) {
+      $latestLog = Join-Path (Join-Path (Join-Path $env:LOCALAPPDATA 'EmTroLyUI') 'logs') 'install-latest.log'
+      if (Test-Path -LiteralPath $latestLog -PathType Leaf) {
+        $tailLines = @(Get-Content -LiteralPath $latestLog -Tail 25 -Encoding UTF8 -ErrorAction SilentlyContinue)
+        if ($tailLines.Count -gt 0) {
+          $joined = $tailLines -join "`r`n"
+          $tailText = if (Get-Command -Name 'Remove-SensitiveStrings' -ErrorAction Ignore) {
+            Remove-SensitiveStrings -Text $joined
+          } else {
+            $joined
+          }
+        }
+      }
+    }
+  } catch { }
+  if (-not $tailText) {
+    $tailText = "Background runner exited with code $ExitCode without producing a diagnostic file."
+  }
+  return [pscustomobject]@{
+    timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+    stage = $stageName
+    code = "runner-unexpected-exit-$ExitCode"
+    friendlyMessage = $cleanSummary
+    summary = $cleanSummary
+    autoHealSummary = ''
+    nextAction = 'Bấm "Tự sửa lỗi bằng Codex" hoặc "Quay lại kiểm tra cấu hình" rồi cài đặt lại. Nếu máy vừa mất mạng hoặc phần mềm diệt virus chặn tải file, hãy thử lại sau ít giây.'
+    technicalDetail = $tailText
+    installLogPath = $latestLog
+  }
+}
