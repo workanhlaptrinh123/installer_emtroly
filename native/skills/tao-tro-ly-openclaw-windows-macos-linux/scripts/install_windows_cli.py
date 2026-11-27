@@ -87,22 +87,65 @@ def shim_payload(node, cli_entry, environment, identifier):
     return "\r\n".join(lines).encode("utf-8")
 
 
+def has_reparse_point(path, stop_at=None):
+    current = Path(path)
+    stop_resolved = None
+    if stop_at is not None and Path(stop_at).exists():
+        try:
+            stop_resolved = Path(stop_at).resolve()
+        except OSError:
+            stop_resolved = None
+    while True:
+        if current.is_symlink():
+            return True
+        if current.exists():
+            try:
+                if getattr(os.lstat(current), "st_file_attributes", 0) & 0x400:
+                    return True
+            except OSError:
+                return True
+        if stop_resolved is not None and current.exists():
+            try:
+                if current.resolve() == stop_resolved:
+                    break
+            except OSError:
+                pass
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return False
+
+
 def install(root, home, node, cli_entry, port, profile=None):
     if platform.system() != "Windows":
         raise ValueError("Windows CLI helper must run on the customer Windows machine")
-    root, home, node, cli_entry = (Path(item) for item in (root, home, node, cli_entry))
-    for item in (root, home, node, cli_entry):
-        if not item.is_absolute() or item.resolve() != item or not item.exists():
+    raw_items = tuple(Path(item) for item in (root, home, node, cli_entry))
+    for item in raw_items:
+        if not item.is_absolute() or not item.exists():
             raise ValueError("Require existing absolute real paths")
+        if any(character in str(item) for character in '\r\n\x00"'):
+            raise ValueError("Invalid Windows path")
+    raw_root, raw_home, raw_node, raw_cli_entry = raw_items
+    if (has_reparse_point(raw_home, stop_at=raw_home.parent)
+            or has_reparse_point(raw_root, stop_at=raw_home)
+            or has_reparse_point(raw_node, stop_at=raw_node.parent)
+            or has_reparse_point(raw_cli_entry, stop_at=raw_root)):
+        raise ValueError("Require existing absolute real paths")
+    root, home, node, cli_entry = (item.resolve() for item in raw_items)
+    for item in (root, home, node, cli_entry):
         if any(character in str(item) for character in '\r\n\x00"'):
             raise ValueError("Invalid Windows path")
     if not root.is_dir() or not home.is_dir() or not node.is_file() or not cli_entry.is_file():
         raise ValueError("Invalid selected instance or runtime")
     if not os.environ.get("USERPROFILE") or Path(os.environ["USERPROFILE"]).resolve() != home:
         raise ValueError("Refusing to configure a different Windows user's PATH")
-    localappdata = Path(os.environ.get("LOCALAPPDATA", ""))
-    if not localappdata.is_absolute() or not localappdata.is_dir():
+    raw_localappdata = Path(os.environ.get("LOCALAPPDATA", ""))
+    if (not raw_localappdata.is_absolute()
+            or not raw_localappdata.is_dir()
+            or has_reparse_point(raw_localappdata, stop_at=raw_localappdata.parent)):
         raise ValueError("Current user's LOCALAPPDATA is unavailable")
+    localappdata = raw_localappdata.resolve()
     config = root / "openclaw.json"
     if config.is_symlink() or not config.is_file():
         raise ValueError("Selected-instance config required")
@@ -119,7 +162,7 @@ def install(root, home, node, cli_entry, port, profile=None):
     if checked.returncode or not re.fullmatch(r"(?:OpenClaw\s+)?" + re.escape(VERSION) + r"(?:\s+\([^\r\n]+\))?", version_output):
         raise ValueError("Private OpenClaw CLI version check failed; no PATH changed")
     directory = localappdata / "OpenClaw" / "bin"
-    if directory.resolve() != directory:
+    if has_reparse_point(directory, stop_at=localappdata) or directory.resolve() != directory:
         raise ValueError("Refusing redirected CLI directory")
     alias = directory / ("openclaw-member-" + identifier + ".cmd")
     default = directory / "openclaw.cmd"

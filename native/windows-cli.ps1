@@ -26,6 +26,11 @@ function Install-UserOpenClawCli {
   $helper = Join-Path $PSScriptRoot 'skills\tao-tro-ly-openclaw-windows-macos-linux\scripts\install_windows_cli.py'
   if (-not (Test-Path -LiteralPath $helper)) { throw 'OpenClaw CLI PATH helper is missing.' }
   $userProfilePath = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
+  if ([string]::IsNullOrWhiteSpace($userProfilePath)) { $userProfilePath = $env:USERPROFILE }
+  if (Test-Path -LiteralPath $Root) { $Root = (Get-Item -LiteralPath $Root -Force).FullName }
+  if (Test-Path -LiteralPath $userProfilePath) { $userProfilePath = (Get-Item -LiteralPath $userProfilePath -Force).FullName }
+  if (Test-Path -LiteralPath $Node) { $Node = (Get-Item -LiteralPath $Node -Force).FullName }
+  if (Test-Path -LiteralPath $CliEntry) { $CliEntry = (Get-Item -LiteralPath $CliEntry -Force).FullName }
   $previousPath = $env:Path
   $runtimeBin = Join-Path (Split-Path (Split-Path $CliEntry)) '.bin'
   try {

@@ -32,8 +32,66 @@ if (Test-Path -LiteralPath $wizardHelperScript -PathType Leaf) {
   . ([ScriptBlock]::Create([IO.File]::ReadAllText($wizardHelperScript, [System.Text.Encoding]::UTF8)))
 }
 
+$persistentInstallLog = ''
+if ($env:LOCALAPPDATA) {
+  try {
+    $uiLogDir = Join-Path $env:LOCALAPPDATA 'EmTroLyUI\logs'
+    [void][IO.Directory]::CreateDirectory($uiLogDir)
+    $persistentInstallLog = Join-Path $uiLogDir 'install-latest.log'
+    if (Test-Path -LiteralPath $persistentInstallLog -PathType Leaf) {
+      if ((Get-Item -LiteralPath $persistentInstallLog).Length -gt 262144) {
+        Move-Item -LiteralPath $persistentInstallLog -Destination (Join-Path $uiLogDir 'install-prev.log') -Force -ErrorAction SilentlyContinue
+      }
+    }
+  } catch { $persistentInstallLog = '' }
+}
+
+function Format-RedactedLogLine([string]$RawText, [psobject]$SettingsObj = $null) {
+  $secList = @()
+  if ($SettingsObj) {
+    if ($SettingsObj.PSObject.Properties['telegram_token'] -and $SettingsObj.telegram_token) { $secList += [string]$SettingsObj.telegram_token }
+    if ($SettingsObj.PSObject.Properties['ai_api_key'] -and $SettingsObj.ai_api_key) { $secList += [string]$SettingsObj.ai_api_key }
+  }
+  $clean = [string]$RawText
+  if (Get-Command Remove-SensitiveStrings -ErrorAction SilentlyContinue) {
+    $clean = Remove-SensitiveStrings -Text $clean -Secrets $secList
+  } else {
+    foreach ($sec in $secList) {
+      if ($sec -and $sec.Length -ge 6) { $clean = $clean.Replace($sec, '[REDACTED_SECRET]') }
+    }
+  }
+  $clean = [regex]::Replace($clean, '[0-9]{5,}:[A-Za-z0-9_-]{20,}', '[REDACTED_TELEGRAM_TOKEN]')
+  $clean = [regex]::Replace($clean, 'sk-[A-Za-z0-9_-]{12,}', '[REDACTED_API_KEY]')
+  $clean = [regex]::Replace($clean, '("token"\s*:\s*")[0-9a-fA-F]{24,}(")', '$1[REDACTED_GATEWAY_TOKEN]$2')
+  return $clean
+}
+
+function Write-RedactedInstallLog([string]$Entry, [psobject]$SettingsObj = $null) {
+  if ([string]::IsNullOrWhiteSpace($script:persistentInstallLog)) { return }
+  try {
+    $safe = Format-RedactedLogLine -RawText $Entry -SettingsObj $(if ($SettingsObj) { $SettingsObj } else { $script:settings })
+    $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    $curStage = if ($script:stage) { $script:stage } else { 'init' }
+    [IO.File]::AppendAllText($script:persistentInstallLog, "[$stamp] [$curStage] $safe`r`n", (New-Object Text.UTF8Encoding($false)))
+  } catch { }
+}
+
+function Resolve-SafeCanonicalPath([string]$PathValue) {
+  if ([string]::IsNullOrWhiteSpace($PathValue)) { return '' }
+  try {
+    $expanded = [Environment]::ExpandEnvironmentVariables($PathValue.Trim().Trim('"'))
+    if (Test-Path -LiteralPath $expanded) {
+      return (Get-Item -LiteralPath $expanded -Force -ErrorAction Stop).FullName.TrimEnd('\')
+    }
+    return [IO.Path]::GetFullPath($expanded).TrimEnd('\')
+  } catch {
+    return $PathValue.Trim().Trim('"').TrimEnd('\')
+  }
+}
+
 function Write-SafeStatus([string]$Text) {
   [IO.File]::WriteAllText($LogFile, $Text, (New-Object Text.UTF8Encoding($false)))
+  Write-RedactedInstallLog -Entry ("STATUS: " + $Text)
 }
 
 function Invoke-TelegramApi {
@@ -374,6 +432,7 @@ requires_openai_auth = true
     } catch {
       $edErr = [string]$_.Exception.Message
       $script:lastTechnicalDetail = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
+      Write-RedactedInstallLog -Entry ("EDITOR_ERROR ($edErr): " + $script:lastTechnicalDetail)
       [IO.File]::WriteAllText($installCaptureFile, $script:lastTechnicalDetail, (New-Object Text.UTF8Encoding($false)))
       $canHealEd = ($edErr -ne 'editor-ide-missing') -and
         (Get-Command Invoke-CodexAutoHeal -ErrorAction SilentlyContinue) -and
@@ -482,16 +541,34 @@ requires_openai_auth = true
         Test-MemberInstallerSettings $settings
         Test-InstallDiskFreeSpace -TargetPath $env:USERPROFILE -SkipEditor ([bool]$settings.skip_editor -or ($isModularRun -and 'antigravity-ide' -notin $requestedComponents -and 'codex-extension' -notin $requestedComponents))
         if ($env:OS -eq 'Windows_NT') {
-          $existingOpenClawCmd = Get-Command openclaw -ErrorAction SilentlyContinue
-          if ($existingOpenClawCmd) {
-            $ownShimDir = if ($env:LOCALAPPDATA) { (Join-Path $env:LOCALAPPDATA 'OpenClaw\bin').TrimEnd('\') } else { '' }
-            $cmdSrcDir = if ($existingOpenClawCmd.Source) { (Split-Path -Parent $existingOpenClawCmd.Source).TrimEnd('\') } else { '' }
-            $rootHasComplete = (Test-Path -LiteralPath (Join-Path $root 'openclaw-instance.ps1') -PathType Leaf)
+          $ownShimDir = if ($env:LOCALAPPDATA) { Resolve-SafeCanonicalPath (Join-Path $env:LOCALAPPDATA 'OpenClaw\bin') } else { '' }
+          $npmRoamingDir = if ($env:APPDATA) { Resolve-SafeCanonicalPath (Join-Path $env:APPDATA 'npm') } else { '' }
+          $rootHasComplete = (Test-Path -LiteralPath (Join-Path $root 'openclaw-instance.ps1') -PathType Leaf)
+          $foreignLegacyConfigured = (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.openclaw\openclaw.json') -PathType Leaf)
+          foreach ($cmdHit in @(Get-Command openclaw -All -ErrorAction SilentlyContinue)) {
+            if (-not $cmdHit.Source -or -not (Test-Path -LiteralPath $cmdHit.Source -PathType Leaf)) { continue }
+            $cmdSrcDir = Resolve-SafeCanonicalPath (Split-Path -Parent $cmdHit.Source)
             if ($ownShimDir -and $cmdSrcDir -ieq $ownShimDir -and (-not $rootHasComplete)) {
-              Remove-Item -LiteralPath $existingOpenClawCmd.Source -Force -ErrorAction SilentlyContinue
-            } else {
-              throw 'cli-probe-conflict'
+              foreach ($staleShim in @(Get-ChildItem -LiteralPath $cmdSrcDir -Filter 'openclaw*.cmd' -ErrorAction SilentlyContinue)) {
+                Remove-Item -LiteralPath $staleShim.FullName -Force -ErrorAction SilentlyContinue
+              }
+            } elseif ($npmRoamingDir -and $cmdSrcDir -ieq $npmRoamingDir -and (-not $foreignLegacyConfigured)) {
+              $shimBackupDir = Join-Path $npmRoamingDir ('backup-openclaw-shims-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+              try {
+                [void][IO.Directory]::CreateDirectory($shimBackupDir)
+                foreach ($shimName in @('openclaw', 'openclaw.cmd', 'openclaw.ps1')) {
+                  $shimCand = Join-Path $npmRoamingDir $shimName
+                  if (Test-Path -LiteralPath $shimCand -PathType Leaf) {
+                    Move-Item -LiteralPath $shimCand -Destination (Join-Path $shimBackupDir $shimName) -Force -ErrorAction Stop
+                  }
+                }
+                Write-RedactedInstallLog -Entry "Moved unconfigured user npm global openclaw shims to $shimBackupDir"
+              } catch { }
             }
+          }
+          $remainingOpenClawCmd = Get-Command openclaw -ErrorAction SilentlyContinue
+          if ($remainingOpenClawCmd) {
+            throw 'cli-probe-conflict'
           }
         }
       } elseif ($openClawSyncExistingMode) {
@@ -800,15 +877,38 @@ requires_openai_auth = true
       $script:stage = 'zalo-verify'
       $verifyGatewayMsg = if ($zaloEnabled) { 'Đang kiểm tra Gateway và lệnh Zalo...' } else { 'Đang kiểm tra kết nối Gateway...' }
       Write-SafeStatus $verifyGatewayMsg
-      $health = (& node $cliEntry gateway health --json | Out-String) | ConvertFrom-Json
-      if ($LASTEXITCODE -ne 0 -or -not $health.ok) { throw 'gateway-health-failed' }
+      $nodeVerify = if ($instance.PSObject.Properties['node'] -and $instance.node -and (Test-Path -LiteralPath $instance.node -PathType Leaf)) { [string]$instance.node } else { 'node' }
+      $maxVerifyTries = if ([string]::IsNullOrEmpty($env:TEST_MODE)) { 6 } else { 1 }
+      $health = $null
+      for ($hvTry = 1; $hvTry -le $maxVerifyTries; $hvTry++) {
+        try {
+          $health = (& $nodeVerify $cliEntry gateway health --json | Out-String) | ConvertFrom-Json
+          if ($LASTEXITCODE -eq 0 -and $health.ok) {
+            if (-not $zaloEnabled -or ('zalouser' -in @($health.plugins.loaded) -and 'telegram-zalo-owner-login' -in @($health.plugins.loaded))) {
+              break
+            }
+          }
+        } catch { }
+        if ($hvTry -lt $maxVerifyTries) { Start-Sleep -Seconds 2 }
+      }
+      if (-not $health -or -not $health.ok) { throw 'gateway-health-failed' }
       if ($zaloEnabled) {
         if ('zalouser' -notin @($health.plugins.loaded)) { throw 'zalo-plugin-not-loaded' }
         if ('telegram-zalo-owner-login' -notin @($health.plugins.loaded)) { throw 'zalo-qr-plugin-not-loaded' }
-        $inspection = (& node $cliEntry plugins inspect telegram-zalo-owner-login --runtime --json | Out-String) | ConvertFrom-Json
-        $qrTools = @($inspection.plugin.toolNames)
-        foreach ($tool in @($inspection.tools)) { $qrTools += @($tool.names) }
-        if ($LASTEXITCODE -ne 0 -or $inspection.plugin.status -ne 'loaded' -or $inspection.plugin.enabled -ne $true -or
+        $inspection = $null
+        $qrTools = @()
+        for ($ivTry = 1; $ivTry -le $maxVerifyTries; $ivTry++) {
+          try {
+            $inspection = (& $nodeVerify $cliEntry plugins inspect telegram-zalo-owner-login --runtime --json | Out-String) | ConvertFrom-Json
+            $qrTools = @($inspection.plugin.toolNames)
+            foreach ($tool in @($inspection.tools)) { $qrTools += @($tool.names) }
+            if ($LASTEXITCODE -eq 0 -and $inspection.plugin.status -eq 'loaded' -and $inspection.plugin.enabled -eq $true -and
+                'zaloqr' -in @($inspection.commands) -and 'zalostatus' -in @($inspection.commands) -and
+                'telegram_zalo_login_qr' -in $qrTools) { break }
+          } catch { }
+          if ($ivTry -lt $maxVerifyTries) { Start-Sleep -Seconds 2 }
+        }
+        if (-not $inspection -or $inspection.plugin.status -ne 'loaded' -or $inspection.plugin.enabled -ne $true -or
             'zaloqr' -notin @($inspection.commands) -or 'zalostatus' -notin @($inspection.commands) -or
             'telegram_zalo_login_qr' -notin $qrTools) { throw 'zalo-qr-command-not-registered' }
         $script:stage = 'telegram-menu'
@@ -823,13 +923,25 @@ requires_openai_auth = true
       $global:Error.Clear()
       $env:MEMBER_INSTALL_ZALO_STAGE_FILE = $zaloStageFile
       $env:MEMBER_INSTALL_STATUS_FILE = $LogFile
+      if ($persistentInstallLog) { $env:EMTROLY_INSTALL_LOG_FILE = $persistentInstallLog }
+      Write-RedactedInstallLog -Entry 'Starting OpenClaw native installation...'
       & $installer @arguments | Out-Null
       if ($LASTEXITCODE -ne 0) { throw 'installer-failed' }
       Invoke-CorePostInstallChecks
       Remove-Item -LiteralPath (Join-Path $root '.emtroly-installing.json') -Force -ErrorAction SilentlyContinue
+      Write-RedactedInstallLog -Entry 'OpenClaw native installation & verification succeeded.'
     } catch {
       $coreErr = [string]$_.Exception.Message
       $lastTechnicalDetail = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
+      Write-RedactedInstallLog -Entry ("ERROR ($coreErr): " + $lastTechnicalDetail)
+      if ($persistentInstallLog -and (Test-Path -LiteralPath $persistentInstallLog -PathType Leaf)) {
+        try {
+          $recentLogTail = (@(Get-Content -LiteralPath $persistentInstallLog -Tail 30 -ErrorAction SilentlyContinue) -join "`r`n").Trim()
+          if ($recentLogTail) {
+            $lastTechnicalDetail = ($lastTechnicalDetail + "`r`n`r`n--- Nhật ký tiến trình cài đặt gần nhất ---`r`n" + (Format-RedactedLogLine -RawText $recentLogTail -SettingsObj $settings)).Trim()
+          }
+        } catch { }
+      }
       [IO.File]::WriteAllText($installCaptureFile, $lastTechnicalDetail, (New-Object Text.UTF8Encoding($false)))
       $canHeal = (Get-Command Invoke-CodexAutoHeal -ErrorAction SilentlyContinue) -and
         (Get-Command Test-IsAutoHealableError -ErrorAction SilentlyContinue) -and
@@ -1052,6 +1164,7 @@ requires_openai_auth = true
   if ([string]::IsNullOrWhiteSpace($lastTechnicalDetail)) {
     $lastTechnicalDetail = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
   }
+  Write-RedactedInstallLog -Entry ("FINAL_ERROR [$code]: " + $message + " | " + $lastTechnicalDetail)
   try {
     $diagObj = [ordered]@{
       timestamp        = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
@@ -1060,6 +1173,7 @@ requires_openai_auth = true
       friendlyMessage  = $message
       autoHealSummary  = $lastAutoHealSummary
       technicalDetail  = $lastTechnicalDetail
+      installLogPath   = $persistentInstallLog
     }
     [IO.File]::WriteAllText($diagJsonFile, ($diagObj | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
   } catch { }
@@ -1077,6 +1191,7 @@ requires_openai_auth = true
   Remove-Item -LiteralPath $zaloDetailFile -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $installCaptureFile -Force -ErrorAction SilentlyContinue
   Remove-Item Env:MEMBER_INSTALL_ZALO_STAGE_FILE -ErrorAction SilentlyContinue
+  Remove-Item Env:EMTROLY_INSTALL_LOG_FILE -ErrorAction SilentlyContinue
   $settings = $null
   $headers = $null
   $config = $null

@@ -52,6 +52,36 @@ def selected_settings(config, root, home, node, cli_entry, telegram_account, zal
             "cliCommand": str(node), "cliPrefix": [str(cli_entry)]}
 
 
+def has_reparse_point(path, stop_at=None):
+    current = Path(path)
+    stop_resolved = None
+    if stop_at is not None and Path(stop_at).exists():
+        try:
+            stop_resolved = Path(stop_at).resolve()
+        except OSError:
+            stop_resolved = None
+    while True:
+        if current.is_symlink():
+            return True
+        if current.exists():
+            try:
+                if getattr(os.lstat(current), "st_file_attributes", 0) & 0x400:
+                    return True
+            except OSError:
+                return True
+        if stop_resolved is not None and current.exists():
+            try:
+                if current.resolve() == stop_resolved:
+                    break
+            except OSError:
+                pass
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("root", "home", "node", "cli-entry"):
@@ -65,10 +95,16 @@ def main():
     mode.add_argument("--check", action="store_true")
     mode.add_argument("--ensure", action="store_true")
     args = parser.parse_args()
-    root, home, node, cli_entry = args.root, args.home, args.node, args.cli_entry
-    for item in (root, home, node, cli_entry):
+    raw_items = (args.root, args.home, args.node, args.cli_entry)
+    for item in raw_items:
         if not item.is_absolute() or item.is_symlink() or not item.exists():
             raise ValueError("Require existing absolute, non-symlink paths")
+    if (has_reparse_point(args.home, stop_at=args.home.parent)
+            or has_reparse_point(args.root, stop_at=args.home)
+            or has_reparse_point(args.node, stop_at=args.node.parent)
+            or has_reparse_point(args.cli_entry, stop_at=args.root)):
+        raise ValueError("Require existing absolute, non-symlink paths")
+    root, home, node, cli_entry = (item.resolve() for item in raw_items)
     config_path = root / "openclaw.json"
     if config_path.is_symlink():
         raise ValueError("Refusing symlinked configuration")
@@ -76,7 +112,7 @@ def main():
     settings = selected_settings(config, root, home, node, cli_entry,
                                  args.telegram_account, args.zalo_account, args.agent)
     plugin = root / "tools" / PLUGIN_ID
-    if plugin.resolve() != plugin:
+    if has_reparse_point(plugin, stop_at=root) or plugin.resolve() != plugin:
         raise ValueError("Refusing symlinked plugin path")
     if any((plugin / name).is_symlink() for name in ("settings.json", "index.mjs", "package.json", "openclaw.plugin.json")):
         raise ValueError("Refusing symlinked plugin files")

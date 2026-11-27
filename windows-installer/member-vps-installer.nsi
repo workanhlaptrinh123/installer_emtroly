@@ -48,11 +48,26 @@ Section
   !else
   File /r "${PAYLOAD_DIR}/*"
   !endif
+  Delete "$PLUGINSDIR\wsh.ok"
   ClearErrors
   ExecWait '"$WINDIR\Sysnative\wscript.exe" //B //Nologo "$PLUGINSDIR\windows-installer\launch-wizard.vbs" "$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" "$PLUGINSDIR\windows-installer\wizard.ps1" "$PLUGINSDIR" "-WindowStyle Hidden"' $0
-  IfErrors launch_error
-  SetErrorLevel $0
-  Goto done
+  IfErrors fallback_ps
+  ${If} ${FileExists} "$PLUGINSDIR\wsh.ok"
+    SetErrorLevel $0
+    Goto done
+  ${EndIf}
+  fallback_ps:
+    ClearErrors
+    ExecWait '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -STA -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$PLUGINSDIR\windows-installer\wizard.ps1" -PayloadRoot "$PLUGINSDIR"' $0
+    IfErrors fallback_ps_sys32
+    SetErrorLevel $0
+    Goto done
+  fallback_ps_sys32:
+    ClearErrors
+    ExecWait '"$WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" -STA -NoLogo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$PLUGINSDIR\windows-installer\wizard.ps1" -PayloadRoot "$PLUGINSDIR"' $0
+    IfErrors launch_error
+    SetErrorLevel $0
+    Goto done
   launch_error:
     MessageBox MB_ICONSTOP "Cannot start Windows PowerShell installer."
     SetErrorLevel 1

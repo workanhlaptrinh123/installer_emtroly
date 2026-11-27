@@ -13,6 +13,17 @@ Else
   winStyle = "-WindowStyle Hidden"
 End If
 
+On Error Resume Next
+Dim fso, markerFile
+Set fso = CreateObject("Scripting.FileSystemObject")
+If fso.FolderExists(payloadRoot) Then
+  Set markerFile = fso.CreateTextFile(payloadRoot & "\wsh.ok", True)
+  If Not (markerFile Is Nothing) Then markerFile.Close
+End If
+Set markerFile = Nothing
+Set fso = Nothing
+On Error GoTo 0
+
 Set shell = CreateObject("WScript.Shell")
 shell.CurrentDirectory = payloadRoot
 command = Chr(34) & psExe & Chr(34) & " -STA -NoLogo -NoProfile -ExecutionPolicy Bypass " & winStyle & " -File " & Chr(34) & wizardScript & Chr(34) & " -PayloadRoot " & Chr(34) & payloadRoot & Chr(34)
