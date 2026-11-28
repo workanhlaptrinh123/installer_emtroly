@@ -86,10 +86,60 @@ fi
 ARTIFACT_BASE="emtroly-$PLATFORM-$ARCH"
 
 if [[ "$SYSTEM" == Darwin ]]; then
-  if command -v codesign >/dev/null 2>&1; then
-    codesign --force --deep --sign - "$OUTPUT/dist/$APP_NAME.app"
+  APP_PATH="$OUTPUT/dist/$APP_NAME.app"
+  SIGNING_IDENTITY="${MACOS_SIGNING_IDENTITY:-${APPLE_SIGNING_IDENTITY:-}}"
+  SIGNING_STATUS="ad-hoc"
+  NOTARIZATION_STATUS="not-requested"
+
+  command -v codesign >/dev/null 2>&1 || {
+    echo 'macOS build requires codesign.' >&2
+    exit 1
+  }
+
+  if [[ -n "$SIGNING_IDENTITY" ]]; then
+    codesign --force --deep --options runtime --timestamp --sign "$SIGNING_IDENTITY" "$APP_PATH"
+    SIGNING_STATUS="developer-id"
+  else
+    # Ad-hoc signing keeps local builds executable. Gatekeeper still requires
+    # the user to approve or clear quarantine until a Developer ID build is used.
+    codesign --force --deep --sign - "$APP_PATH"
   fi
-  ditto -c -k --sequesterRsrc --keepParent "$OUTPUT/dist/$APP_NAME.app" "$OUTPUT/$ARTIFACT_BASE.zip"
+  codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+  ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$OUTPUT/$ARTIFACT_BASE.zip"
+
+  if [[ "$SIGNING_STATUS" == "developer-id" && "${MACOS_NOTARIZE:-auto}" != "never" &&
+        -n "${APPLE_ID:-}" && -n "${APPLE_TEAM_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]]; then
+    command -v xcrun >/dev/null 2>&1 || {
+      echo 'xcrun is required for macOS notarization.' >&2
+      exit 1
+    }
+    xcrun notarytool submit "$OUTPUT/$ARTIFACT_BASE.zip" \
+      --apple-id "$APPLE_ID" \
+      --team-id "$APPLE_TEAM_ID" \
+      --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+      --wait
+    xcrun stapler staple "$APP_PATH"
+    codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+    spctl --assess --type execute --verbose=2 "$APP_PATH"
+    # Recreate the archive after stapling the notarization ticket.
+    ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$OUTPUT/$ARTIFACT_BASE.zip"
+    NOTARIZATION_STATUS="notarized"
+  elif [[ "$SIGNING_STATUS" == "developer-id" ]]; then
+    NOTARIZATION_STATUS="not-configured"
+  fi
+
+  if [[ "${MACOS_NOTARIZE_REQUIRED:-0}" == "1" && "$NOTARIZATION_STATUS" != "notarized" ]]; then
+    echo 'Tagged macOS releases require Developer ID signing and Apple notarization.' >&2
+    echo 'Configure MACOS_CERTIFICATE_P12_BASE64, APPLE_ID, APPLE_TEAM_ID and APPLE_APP_SPECIFIC_PASSWORD in CI.' >&2
+    exit 1
+  fi
+
+  {
+    printf 'signing=%s\n' "$SIGNING_STATUS"
+    printf 'notarization=%s\n' "$NOTARIZATION_STATUS"
+    printf 'identity=%s\n' "${SIGNING_IDENTITY:-none}"
+  } > "$OUTPUT/$ARTIFACT_BASE.macos-signing.txt"
   (cd "$OUTPUT" && shasum -a 256 "$ARTIFACT_BASE.zip" > "$ARTIFACT_BASE.zip.sha256")
   printf 'Built macOS release: %s/%s.zip\n' "$OUTPUT" "$ARTIFACT_BASE"
 else

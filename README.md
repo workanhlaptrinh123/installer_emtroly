@@ -14,6 +14,26 @@ Official GitHub Releases publish synchronized `emtroly` installers for all three
   - *(If launching `emtroly.exe` directly from browser Downloads before Authenticode EV/Azure signing secrets are configured, click **More info** → **Run anyway** once; subsequent launches via the Desktop shortcut `Em Tro Ly - Anh Lap Trinh` never prompt).*
 - **macOS Apple Silicon (M1/M2/M3/M4)**: `emtroly-macos-arm64.zip` (+ `emtroly-macos-arm64.zip.sha256`, containing `EmTroLy.app`)
 - **macOS Intel (x64)**: `emtroly-macos-x64.zip` (+ `emtroly-macos-x64.zip.sha256`, containing `EmTroLy.app`)
+
+The macOS release workflow uses an Apple Developer ID certificate and notarizes
+tagged releases when the repository has the `MACOS_CERTIFICATE_P12_BASE64`,
+`MACOS_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID` and
+`APPLE_APP_SPECIFIC_PASSWORD` secrets. A build without those secrets is
+ad-hoc signed, so macOS may show “Apple cannot check it for malicious software”
+the first time it is opened. After checking the downloaded SHA-256, approve it
+once with Finder Control-click → **Open**, or run:
+
+```bash
+cd ~/Downloads
+shasum -a 256 -c emtroly-macos-arm64.zip.sha256
+unzip -q -o emtroly-macos-arm64.zip
+xattr -dr com.apple.quarantine EmTroLy.app
+open EmTroLy.app
+```
+
+Use `emtroly-macos-x64.zip` in the checksum command on an Intel Mac. The
+`*.macos-signing.txt` release asset records whether the build is Developer ID
+signed and notarized.
 - **Linux Ubuntu / Debian (x64)**: `emtroly-linux-x64.deb` (+ `emtroly-linux-x64.deb.sha256`) and portable `emtroly-linux-x64.tar.gz` (+ `emtroly-linux-x64.tar.gz.sha256`)
 - **Headless Terminal Installers (macOS & Ubuntu VPS)**:
   - Ubuntu / Linux: `./install-ubuntu.sh --check` then `source install-ubuntu.sh`

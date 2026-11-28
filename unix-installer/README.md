@@ -12,10 +12,28 @@ Tài liệu hướng dẫn sử dụng các bản cài đặt chính thức trê
 
 | Nền tảng | Tệp cài đặt | Cách mở / cài đặt |
 |---|---|---|
-| **macOS Apple Silicon (M1–M4)** | `emtroly-macos-arm64.zip` | Giải nén → mở ứng dụng **`EmTroLy.app`** (nếu macOS hỏi xác nhận lần đầu: Chuột phải → *Open*, hoặc chạy `xattr -cr EmTroLy.app`) |
-| **macOS Intel (x64)** | `emtroly-macos-x64.zip` | Giải nén → mở ứng dụng **`EmTroLy.app`** |
+| **macOS Apple Silicon (M1–M4)** | `emtroly-macos-arm64.zip` | Kiểm tra SHA-256 → giải nén → mở **`EmTroLy.app`** |
+| **macOS Intel (x64)** | `emtroly-macos-x64.zip` | Kiểm tra SHA-256 → giải nén → mở **`EmTroLy.app`** |
 | **Ubuntu / Debian Desktop (x64)** | `emtroly-linux-x64.deb` | Chạy `sudo apt install ./emtroly-linux-x64.deb` → mở **Em Trợ Lý** trong menu ứng dụng hoặc gõ `emtroly` (không chạy với `sudo`) |
 | **Linux Portable (x64)** | `emtroly-linux-x64.tar.gz` | Giải nén `tar -xzf emtroly-linux-x64.tar.gz` → chạy `./emtroly` bằng user thường |
+
+### Nếu macOS báo “Apple cannot check it for malicious software”
+
+Bản phát hành có file `*.macos-signing.txt` để xác nhận trạng thái ký và
+notarization. Với bản `notarized`, mở app bình thường. Với bản ad-hoc chưa có
+notarization, hãy xác minh checksum trước rồi xóa quarantine cho đúng app:
+
+```bash
+cd ~/Downloads
+shasum -a 256 -c emtroly-macos-arm64.zip.sha256
+unzip -q -o emtroly-macos-arm64.zip
+xattr -dr com.apple.quarantine EmTroLy.app
+open EmTroLy.app
+```
+
+Trên máy Intel thay tên archive và file checksum bằng `emtroly-macos-x64`.
+Finder cũng cho phép Control-click vào `EmTroLy.app`, chọn **Open**, rồi xác
+nhận lần đầu. Không tắt Gatekeeper trên toàn hệ thống.
 
 ---
 
