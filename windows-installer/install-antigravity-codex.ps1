@@ -90,43 +90,64 @@ function Get-VerifiedDownload([string]$Url, [string]$Path, [string]$Hash) {
     [Net.ServicePointManager]::Expect100Continue = $false
   }
   $label = if ($Url -match '\.vsix($|\?)') { 'Codex Extension' } else { 'Antigravity IDE' }
+  $knownTotalBytes = if ($Url -match '\.vsix($|\?)') { 389000000L } else { 199649432L }
   $partPath = "$Path.part"
+  if (Test-Path -LiteralPath $Path -PathType Leaf) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
+  if (Test-Path -LiteralPath $partPath -PathType Leaf) { Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue }
+
   $downloaded = $false
   for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
     $resp = $null
     $inStream = $null
     $outStream = $null
     try {
-      if (Test-Path -LiteralPath $Path -PathType Leaf) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
-      if (Test-Path -LiteralPath $partPath -PathType Leaf) { Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue }
       if ($useLegacy) {
+        if (Test-Path -LiteralPath $Path -PathType Leaf) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
         & $legacyTransport
       } else {
+        $resumePos = if (Test-Path -LiteralPath $partPath -PathType Leaf) { (Get-Item -LiteralPath $partPath).Length } else { 0L }
+        if ($resumePos -gt 0 -and ((Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash -ieq $Hash)) {
+          Move-Item -LiteralPath $partPath -Destination $Path -Force
+          $downloaded = $true
+          break
+        }
         $req = [System.Net.HttpWebRequest]::Create([uri]$Url)
         $req.UserAgent = 'AnhLapTrinh-EmTroLy-Installer/1.0'
         $req.AllowAutoRedirect = $true
         $req.MaximumAutomaticRedirections = 10
         $req.Timeout = 30000
         $req.ReadWriteTimeout = 60000
+        if ($resumePos -gt 0) { $req.AddRange([long]$resumePos) }
         $resp = $req.GetResponse()
-        $totalBytes = [long]$resp.ContentLength
+        $isPartial = ([int]$resp.StatusCode -eq 206)
+        $respLen = [long]$resp.ContentLength
+        if ($isPartial) {
+          if ($respLen -gt 0) { $knownTotalBytes = $resumePos + $respLen }
+          $fileMode = [System.IO.FileMode]::Append
+          $readTotal = $resumePos
+        } else {
+          if ($respLen -gt 0) { $knownTotalBytes = $respLen }
+          $fileMode = [System.IO.FileMode]::Create
+          $readTotal = 0L
+        }
         $inStream = $resp.GetResponseStream()
-        $outStream = New-Object System.IO.FileStream($partPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read, 262144)
+        $outStream = New-Object System.IO.FileStream($partPath, $fileMode, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read, 262144)
         $buf = New-Object byte[] 262144
-        $readTotal = 0L
+        $sessionRead = 0L
         $sw = [Diagnostics.Stopwatch]::StartNew()
         $lastTick = -2000L
         while (($n = $inStream.Read($buf, 0, $buf.Length)) -gt 0) {
           $outStream.Write($buf, 0, $n)
           $readTotal += $n
+          $sessionRead += $n
           if (($sw.ElapsedMilliseconds - $lastTick) -ge 450) {
             $lastTick = $sw.ElapsedMilliseconds
             if ((Get-Command Write-EditorStatus -ErrorAction SilentlyContinue) -and $StatusFile) {
               $mbCur = [Math]::Round($readTotal / 1MB, 1)
-              $spd = [Math]::Round(($readTotal / 1MB) / [Math]::Max(0.1, $sw.Elapsed.TotalSeconds), 1)
-              if ($totalBytes -gt 0) {
-                $pct = [Math]::Min(99, [int][Math]::Floor(($readTotal * 100.0) / $totalBytes))
-                $mbMax = [Math]::Round($totalBytes / 1MB, 0)
+              $spd = [Math]::Round(($sessionRead / 1MB) / [Math]::Max(0.1, $sw.Elapsed.TotalSeconds), 1)
+              if ($knownTotalBytes -gt 0) {
+                $pct = [Math]::Min(99, [int][Math]::Floor(($readTotal * 100.0) / $knownTotalBytes))
+                $mbMax = [Math]::Round($knownTotalBytes / 1MB, 0)
                 try { Write-EditorStatus "Đang tải $label... $pct% ($mbCur / $mbMax MB · $spd MB/s)" } catch { }
               } else {
                 try { Write-EditorStatus "Đang tải $label... ($mbCur MB · $spd MB/s)" } catch { }
@@ -138,49 +159,175 @@ function Get-VerifiedDownload([string]$Url, [string]$Path, [string]$Hash) {
         $outStream.Dispose(); $outStream = $null
         $inStream.Dispose(); $inStream = $null
         $resp.Close(); $resp = $null
-        Move-Item -LiteralPath $partPath -Destination $Path -Force
+        if ((Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash -ieq $Hash) {
+          Move-Item -LiteralPath $partPath -Destination $Path -Force
+        } else {
+          Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue
+          throw 'editor-download-partial-checksum'
+        }
       }
       $downloaded = $true
       break
     } catch {
-      if ($outStream) { try { $outStream.Dispose() } catch { } }
+      if ($outStream) { try { $outStream.Flush() } catch { }; try { $outStream.Dispose() } catch { } }
       if ($inStream) { try { $inStream.Dispose() } catch { } }
       if ($resp) { try { $resp.Close() } catch { } }
+
+      # If Schannel failed after downloading >= 0 bytes, try Node OpenSSL ChaCha20 range resume FIRST if Node is installed on the machine
+      if (-not $useLegacy) {
+        $nodeHelper = $null
+        $cmdN = @(Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1)
+        if ($cmdN.Count -gt 0 -and $cmdN[0].Source) { $nodeHelper = $cmdN[0].Source }
+        elseif ($env:LOCALAPPDATA) {
+          $depNs = @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'MemberInstaller\dependencies\node-*\node.exe') -ErrorAction SilentlyContinue | Select-Object -First 1)
+          if ($depNs.Count -gt 0) { $nodeHelper = $depNs[0].FullName }
+        }
+        if (-not $nodeHelper -and $env:ProgramFiles) {
+          $pfNode = Join-Path $env:ProgramFiles 'nodejs\node.exe'
+          if (Test-Path -LiteralPath $pfNode -PathType Leaf) { $nodeHelper = $pfNode }
+        }
+        if ($nodeHelper) {
+          try {
+            $nodeDlScript = @'
+const fs=require('fs'),https=require('https'),http=require('http'),crypto=require('crypto');
+const [,,url0,part,hash,stFile,lbl,totStr]=process.argv;
+let knownTotal=Number(totStr)||0;
+function wStat(m){if(!stFile)return;try{fs.writeFileSync(stFile,m,'utf8');}catch{}}
+function dlChunk(u,pos,hops,stag){
+  if(hops>120||stag>=8)return Promise.reject(new Error('node-hops-exhausted'));
+  return new Promise((res,rej)=>{
+    const lib=u.startsWith('https:')?https:http;
+    const opts=u.startsWith('https:')?{headers:{'User-Agent':'AnhLapTrinh-EmTroLy-Installer/1.0',Range:'bytes='+pos+'-'},ciphers:'TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-CHACHA20-POLY1305:DEFAULT',minVersion:'TLSv1.2',maxVersion:'TLSv1.2',timeout:30000}:{headers:{'User-Agent':'AnhLapTrinh-EmTroLy-Installer/1.0',Range:'bytes='+pos+'-'},timeout:30000};
+    const req=lib.get(u,opts,(r)=>{
+      if([301,302,303,307,308].includes(r.statusCode)&&r.headers.location){
+        r.resume();
+        const nxt=new URL(r.headers.location,u).toString();
+        return dlChunk(nxt,pos,hops,stag).then(res,rej);
+      }
+      if(r.statusCode!==200&&r.statusCode!==206){r.resume();return rej(new Error('http-'+r.statusCode));}
+      const cl=Number(r.headers['content-length']||0);
+      if(r.statusCode===206&&cl>0)knownTotal=pos+cl;
+      else if(r.statusCode===200&&cl>0){knownTotal=cl;pos=0;}
+      const mode=r.statusCode===206?'a':'w';
+      const out=fs.createWriteStream(part,{flags:mode});
+      let cur=pos,lastT=Date.now(),startedAt=Date.now(),got=0;
+      r.on('data',(c)=>{
+        out.write(c);cur+=c.length;got+=c.length;
+        const now=Date.now();
+        if(now-lastT>=450){
+          lastT=now;
+          const mb=(cur/1048576).toFixed(1),mx=(knownTotal/1048576).toFixed(0);
+          const pct=knownTotal>0?Math.min(99,Math.floor(cur*100/knownTotal)):0;
+          const spd=((got/1048576)/Math.max(0.1,(now-startedAt)/1000)).toFixed(1);
+          wStat('Đang tải '+lbl+'... '+pct+'% ('+mb+' / '+mx+' MB · '+spd+' MB/s)');
+        }
+      });
+      r.on('end',()=>{out.end(()=>res({done:true,got}));});
+      r.on('error',()=>{out.end(()=>res({done:false,got}));});
+    });
+    req.setTimeout(30000,()=>{req.destroy(new Error('timeout'));});
+    req.on('error',()=>{let sz=0;try{sz=fs.statSync(part).size;}catch{};res({done:false,got:Math.max(0,sz-pos)});});
+  }).then((st)=>{
+    const sz=fs.existsSync(part)?fs.statSync(part).size:0;
+    if(st.done||(knownTotal>0&&sz>=knownTotal)){
+      const hObj=crypto.createHash('sha256'),fBuf=Buffer.allocUnsafe(262144),fd=fs.openSync(part,'r');
+      let bytesR=0;while((bytesR=fs.readSync(fd,fBuf,0,fBuf.length,null))>0){hObj.update(fBuf.subarray(0,bytesR));}
+      fs.closeSync(fd);
+      const h=hObj.digest('hex');
+      if(h.toLowerCase()===hash.toLowerCase())return 'OK';
+      if(st.done){try{fs.unlinkSync(part);}catch{};return dlChunk(url0,0,hops+1,stag+1);}
+    }
+    const nxtStag=sz>pos?0:stag+1;
+    return new Promise((r2)=>setTimeout(r2,150)).then(()=>dlChunk(url0,sz,hops+1,nxtStag));
+  });
+}
+const startPos=fs.existsSync(part)?fs.statSync(part).size:0;
+dlChunk(url0,startPos,1,0).then((ok)=>{if(ok==='OK')process.exit(0);process.exit(1);}).catch(()=>process.exit(1));
+'@
+            $nodeJsFile = $partPath + '.dl.js'
+            [IO.File]::WriteAllText($nodeJsFile, $nodeDlScript, (New-Object System.Text.UTF8Encoding($false)))
+            $prevIa32 = $env:OPENSSL_ia32cap
+            $prevNOpts = $env:NODE_OPTIONS
+            $prevEaN = $ErrorActionPreference
+            try {
+              $env:OPENSSL_ia32cap = '~0x200000200000000'
+              $env:NODE_OPTIONS = '--tls-max-v1.2'
+              $ErrorActionPreference = 'Continue'
+              & $nodeHelper $nodeJsFile $Url $partPath $Hash ([string]$StatusFile) $label ([string]$knownTotalBytes) *> $null
+              if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $partPath -PathType Leaf) -and ((Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash -ieq $Hash)) {
+                Move-Item -LiteralPath $partPath -Destination $Path -Force
+                $downloaded = $true
+              }
+            } finally {
+              $ErrorActionPreference = $prevEaN
+              if ($null -ne $prevIa32) { $env:OPENSSL_ia32cap = $prevIa32 } else { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
+              if ($null -ne $prevNOpts) { $env:NODE_OPTIONS = $prevNOpts } else { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
+              Remove-Item -LiteralPath $nodeJsFile -Force -ErrorAction SilentlyContinue
+            }
+            if ($downloaded) { break }
+          } catch { }
+        }
+      }
+
       $curlExe = Join-Path $env:SystemRoot 'System32\curl.exe'
       if (-not $useLegacy -and (Test-Path -LiteralPath $curlExe -PathType Leaf)) {
+        $prevEaCurl = $ErrorActionPreference
         try {
-          for ($hop = 1; $hop -le 6; $hop++) {
+          $ErrorActionPreference = 'Continue'
+          $stagnant = 0
+          for ($hop = 1; $hop -le 120 -and $stagnant -lt 8; $hop++) {
             $curBytes = if (Test-Path -LiteralPath $partPath -PathType Leaf) { (Get-Item -LiteralPath $partPath).Length } else { 0L }
             if ((Get-Command Write-EditorStatus -ErrorAction SilentlyContinue) -and $StatusFile) {
               $mbHop = [Math]::Round($curBytes / 1MB, 1)
-              try { Write-EditorStatus "Kết nối tải $label bị gián đoạn — đang tải nối tiếp từ $mbHop MB (TLS 1.2, chặng $hop/6)..." } catch { }
+              $mbMaxH = [Math]::Round($knownTotalBytes / 1MB, 0)
+              $pctHop = if ($knownTotalBytes -gt 0) { [Math]::Min(99, [int][Math]::Floor(($curBytes * 100.0) / $knownTotalBytes)) } else { 0 }
+              try { Write-EditorStatus "Đang tải nối tiếp $label... $pctHop% ($mbHop / $mbMaxH MB · chặng $hop)" } catch { }
             }
-            & $curlExe --fail --location --http1.1 --tlsv1.2 --retry 2 --connect-timeout 30 --max-time 600 -A 'AnhLapTrinh-EmTroLy-Installer/1.0' -C - -o $partPath $Url *> $null
-            if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $partPath -PathType Leaf)) {
-              if ((Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash -ieq $Hash) {
-                Move-Item -LiteralPath $partPath -Destination $Path -Force
-                $downloaded = $true
-                break
+            & $curlExe -sS --fail --location --http1.1 --tlsv1.2 --connect-timeout 25 --max-time 180 --speed-limit 10240 --speed-time 15 -A 'AnhLapTrinh-EmTroLy-Installer/1.0' -C - -o $partPath $Url 2>$null
+            $curlRc = $LASTEXITCODE
+            if (Test-Path -LiteralPath $partPath -PathType Leaf) {
+              $newBytes = (Get-Item -LiteralPath $partPath).Length
+              if ($curlRc -eq 0 -or ($knownTotalBytes -gt 0 -and $newBytes -ge $knownTotalBytes)) {
+                if ((Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash -ieq $Hash) {
+                  Move-Item -LiteralPath $partPath -Destination $Path -Force
+                  $downloaded = $true
+                  break
+                }
+                if ($curlRc -eq 0) {
+                  # Full file completed with wrong hash (corrupt bytes cached in part); reset part once
+                  Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue
+                  $stagnant++
+                  continue
+                }
               }
-              # Full file completed with wrong hash (corrupt bytes cached in part); reset part once
-              Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue
-              continue
+              if ($curlRc -eq 33 -or $newBytes -lt $curBytes) {
+                Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue
+                $stagnant++
+              } elseif ($newBytes -gt $curBytes) {
+                $stagnant = 0
+              } else {
+                $stagnant++
+              }
+            } else {
+              $stagnant++
             }
-            $newBytes = if (Test-Path -LiteralPath $partPath -PathType Leaf) { (Get-Item -LiteralPath $partPath).Length } else { 0L }
-            if ($LASTEXITCODE -eq 33 -or $newBytes -lt $curBytes) {
-              if (Test-Path -LiteralPath $partPath -PathType Leaf) { Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue }
-            }
-            if ($hop -lt 6) { Start-Sleep -Milliseconds 600 }
+            if ($hop -lt 120) { Start-Sleep -Milliseconds 150 }
           }
           if ($downloaded) { break }
-        } catch { }
+        } catch {
+        } finally {
+          $ErrorActionPreference = $prevEaCurl
+        }
       }
-      if (Test-Path -LiteralPath $partPath -PathType Leaf) { Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue }
-      if (Test-Path -LiteralPath $Path -PathType Leaf) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
+      if ($useLegacy -and (Test-Path -LiteralPath $Path -PathType Leaf)) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
       if ($attempt -lt $maxAttempts) { Start-Sleep -Milliseconds (500 * $attempt) }
     }
   }
-  if (-not $downloaded) { throw 'editor-download-failed' }
+  if (-not $downloaded) {
+    if (Test-Path -LiteralPath $partPath -PathType Leaf) { Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue }
+    if (Test-Path -LiteralPath $Path -PathType Leaf) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
+    throw 'editor-download-failed'
+  }
   if ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ine $Hash) {
     Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     throw 'editor-download-checksum'

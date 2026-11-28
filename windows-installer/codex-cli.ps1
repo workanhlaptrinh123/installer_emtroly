@@ -154,12 +154,16 @@ function Find-EmTroLyCodexCli {
   if ($emTroLyBase) {
     $autoHealCmd = Join-Path $emTroLyBase 'AutoHealCli\node_modules\.bin\codex.cmd'
     if (Test-Path -LiteralPath $autoHealCmd -PathType Leaf) {
-      return [pscustomobject]@{
-        Available = $true
-        Executable = $autoHealCmd
-        CodexHome = if ($hasPrivateCodexHome) { $emTroLyCodexHome } else { '' }
-        Source = 'emtroly'
-        Label = 'Sẵn sàng · Codex CLI tự sửa lỗi của Em Trợ Lý'
+      $autoHealJs = Join-Path $emTroLyBase 'AutoHealCli\node_modules\@openai\codex\bin\codex.js'
+      $autoHealWinPkg = Join-Path $emTroLyBase 'AutoHealCli\node_modules\@openai\codex-win32-x64'
+      if (-not (Test-Path -LiteralPath $autoHealJs -PathType Leaf) -or (Test-Path -LiteralPath $autoHealWinPkg -PathType Container)) {
+        return [pscustomobject]@{
+          Available = $true
+          Executable = $autoHealCmd
+          CodexHome = if ($hasPrivateCodexHome) { $emTroLyCodexHome } else { '' }
+          Source = 'emtroly'
+          Label = 'Sẵn sàng · Codex CLI tự sửa lỗi của Em Trợ Lý'
+        }
       }
     }
   }
@@ -285,77 +289,112 @@ requires_openai_auth = true
       try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         Add-Type -AssemblyName System.Net.Http -ErrorAction SilentlyContinue
+        $knownTotalLen = 389000000L
         for ($dlTry = 1; $dlTry -le 3; $dlTry++) {
+          $handler = $null
+          $client = $null
+          $inStream = $null
+          $outStream = $null
           try {
-            if (Test-Path -LiteralPath $tmpVsix -PathType Leaf) { Remove-Item -LiteralPath $tmpVsix -Force -ErrorAction SilentlyContinue }
-            & $writeMsg 'Đang tải gói Codex CLI & Extension (khoảng 370 MB)...'
-            $handler = New-Object System.Net.Http.HttpClientHandler
-            $handler.AutomaticDecompression = [System.Net.DecompressionMethods]::GZip -bor [System.Net.DecompressionMethods]::Deflate
-            $client = New-Object System.Net.Http.HttpClient($handler)
-            $client.Timeout = [TimeSpan]::FromMinutes(20)
-            try {
-              $resp = $client.GetAsync($extensionUrl, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
-              [void]$resp.EnsureSuccessStatusCode()
-              $totalLen = if ($resp.Content.Headers.ContentLength) { [long]$resp.Content.Headers.ContentLength } else { 389000000L }
-              $inStream = $resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
-              $outStream = New-Object System.IO.FileStream($tmpVsix, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read, 262144)
-              try {
-                $buf = New-Object byte[] 262144
-                $readTotal = 0L
-                $sw = [Diagnostics.Stopwatch]::StartNew()
-                $lastTick = -2000L
-                while (($n = $inStream.Read($buf, 0, $buf.Length)) -gt 0) {
-                  $outStream.Write($buf, 0, $n)
-                  $readTotal += $n
-                  if (($sw.ElapsedMilliseconds - $lastTick) -ge 450) {
-                    $lastTick = $sw.ElapsedMilliseconds
-                    $pct = [Math]::Min(99, [int][Math]::Floor(($readTotal * 100.0) / [Math]::Max(1L, $totalLen)))
-                    $mbCur = [Math]::Round($readTotal / 1MB, 1)
-                    $mbMax = [Math]::Round($totalLen / 1MB, 0)
-                    $spd = [Math]::Round(($readTotal / 1MB) / [Math]::Max(0.1, $sw.Elapsed.TotalSeconds), 1)
-                    & $writeMsg "Đang tải gói Codex CLI & Extension... $pct% ($mbCur / $mbMax MB · $spd MB/s)"
-                  }
-                }
-              } finally {
-                $outStream.Dispose()
-                $inStream.Dispose()
-              }
-            } finally {
-              $client.Dispose()
-              $handler.Dispose()
-            }
-            if ((Get-FileHash -LiteralPath $tmpVsix -Algorithm SHA256).Hash -ieq $extensionHash) {
+            $resumeAt = if (Test-Path -LiteralPath $tmpVsix -PathType Leaf) { (Get-Item -LiteralPath $tmpVsix).Length } else { 0L }
+            if ($resumeAt -gt 0 -and ((Get-FileHash -LiteralPath $tmpVsix -Algorithm SHA256).Hash -ieq $extensionHash)) {
               Move-Item -LiteralPath $tmpVsix -Destination $cachedVsix -Force
               $vsixReady = $true
               break
-            } else {
+            }
+            if ($resumeAt -eq 0) {
+              & $writeMsg 'Đang tải gói Codex CLI & Extension (khoảng 370 MB)...'
+              $handler = New-Object System.Net.Http.HttpClientHandler
+              $handler.AutomaticDecompression = [System.Net.DecompressionMethods]::GZip -bor [System.Net.DecompressionMethods]::Deflate
+              $client = New-Object System.Net.Http.HttpClient($handler)
+              $client.Timeout = [TimeSpan]::FromMinutes(20)
+              $resp = $client.GetAsync($extensionUrl, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+              [void]$resp.EnsureSuccessStatusCode()
+              $totalLen = if ($resp.Content.Headers.ContentLength) { [long]$resp.Content.Headers.ContentLength } else { $knownTotalLen }
+              $knownTotalLen = $totalLen
+              $inStream = $resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+              $outStream = New-Object System.IO.FileStream($tmpVsix, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Read, 262144)
+              $buf = New-Object byte[] 262144
+              $readTotal = 0L
+              $sw = [Diagnostics.Stopwatch]::StartNew()
+              $lastTick = -2000L
+              while (($n = $inStream.Read($buf, 0, $buf.Length)) -gt 0) {
+                $outStream.Write($buf, 0, $n)
+                $readTotal += $n
+                if (($sw.ElapsedMilliseconds - $lastTick) -ge 450) {
+                  $lastTick = $sw.ElapsedMilliseconds
+                  $pct = [Math]::Min(99, [int][Math]::Floor(($readTotal * 100.0) / [Math]::Max(1L, $totalLen)))
+                  $mbCur = [Math]::Round($readTotal / 1MB, 1)
+                  $mbMax = [Math]::Round($totalLen / 1MB, 0)
+                  $spd = [Math]::Round(($readTotal / 1MB) / [Math]::Max(0.1, $sw.Elapsed.TotalSeconds), 1)
+                  & $writeMsg "Đang tải gói Codex CLI & Extension... $pct% ($mbCur / $mbMax MB · $spd MB/s)"
+                }
+              }
+              $outStream.Flush()
+              $outStream.Dispose(); $outStream = $null
+              $inStream.Dispose(); $inStream = $null
+              $client.Dispose(); $client = $null
+              $handler.Dispose(); $handler = $null
+              if ((Get-FileHash -LiteralPath $tmpVsix -Algorithm SHA256).Hash -ieq $extensionHash) {
+                Move-Item -LiteralPath $tmpVsix -Destination $cachedVsix -Force
+                $vsixReady = $true
+                break
+              }
               Remove-Item -LiteralPath $tmpVsix -Force -ErrorAction SilentlyContinue
+            } else {
+              throw 'resume-via-curl'
             }
           } catch {
+            if ($outStream) { try { $outStream.Flush() } catch { }; try { $outStream.Dispose() } catch { } }
+            if ($inStream) { try { $inStream.Dispose() } catch { } }
+            if ($client) { try { $client.Dispose() } catch { } }
+            if ($handler) { try { $handler.Dispose() } catch { } }
             $curlFallback = Join-Path $env:SystemRoot 'System32\curl.exe'
             if ((Test-Path -LiteralPath $curlFallback -PathType Leaf) -and $extensionUrl -match '^https://') {
+              $prevEaCurl = $ErrorActionPreference
               try {
-                for ($hop = 1; $hop -le 6; $hop++) {
+                $ErrorActionPreference = 'Continue'
+                $stagnant = 0
+                for ($hop = 1; $hop -le 120 -and $stagnant -lt 8; $hop++) {
                   $curVBytes = if (Test-Path -LiteralPath $tmpVsix -PathType Leaf) { (Get-Item -LiteralPath $tmpVsix).Length } else { 0L }
                   $mbVHop = [Math]::Round($curVBytes / 1MB, 1)
-                  & $writeMsg "Kết nối tải bị gián đoạn — đang tải nối tiếp Codex VSIX từ $mbVHop MB (TLS 1.2, chặng $hop/6)..."
-                  & $curlFallback --fail --location --http1.1 --tlsv1.2 --retry 2 --connect-timeout 30 --max-time 600 -A 'AnhLapTrinh-EmTroLy-Installer/1.0' -C - -o $tmpVsix $extensionUrl *> $null
-                  if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $tmpVsix -PathType Leaf)) {
-                    if ((Get-FileHash -LiteralPath $tmpVsix -Algorithm SHA256).Hash -ieq $extensionHash) {
-                      Move-Item -LiteralPath $tmpVsix -Destination $cachedVsix -Force
-                      $vsixReady = $true
-                      break
+                  $mbVMax = [Math]::Round($knownTotalLen / 1MB, 0)
+                  $pctVHop = [Math]::Min(99, [int][Math]::Floor(($curVBytes * 100.0) / [Math]::Max(1L, $knownTotalLen)))
+                  & $writeMsg "Đang tải nối tiếp Codex VSIX... $pctVHop% ($mbVHop / $mbVMax MB · chặng $hop)"
+                  & $curlFallback -sS --fail --location --http1.1 --tlsv1.2 --connect-timeout 25 --max-time 180 --speed-limit 10240 --speed-time 15 -A 'AnhLapTrinh-EmTroLy-Installer/1.0' -C - -o $tmpVsix $extensionUrl 2>$null
+                  $curlRc = $LASTEXITCODE
+                  if (Test-Path -LiteralPath $tmpVsix -PathType Leaf) {
+                    $newVBytes = (Get-Item -LiteralPath $tmpVsix).Length
+                    if ($curlRc -eq 0 -or $newVBytes -ge $knownTotalLen) {
+                      if ((Get-FileHash -LiteralPath $tmpVsix -Algorithm SHA256).Hash -ieq $extensionHash) {
+                        Move-Item -LiteralPath $tmpVsix -Destination $cachedVsix -Force
+                        $vsixReady = $true
+                        break
+                      }
+                      if ($curlRc -eq 0) {
+                        Remove-Item -LiteralPath $tmpVsix -Force -ErrorAction SilentlyContinue
+                        $stagnant++
+                        continue
+                      }
                     }
-                    Remove-Item -LiteralPath $tmpVsix -Force -ErrorAction SilentlyContinue
-                    continue
+                    if ($curlRc -eq 33 -or $newVBytes -lt $curVBytes) {
+                      Remove-Item -LiteralPath $tmpVsix -Force -ErrorAction SilentlyContinue
+                      $stagnant++
+                    } elseif ($newVBytes -gt $curVBytes) {
+                      $stagnant = 0
+                    } else {
+                      $stagnant++
+                    }
+                  } else {
+                    $stagnant++
                   }
-                  if ($LASTEXITCODE -eq 33) {
-                    if (Test-Path -LiteralPath $tmpVsix -PathType Leaf) { Remove-Item -LiteralPath $tmpVsix -Force -ErrorAction SilentlyContinue }
-                  }
-                  if ($hop -lt 6) { Start-Sleep -Milliseconds 600 }
+                  if ($hop -lt 120) { Start-Sleep -Milliseconds 150 }
                 }
                 if ($vsixReady) { break }
-              } catch { }
+              } catch {
+              } finally {
+                $ErrorActionPreference = $prevEaCurl
+              }
             }
             if ($dlTry -lt 3) { Start-Sleep -Seconds (2 * $dlTry) }
           }

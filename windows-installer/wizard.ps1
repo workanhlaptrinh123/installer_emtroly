@@ -1395,6 +1395,55 @@ $xamlText = @'
               </Grid>
             </Border>
 
+            <!-- Inline Modular Progress Card (Stays inside ViewModular — shows ONLY the running component(s)) -->
+            <Border x:Name="ModProgressCard" Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="12" Padding="16,13" Margin="0,0,0,10" Visibility="Collapsed">
+              <StackPanel>
+                <DockPanel Margin="0,0,0,8">
+                  <TextBlock x:Name="ModProgressPercentText" DockPanel.Dock="Right" Text="0%" FontSize="14.5" FontWeight="Bold" Foreground="#2563EB" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                  <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border x:Name="ModActiveCompPill" Background="#DBEAFE" BorderBrush="#93C5FD" BorderThickness="1" CornerRadius="10" Padding="9,2" Margin="0,0,8,2" VerticalAlignment="Center">
+                      <TextBlock x:Name="ModActiveCompText" Text="Đang cài phần đã chọn" FontSize="11.5" FontWeight="Bold" Foreground="#1D4ED8"/>
+                    </Border>
+                    <TextBlock x:Name="ModProgressStatusText" Text="Đang chuẩn bị..." FontSize="13.5" FontWeight="Bold" Foreground="#0F172A" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                  </WrapPanel>
+                </DockPanel>
+                <ProgressBar x:Name="ModProgressBar" Style="{StaticResource ModernProgressBar}" Minimum="0" Maximum="100" Value="0"/>
+                <TextBlock x:Name="ModProgressSubText" Text="Đang thực hiện riêng phần đã chọn ngay tại đây · Có thể bấm Dừng lại bất cứ lúc nào." FontSize="11.5" Foreground="#475569" Margin="0,6,0,0" TextWrapping="Wrap"/>
+              </StackPanel>
+            </Border>
+
+            <!-- Inline Modular Error & Diagnostics Card (Stays inside ViewModular) -->
+            <Border x:Name="ModFailureActions" Background="#FFFFFF" BorderBrush="#FCA5A5" BorderThickness="1.5" CornerRadius="12" Padding="16,13" Margin="0,0,0,10" Visibility="Collapsed">
+              <StackPanel>
+                <DockPanel Margin="0,0,0,8">
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="ModCopyErrorBtn" Style="{StaticResource SecondaryBtn}" Content="Sao chép lỗi" Height="30" Padding="10,0" FontSize="12" Margin="0,0,6,0"/>
+                    <Button x:Name="ModOpenCodexBtn" Style="{StaticResource SoftAccentBtn}" Content="Mở Công cụ Codex CLI →" Height="30" Padding="10,0" FontSize="12"/>
+                  </StackPanel>
+                  <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border Background="#FEF2F2" BorderBrush="#FECACA" BorderThickness="1" CornerRadius="10" Padding="9,2" Margin="0,0,8,0">
+                      <StackPanel Orientation="Horizontal">
+                        <Ellipse Width="7" Height="7" Fill="#DC2626" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBlock Text="SỰ CỐ THÀNH PHẦN" FontSize="11" FontWeight="Bold" Foreground="#B91C1C" VerticalAlignment="Center"/>
+                      </StackPanel>
+                    </Border>
+                    <Border Background="#FFFBEB" BorderBrush="#FDE68A" BorderThickness="1" CornerRadius="10" Padding="8,2" VerticalAlignment="Center">
+                      <TextBlock x:Name="ModErrorStepText" Text="Cần kiểm tra" FontSize="11.5" FontWeight="SemiBold" Foreground="#B45309"/>
+                    </Border>
+                  </StackPanel>
+                </DockPanel>
+                <TextBlock x:Name="ModErrorSummaryHeading" Text="Không hoàn tất được thành phần đã chọn." FontSize="13" FontWeight="Bold" Foreground="#991B1B" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                <Border Background="#FFF8F8" BorderBrush="#FECACA" BorderThickness="1" CornerRadius="8" Padding="2" Margin="0,0,0,10">
+                  <TextBox x:Name="ModErrorDetailBox" FontFamily="Segoe UI" FontSize="12" Foreground="#1E293B" Background="Transparent" BorderThickness="0" TextWrapping="Wrap" MaxHeight="110" Padding="10,6"/>
+                </Border>
+                <UniformGrid Columns="3">
+                  <Button x:Name="ModRetryBtn" Style="{StaticResource PrimaryBtn}" Content="Thử cài lại phần này" Padding="8,0" Margin="0,0,6,0"/>
+                  <Button x:Name="ModAutoHealBtn" Style="{StaticResource SoftAccentBtn}" Content="Tự sửa lỗi bằng Codex" Padding="8,0" Margin="3,0,3,0"/>
+                  <Button x:Name="ModExportBtn" Style="{StaticResource SecondaryBtn}" Content="Xuất báo cáo (.txt)" Padding="8,0" Margin="6,0,0,0"/>
+                </UniformGrid>
+              </StackPanel>
+            </Border>
+
             <!-- Component 1: Codex CLI -->
             <Border Style="{StaticResource CardBorder}" Padding="16,11" Margin="0,0,0,8">
               <Grid>
@@ -2001,6 +2050,28 @@ if ($codexOutputBox) {
   $codexOutputBox.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
 }
 
+$modProgressCard      = Get-Ui 'ModProgressCard'
+$modActiveCompPill    = Get-Ui 'ModActiveCompPill'
+$modActiveCompText    = Get-Ui 'ModActiveCompText'
+$modProgressStatusText = Get-Ui 'ModProgressStatusText'
+$modProgressPercentText = Get-Ui 'ModProgressPercentText'
+$modProgressBar       = Get-Ui 'ModProgressBar'
+$modProgressSubText   = Get-Ui 'ModProgressSubText'
+$modFailureActions    = Get-Ui 'ModFailureActions'
+$modErrorStepText     = Get-Ui 'ModErrorStepText'
+$modErrorSummaryHeading = Get-Ui 'ModErrorSummaryHeading'
+$modErrorDetailBox    = Get-Ui 'ModErrorDetailBox'
+$modCopyErrorBtn      = Get-Ui 'ModCopyErrorBtn'
+$modOpenCodexBtn      = Get-Ui 'ModOpenCodexBtn'
+$modRetryBtn          = Get-Ui 'ModRetryBtn'
+$modAutoHealBtn       = Get-Ui 'ModAutoHealBtn'
+$modExportBtn         = Get-Ui 'ModExportBtn'
+if ($modErrorDetailBox) {
+  $modErrorDetailBox.IsReadOnly = $true
+  $modErrorDetailBox.AcceptsReturn = $true
+  $modErrorDetailBox.VerticalScrollBarVisibility = [System.Windows.Controls.ScrollBarVisibility]::Auto
+}
+
 $diagCheckUpdateBtn = Get-Ui 'DiagCheckUpdateBtn'
 $diagUpdateStatusText = Get-Ui 'DiagUpdateStatusText'
 $runPreflightBtn    = Get-Ui 'RunPreflightBtn'
@@ -2150,6 +2221,10 @@ $script:lastInstallErrorDetail = ''
 $script:lastFullErrorReport = ''
 $script:lastActiveStepIndex = 1
 $script:gatewayDashboardUrl = ''
+$script:activeInstallOrigin = ''
+$script:activeModularComponents = @()
+$script:lastModularSelected = @()
+$script:lastModularForceReinstall = $false
 
 $script:codexProcess = $null
 $script:codexPrivateDir = $null
@@ -2683,7 +2758,21 @@ function Set-NavActive([string]$Key) {
   }
 
   $activeBtn = $navHomeBtn
-  if ($script:installRunning -or $script:retryEditor) {
+  if ($script:installRunning -and $script:activeInstallOrigin -eq 'modular') {
+    $activeBtn = $navModularBtn
+    $viewModular.Visibility = [System.Windows.Visibility]::Visible
+    $activeModLabel = if (Get-Command Get-ModularFriendlyNames -ErrorAction SilentlyContinue) {
+      Get-ModularFriendlyNames $script:activeModularComponents
+    } else {
+      ($script:activeModularComponents -join ', ')
+    }
+    $headerTitle.Text = 'Cài đặt từng phần thủ công (Lõi)'
+    $headerSubtitle.Text = if ($activeModLabel) {
+      "Đang chạy riêng: $activeModLabel — chỉ hiển thị tiến trình phần đang cài"
+    } else {
+      'Đang thực hiện thành phần đã chọn ngay trên tab này'
+    }
+  } elseif ($script:installRunning -or $script:retryEditor) {
     $viewProgress.Visibility = [System.Windows.Visibility]::Visible
     $installChecklistCard.Visibility = if ($script:currentManageAction) { [System.Windows.Visibility]::Collapsed } else { [System.Windows.Visibility]::Visible }
     $activeBtn = if ($script:isManageMode) { $navHomeBtn } else { $navConfigBtn }
@@ -2707,7 +2796,9 @@ function Set-NavActive([string]$Key) {
     $viewModular.Visibility = [System.Windows.Visibility]::Visible
     $headerTitle.Text = 'Cài đặt từng phần thủ công (Lõi)'
     $headerSubtitle.Text = 'Chọn cài riêng lẻ từng công cụ lõi (Codex CLI · Antigravity IDE · Codex Extension · OpenClaw)'
-    Update-ModularCards
+    if (-not $script:installRunning) {
+      [void](Update-ModularCards)
+    }
   } elseif ($Key -eq 'store') {
     $activeBtn = $navStoreBtn
     if ($viewStore) { $viewStore.Visibility = [System.Windows.Visibility]::Visible }
@@ -2765,6 +2856,12 @@ function Set-Buttons {
   foreach ($nb in @($navHomeBtn, $navModularBtn, $navStoreBtn, $navConfigBtn, $navCodexBtn, $navDiagBtn)) {
     if (-not $nb) { continue }
     $nb.IsEnabled = (-not $script:installRunning -and -not $script:retryEditor)
+  }
+  foreach ($modCtrl in @($modModelBox, $modSelectAllBtn, $modRefreshBtn, $modInstall1Btn, $modInstall2Btn, $modInstall3Btn, $modInstall4Btn, $modCheck1, $modCheck2, $modCheck3, $modZaloCheck, $modTokenPwdBox, $modAutoFetchBtn, $modOwnersBox, $modGroupBox)) {
+    if ($modCtrl) { $modCtrl.IsEnabled = (-not $script:installRunning -and -not $script:retryEditor) }
+  }
+  if ($modCheck4 -and ($script:installRunning -or $script:retryEditor)) {
+    $modCheck4.IsEnabled = $false
   }
   if ($sidebarResetAllBtn) {
     $sidebarResetAllBtn.IsEnabled = (-not $script:installRunning)
@@ -2864,10 +2961,13 @@ function Set-Buttons {
 
 function Stop-ActiveRunner([string]$ReasonMessage = 'Đã dừng tiến trình theo yêu cầu của bạn.') {
   $installTimer.Stop()
+  $wasOrigin = $script:activeInstallOrigin
   $proc = $script:runnerProcess
   $script:runnerProcess = $null
   $script:installRunning = $false
   $script:currentManageAction = ''
+  $script:activeInstallOrigin = ''
+  $script:activeModularComponents = @()
   if ($proc) {
     $procId = 0
     try { $procId = [int]$proc.Id } catch { }
@@ -2878,13 +2978,46 @@ function Stop-ActiveRunner([string]$ReasonMessage = 'Đã dừng tiến trình t
   }
   Cleanup-Secret
   $installProgressBar.IsIndeterminate = $false
+  if ($modProgressBar) { $modProgressBar.IsIndeterminate = $false }
   if (-not [string]::IsNullOrWhiteSpace($ReasonMessage)) {
     $statusText.Text = $ReasonMessage
   }
   if (-not $script:retryEditor -and -not $script:installCompleted) {
     $script:resultCode = 2
   }
-  Set-Buttons
+  if ($wasOrigin -eq 'modular') {
+    if ($modProgressCard) {
+      $modProgressCard.Background = New-Brush '#FFFBEB'
+      $modProgressCard.BorderBrush = New-Brush '#FDE68A'
+      $modProgressCard.Visibility = [System.Windows.Visibility]::Visible
+    }
+    if ($modActiveCompPill) {
+      $modActiveCompPill.Background = New-Brush '#FEF3C7'
+      $modActiveCompPill.BorderBrush = New-Brush '#FDE68A'
+    }
+    if ($modActiveCompText) {
+      $modActiveCompText.Foreground = New-Brush '#B45309'
+      $modActiveCompText.Text = 'Đã dừng'
+    }
+    if ($modProgressBar) {
+      $modProgressBar.Foreground = New-Brush '#D97706'
+      $modProgressBar.Background = New-Brush '#FEF3C7'
+    }
+    if ($modProgressPercentText) {
+      $modProgressPercentText.Foreground = New-Brush '#B45309'
+      $modProgressPercentText.Text = 'Đã dừng'
+    }
+    if ($modProgressStatusText -and -not [string]::IsNullOrWhiteSpace($ReasonMessage)) {
+      $modProgressStatusText.Text = $ReasonMessage
+    }
+    if ($modProgressSubText) {
+      $modProgressSubText.Text = 'Đã dừng an toàn. Bạn có thể chọn cài lại phần này bất cứ lúc nào.'
+    }
+    [void](Update-ModularCards)
+    Set-NavActive 'modular'
+  } else {
+    Set-Buttons
+  }
   if (-not $script:licenseVerified -and -not $SmokeTest) {
     Show-LicenseGate $ReasonMessage
   }
@@ -3283,7 +3416,28 @@ function Invoke-FactoryResetPrompt {
   Start-ManageAction 'factory-reset'
 }
 
-function Set-ModularBadgeVisual($BadgeBorder, $BadgeTextCtrl, [bool]$Installed) {
+function Set-ModularBadgeVisual($BadgeBorder, $BadgeTextCtrl, [bool]$Installed, [string]$OverrideState = '', [string]$OverrideText = '') {
+  if ($OverrideState -eq 'running') {
+    $BadgeBorder.Background = New-Brush '#EFF6FF'
+    $BadgeBorder.BorderBrush = New-Brush '#93C5FD'
+    $BadgeTextCtrl.Foreground = New-Brush '#1D4ED8'
+    $BadgeTextCtrl.Text = if ($OverrideText) { $OverrideText } else { '⟳ Đang cài...' }
+    return
+  }
+  if ($OverrideState -eq 'heal') {
+    $BadgeBorder.Background = New-Brush '#FFFBEB'
+    $BadgeBorder.BorderBrush = New-Brush '#FCD34D'
+    $BadgeTextCtrl.Foreground = New-Brush '#B45309'
+    $BadgeTextCtrl.Text = if ($OverrideText) { $OverrideText } else { '⟳ Tự sửa lỗi...' }
+    return
+  }
+  if ($OverrideState -eq 'error') {
+    $BadgeBorder.Background = New-Brush '#FEF2F2'
+    $BadgeBorder.BorderBrush = New-Brush '#FCA5A5'
+    $BadgeTextCtrl.Foreground = New-Brush '#DC2626'
+    $BadgeTextCtrl.Text = if ($OverrideText) { $OverrideText } else { '✕ Gặp lỗi' }
+    return
+  }
   if ($Installed) {
     $BadgeBorder.Background = New-Brush '#ECFDF5'
     $BadgeBorder.BorderBrush = New-Brush '#A7F3D0'
@@ -3295,6 +3449,280 @@ function Set-ModularBadgeVisual($BadgeBorder, $BadgeTextCtrl, [bool]$Installed) 
     $BadgeTextCtrl.Foreground = New-Brush '#475569'
     $BadgeTextCtrl.Text = '○ Chưa cài'
   }
+}
+
+function Get-ModularFriendlyNames([string[]]$Components) {
+  $labelMap = @{
+    'codex-cli'       = '1. Codex CLI'
+    'antigravity-ide' = '2. Antigravity IDE'
+    'codex-extension' = '3. Codex Extension'
+    'openclaw'        = '4. OpenClaw'
+  }
+  $names = @()
+  foreach ($c in @($Components)) {
+    if ($labelMap.ContainsKey($c)) { $names += $labelMap[$c] } elseif ($c) { $names += $c }
+  }
+  return ($names -join ' · ')
+}
+
+function Get-ModularCardRefs([string]$ComponentId) {
+  switch ($ComponentId) {
+    'codex-cli'       { return @{ Badge = $modBadge1; Text = $modBadgeText1; Btn = $modInstall1Btn; Label = '1. Codex CLI riêng' } }
+    'antigravity-ide' { return @{ Badge = $modBadge2; Text = $modBadgeText2; Btn = $modInstall2Btn; Label = '2. Antigravity IDE riêng' } }
+    'codex-extension' { return @{ Badge = $modBadge3; Text = $modBadgeText3; Btn = $modInstall3Btn; Label = '3. Codex Extension' } }
+    'openclaw'        { return @{ Badge = $modBadge4; Text = $modBadgeText4; Btn = $modInstall4Btn; Label = '4. Trợ lý OpenClaw' } }
+    default           { return $null }
+  }
+}
+
+function Reset-ModularProgressVisualState([string[]]$Components) {
+  $friendly = Get-ModularFriendlyNames $Components
+  if ($modFailureActions) { $modFailureActions.Visibility = [System.Windows.Visibility]::Collapsed }
+  if ($modCopyErrorBtn) { $modCopyErrorBtn.Content = 'Sao chép lỗi' }
+  if ($modProgressCard) {
+    $modProgressCard.Background = New-Brush '#EFF6FF'
+    $modProgressCard.BorderBrush = New-Brush '#BFDBFE'
+    $modProgressCard.Visibility = [System.Windows.Visibility]::Visible
+  }
+  if ($modActiveCompPill) {
+    $modActiveCompPill.Background = New-Brush '#DBEAFE'
+    $modActiveCompPill.BorderBrush = New-Brush '#93C5FD'
+  }
+  if ($modActiveCompText) {
+    $modActiveCompText.Foreground = New-Brush '#1D4ED8'
+    $modActiveCompText.Text = if ($friendly) { "Đang cài: $friendly" } else { 'Đang cài phần đã chọn' }
+  }
+  if ($modProgressPercentText) {
+    $modProgressPercentText.Foreground = New-Brush '#2563EB'
+    $modProgressPercentText.Text = '4%'
+  }
+  if ($modProgressBar) {
+    $modProgressBar.IsIndeterminate = $false
+    $modProgressBar.Foreground = New-Brush '#2563EB'
+    $modProgressBar.Background = New-Brush '#DBEAFE'
+    $modProgressBar.Value = 4
+  }
+  if ($modProgressStatusText) {
+    $modProgressStatusText.Text = if ($friendly) { "Đang khởi động cài riêng $friendly..." } else { 'Đang chuẩn bị...' }
+  }
+  if ($modProgressSubText) {
+    $modProgressSubText.Text = 'Đang chạy trực tiếp ngay trên tab Cài từng phần · Chỉ hiển thị tiến trình của thành phần đang chạy.'
+  }
+  foreach ($c in @('codex-cli', 'antigravity-ide', 'codex-extension', 'openclaw')) {
+    $refs = Get-ModularCardRefs $c
+    if (-not $refs) { continue }
+    if ($c -in @($Components)) {
+      if ($c -eq $Components[0]) {
+        Set-ModularBadgeVisual $refs.Badge $refs.Text $false 'running' '⟳ Đang chạy...'
+      } else {
+        Set-ModularBadgeVisual $refs.Badge $refs.Text $false 'running' 'Chờ lượt...'
+      }
+      if ($refs.Btn) { $refs.Btn.Content = 'Đang cài...' }
+    }
+  }
+}
+
+function Update-ModularProgressFromStatus([string]$Message) {
+  if ([string]::IsNullOrWhiteSpace($Message)) { return }
+  $activeComps = @($script:activeModularComponents)
+  if ($activeComps.Count -eq 0) { $activeComps = @('codex-cli') }
+  $isHealing = ($Message -match 'Codex CLI đang tự động|Codex CLI đã xử lý|Phát hiện sự cố|tự sửa lỗi')
+
+  if ($modProgressStatusText) { $modProgressStatusText.Text = $Message }
+  if ($Message.StartsWith('Hoàn tất:')) {
+    if ($modProgressBar) {
+      $modProgressBar.IsIndeterminate = $false
+      $modProgressBar.Value = 100
+      $modProgressBar.Foreground = New-Brush '#059669'
+      $modProgressBar.Background = New-Brush '#D1FAE5'
+    }
+    if ($modProgressPercentText) {
+      $modProgressPercentText.Text = '100%'
+      $modProgressPercentText.Foreground = New-Brush '#059669'
+    }
+    return
+  }
+
+  $activeComp = $activeComps[0]
+  if ($activeComps.Count -gt 1) {
+    if ($Message -match 'OpenClaw|Node\.js|Python|FFmpeg|Zalo|/zaloqr|bot Telegram|menu Telegram|Gateway|nâng cấp' -and ('openclaw' -in $activeComps)) {
+      $activeComp = 'openclaw'
+    } elseif ($Message -match 'Codex Extension' -and ('codex-extension' -in $activeComps)) {
+      $activeComp = 'codex-extension'
+    } elseif ($Message -match 'Antigravity IDE|lối tắt' -and ('antigravity-ide' -in $activeComps)) {
+      $activeComp = 'antigravity-ide'
+    } elseif ($Message -match 'Codex CLI|gói Codex CLI' -and ('codex-cli' -in $activeComps)) {
+      $activeComp = 'codex-cli'
+    }
+  }
+
+  $compIndex = [Math]::Max(0, [Array]::IndexOf($activeComps, $activeComp))
+  $slicePct = 100.0 / [Math]::Max(1, $activeComps.Count)
+  $subPct = -1
+  if ($Message -match '(?<!\d)(\d{1,3})%') {
+    $subPct = [Math]::Max(0, [Math]::Min(100, [int]$Matches[1]))
+  }
+
+  $withinRatio = 0.25
+  if ($isHealing) {
+    $curVal = if ($modProgressBar) { [double]$modProgressBar.Value } else { 20.0 }
+    $withinRatio = [Math]::Max(0.25, (($curVal - ($compIndex * $slicePct)) / $slicePct))
+  } elseif ($subPct -ge 0) {
+    $withinRatio = 0.12 + (0.72 * ($subPct / 100.0))
+  } elseif ($Message -match 'bỏ qua không cài lại|đã ở phiên bản mới nhất|đã cài đặt sẵn') {
+    $withinRatio = 0.96
+  } elseif ($Message -match 'kiểm tra API|máy chủ AI|bot Telegram') {
+    $withinRatio = 0.08
+  } elseif ($Message -match 'giải nén|kích hoạt|cấu hình khóa API|đăng ký lệnh|menu Telegram|xác nhận|khởi động Gateway') {
+    $withinRatio = 0.85
+  } elseif ($Message -match 'đang cài Antigravity|đang cài Codex Extension|đang tải và cài OpenClaw|cài đặt|nâng cấp') {
+    $withinRatio = 0.62
+  } else {
+    $withinRatio = 0.35
+  }
+
+  $totalPct = [int][Math]::Min(99, [Math]::Max(5, [Math]::Round(($compIndex * $slicePct) + ($slicePct * $withinRatio))))
+  if ($modProgressBar) {
+    $modProgressBar.IsIndeterminate = ($script:currentManageAction -eq 'auto-heal')
+    if (-not $modProgressBar.IsIndeterminate) { $modProgressBar.Value = [Math]::Max([int]$modProgressBar.Value, $totalPct) }
+  }
+  if ($modProgressPercentText) {
+    $modProgressPercentText.Text = if ($modProgressBar -and $modProgressBar.IsIndeterminate) { 'Đang xử lý...' } else { "$($modProgressBar.Value)%" }
+  }
+
+  $badgeLabel = if ($isHealing) {
+    '⟳ Tự sửa lỗi...'
+  } elseif ($subPct -ge 0) {
+    "Đang tải $subPct%"
+  } else {
+    '⟳ Đang cài...'
+  }
+  $refsAct = Get-ModularCardRefs $activeComp
+  if ($modActiveCompText -and $refsAct) {
+    $modActiveCompText.Text = if ($isHealing) { "Tự sửa: $($refsAct.Label)" } else { "Đang chạy: $($refsAct.Label)" }
+  }
+  for ($ci = 0; $ci -lt $activeComps.Count; $ci++) {
+    $cid = $activeComps[$ci]
+    $refs = Get-ModularCardRefs $cid
+    if (-not $refs) { continue }
+    if ($ci -lt $compIndex) {
+      Set-ModularBadgeVisual $refs.Badge $refs.Text $true
+    } elseif ($cid -eq $activeComp) {
+      Set-ModularBadgeVisual $refs.Badge $refs.Text $false $(if ($isHealing) { 'heal' } else { 'running' }) $badgeLabel
+    } else {
+      Set-ModularBadgeVisual $refs.Badge $refs.Text $false 'running' 'Chờ lượt...'
+    }
+  }
+}
+
+function Show-ModularFailureDiagnostics([string]$SummaryMessage, [object]$DiagPayload = $null) {
+  if ($modProgressCard) {
+    $modProgressCard.Background = New-Brush '#FEF2F2'
+    $modProgressCard.BorderBrush = New-Brush '#FCA5A5'
+    $modProgressCard.Visibility = [System.Windows.Visibility]::Visible
+  }
+  if ($modActiveCompPill) {
+    $modActiveCompPill.Background = New-Brush '#FEE2E2'
+    $modActiveCompPill.BorderBrush = New-Brush '#FCA5A5'
+  }
+  if ($modActiveCompText) {
+    $modActiveCompText.Foreground = New-Brush '#B91C1C'
+    $modActiveCompText.Text = 'Gặp sự cố'
+  }
+  if ($modProgressBar) {
+    $modProgressBar.IsIndeterminate = $false
+    $modProgressBar.Foreground = New-Brush '#DC2626'
+    $modProgressBar.Background = New-Brush '#FEE2E2'
+    if ([int]$modProgressBar.Value -lt 15) { $modProgressBar.Value = 25 }
+  }
+  if ($modProgressPercentText) {
+    $modProgressPercentText.Text = 'Gặp sự cố'
+    $modProgressPercentText.Foreground = New-Brush '#DC2626'
+  }
+  if ($modProgressStatusText) {
+    $modProgressStatusText.Text = 'Chưa hoàn tất phần đã chọn — xem chi tiết ngay bên dưới.'
+  }
+  if ($modProgressSubText) {
+    $modProgressSubText.Text = 'Các thành phần khác trên máy vẫn được giữ nguyên. Bấm "Thử cài lại phần này" hoặc "Tự sửa lỗi bằng Codex".'
+  }
+
+  $stageRaw = if ($DiagPayload -and $DiagPayload.stage) { ([string]$DiagPayload.stage).Trim() } else { '' }
+  $stageFriendlyMap = @{
+    'codex-cli'    = '1. Codex CLI'
+    'editor'       = '2–3. Antigravity IDE / Codex Extension'
+    'dependencies' = '4. Môi trường Node.js / Python / FFmpeg'
+    'install'      = '4. Trợ lý OpenClaw'
+    'openclaw'     = '4. Trợ lý OpenClaw'
+    'command'      = '4. Lệnh openclaw'
+    'zalo-verify'  = '4. Zalo & /zaloqr'
+    'provider'     = 'Kiểm tra API Key & Model'
+    'telegram'     = 'Kiểm tra Bot Telegram'
+  }
+  $activeLabel = Get-ModularFriendlyNames $script:lastModularSelected
+  $stepText = if ($stageFriendlyMap.ContainsKey($stageRaw)) { $stageFriendlyMap[$stageRaw] } elseif ($activeLabel) { $activeLabel } else { 'Thành phần đã chọn' }
+
+  $activeSecrets = @()
+  foreach ($candSec in @($tokenBox.Text, $apiKeyBox.Text, $script:sessionApiKeyFallback)) {
+    if (-not [string]::IsNullOrWhiteSpace($candSec)) { $activeSecrets += $candSec.Trim() }
+  }
+  if (Get-Command Get-EmTroLySavedLicenseKey -ErrorAction SilentlyContinue) {
+    try { $savedK = Get-EmTroLySavedLicenseKey; if ($savedK) { $activeSecrets += $savedK } } catch { }
+  }
+  $scrubMod = {
+    param([string]$T)
+    if (Get-Command Remove-SensitiveStrings -ErrorAction SilentlyContinue) {
+      return (Remove-SensitiveStrings -Text $T -Secrets $activeSecrets)
+    }
+    return $T
+  }
+
+  $safeSummary = & $scrubMod $SummaryMessage
+  $codeRaw = if ($DiagPayload -and $DiagPayload.code) { [string]$DiagPayload.code } else { '' }
+  $timeRaw = if ($DiagPayload -and $DiagPayload.timestamp) { [string]$DiagPayload.timestamp } else { (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') }
+  $healSum = if ($DiagPayload -and $DiagPayload.autoHealSummary) { [string]$DiagPayload.autoHealSummary } else { '' }
+  $techRaw = if ($DiagPayload -and $DiagPayload.technicalDetail) { [string]$DiagPayload.technicalDetail } else { '' }
+  $safeHealSum = & $scrubMod $healSum
+  $safeTechRaw = & $scrubMod $techRaw
+
+  $lines = New-Object System.Collections.Generic.List[string]
+  [void]$lines.Add("Thời điểm ghi nhận : $timeRaw")
+  [void]$lines.Add("Thành phần đang cài: $stepText")
+  if ($codeRaw) { [void]$lines.Add("Mã chẩn đoán       : $codeRaw") }
+  [void]$lines.Add("Tóm tắt thông báo  : $safeSummary")
+  if ($safeHealSum) {
+    [void]$lines.Add('')
+    [void]$lines.Add('--- Ghi chú từ Codex tự sửa lỗi ---')
+    [void]$lines.Add($safeHealSum)
+  }
+  if ($safeTechRaw) {
+    [void]$lines.Add('')
+    [void]$lines.Add('--- Nhật ký kỹ thuật chi tiết (đã ẩn mã bí mật) ---')
+    [void]$lines.Add($safeTechRaw)
+  }
+
+  $fullReport = & $scrubMod ($lines -join "`r`n")
+  $script:lastInstallErrorDetail = "$safeSummary`n$safeTechRaw".Trim()
+  $script:lastFullErrorReport = $fullReport
+  if ($modErrorStepText) { $modErrorStepText.Text = $stepText }
+  if ($modErrorSummaryHeading) { $modErrorSummaryHeading.Text = $safeSummary }
+  if ($modErrorDetailBox) { $modErrorDetailBox.Text = $fullReport }
+  if ($modFailureActions) { $modFailureActions.Visibility = [System.Windows.Visibility]::Visible }
+
+  $failedTarget = switch ($stageRaw) {
+    'codex-cli'    { 'codex-cli' }
+    'editor'       { if ('codex-extension' -in $script:lastModularSelected -and 'antigravity-ide' -notin $script:lastModularSelected) { 'codex-extension' } else { 'antigravity-ide' } }
+    'dependencies' { 'openclaw' }
+    'install'      { 'openclaw' }
+    'openclaw'     { 'openclaw' }
+    'command'      { 'openclaw' }
+    'zalo-verify'  { 'openclaw' }
+    default        { if ($script:lastModularSelected.Count -gt 0) { $script:lastModularSelected[-1] } else { '' } }
+  }
+  $refsErr = Get-ModularCardRefs $failedTarget
+  if ($refsErr) {
+    Set-ModularBadgeVisual $refsErr.Badge $refsErr.Text $false 'error' '✕ Gặp lỗi'
+  }
+  $codexOutputBox.Text = "=== CHI TIẾT LỖI THÀNH PHẦN GẦN NHẤT ===`r`n`r`n$fullReport"
 }
 
 function Update-ModularCards {
@@ -3365,7 +3793,7 @@ function Start-ModularInstall([string[]]$SelectedList, [switch]$ForceReinstall) 
   $msNow = Update-ModularCards
   if ($cleanSelected.Count -eq 1 -and $cleanSelected[0] -eq 'openclaw' -and $msNow -and $msNow.OpenClawInstalled) {
     if ($msNow.PSObject.Properties['OpenClawNeedsUpgrade'] -and $msNow.OpenClawNeedsUpgrade) {
-      Start-ManageAction 'upgrade-openclaw'
+      Start-ManageAction 'upgrade-openclaw' -Origin 'modular'
       return
     }
     Set-NavActive 'config'
@@ -3432,12 +3860,18 @@ function Start-ModularInstall([string[]]$SelectedList, [switch]$ForceReinstall) 
 
   $script:installRunning = $true
   $script:currentManageAction = ''
+  $script:activeInstallOrigin = 'modular'
+  $script:activeModularComponents = @($cleanSelected)
+  $script:lastModularSelected = @($cleanSelected)
+  $script:lastModularForceReinstall = [bool]$ForceReinstall
   Reset-ProgressVisualState
+  Reset-ModularProgressVisualState -Components $cleanSelected
   $retryEditorPanel.Visibility = [System.Windows.Visibility]::Collapsed
   $statusText.Text = 'Đang khởi động cài đặt thành phần đã chọn (' + ($cleanSelected -join ', ') + ')...'
   $installProgressBar.IsIndeterminate = $true
   $progressPercentText.Text = 'Đang xử lý...'
-  Set-NavActive 'progress'
+  Set-NavActive 'modular'
+  try { if ($viewModular) { $viewModular.ScrollToHome() } } catch { }
 
   try {
     $modSettings = [ordered]@{
@@ -3486,6 +3920,9 @@ function Start-ModularInstall([string[]]$SelectedList, [switch]$ForceReinstall) 
   } catch {
     Cleanup-Secret
     $script:installRunning = $false
+    $script:activeInstallOrigin = ''
+    $script:activeModularComponents = @()
+    [void](Update-ModularCards)
     Set-Buttons
     Show-Error 'Không thể khởi động trình cài đặt từng phần. Hãy kiểm tra quyền thư mục tạm.'
   }
@@ -3669,7 +4106,7 @@ function Show-RichFailureDiagnostics([string]$SummaryMessage, [object]$DiagPaylo
   }
 }
 
-function Start-ManageAction([string]$ActionName, [string]$ErrorDetail = '') {
+function Start-ManageAction([string]$ActionName, [string]$ErrorDetail = '', [string]$Origin = '') {
   if (-not $script:licenseVerified -and -not $SmokeTest -and $ActionName -ne 'factory-reset') {
     Show-LicenseGate 'Vui lòng kích hoạt bản quyền trước khi thực hiện thao tác.'
     return
@@ -3685,13 +4122,25 @@ function Start-ManageAction([string]$ActionName, [string]$ErrorDetail = '') {
   }
 
   $script:currentManageAction = $ActionName
+  $script:activeInstallOrigin = if ($Origin) { $Origin } else { 'manage' }
   $script:installRunning = $true
   Reset-ProgressVisualState
   $retryEditorPanel.Visibility = [System.Windows.Visibility]::Collapsed
   $statusText.Text = 'Đang chuẩn bị thực hiện thao tác...'
   $installProgressBar.IsIndeterminate = $true
   $progressPercentText.Text = 'Đang xử lý...'
-  Set-NavActive 'progress'
+  if ($script:activeInstallOrigin -eq 'modular') {
+    if ($script:activeModularComponents.Count -eq 0) {
+      $script:activeModularComponents = if ($script:lastModularSelected.Count -gt 0) { @($script:lastModularSelected) } else { @('openclaw') }
+    }
+    Reset-ModularProgressVisualState -Components $script:activeModularComponents
+    if ($modProgressBar) { $modProgressBar.IsIndeterminate = ($ActionName -eq 'auto-heal') }
+    if ($modProgressPercentText -and $ActionName -eq 'auto-heal') { $modProgressPercentText.Text = 'Đang xử lý...' }
+    Set-NavActive 'modular'
+    try { if ($viewModular) { $viewModular.ScrollToHome() } } catch { }
+  } else {
+    Set-NavActive 'progress'
+  }
 
   try {
     $script:privateDir = Join-Path $env:TEMP ('openclaw-manage-' + [guid]::NewGuid().ToString('N'))
@@ -4131,6 +4580,8 @@ function Start-Install {
     }
   }
 
+  $script:activeInstallOrigin = 'full'
+  $script:activeModularComponents = @()
   $script:installRunning = $true
   Reset-ProgressVisualState
   $statusText.Text = 'Đang kiểm tra thông tin cài đặt...'
@@ -4241,7 +4692,7 @@ $installTimer.Add_Tick({
         if ($msg -match '^Đang tải (Codex Extension|Antigravity IDE)' -and $msg -notmatch '\d+%') {
           try {
             $isVsix = ($Matches[1] -eq 'Codex Extension')
-            $filePat = if ($isVsix) { 'codex.vsix' } else { 'antigravity-ide-setup.exe' }
+            $filePat = if ($isVsix) { 'codex.vsix*' } else { 'antigravity-ide-setup.exe*' }
             $estTotal = if ($isVsix) { 389000000L } else { 199000000L }
             $cand = @(Get-ChildItem -Path (Join-Path $env:TEMP 'emtroly-editor-*') -Filter $filePat -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1)
             if ($cand.Count -gt 0 -and $cand[0].Length -gt 0) {
@@ -4254,7 +4705,11 @@ $installTimer.Add_Tick({
           } catch { }
         }
         $statusText.Text = $msg
-        Update-ProgressFromStatus $msg
+        if ($script:activeInstallOrigin -eq 'modular') {
+          Update-ModularProgressFromStatus $msg
+        } else {
+          Update-ProgressFromStatus $msg
+        }
       }
     } catch { }
   }
@@ -4283,10 +4738,13 @@ $installTimer.Add_Tick({
     $detail = $statusText.Text
     if ($code -eq 0 -and -not $detail.StartsWith('Hoàn tất:')) { $code = 1 }
     $wasManage = $script:currentManageAction
+    $wasOrigin = $script:activeInstallOrigin
     $script:currentManageAction = ''
+    $script:activeInstallOrigin = ''
     Cleanup-Secret
     $script:installRunning = $false
     $installProgressBar.IsIndeterminate = $false
+    if ($modProgressBar) { $modProgressBar.IsIndeterminate = $false }
 
     if ($wasManage) {
       if ($code -eq 0) {
@@ -4294,6 +4752,40 @@ $installTimer.Add_Tick({
         Reset-ProgressVisualState
         $installProgressBar.Value = 100
         $progressPercentText.Text = '100%'
+        if ($wasOrigin -eq 'modular' -and $wasManage -notin @('factory-reset', 'uninstall-instance')) {
+          $script:activeModularComponents = @()
+          Apply-ManageModeUI
+          [void](Update-CodexAvailability)
+          [void](Update-ModularCards)
+          if ($modProgressCard) {
+            $modProgressCard.Background = New-Brush '#ECFDF5'
+            $modProgressCard.BorderBrush = New-Brush '#A7F3D0'
+            $modProgressCard.Visibility = [System.Windows.Visibility]::Visible
+          }
+          if ($modActiveCompPill) {
+            $modActiveCompPill.Background = New-Brush '#D1FAE5'
+            $modActiveCompPill.BorderBrush = New-Brush '#A7F3D0'
+          }
+          if ($modActiveCompText) {
+            $modActiveCompText.Foreground = New-Brush '#065F46'
+            $modActiveCompText.Text = '✓ Hoàn tất'
+          }
+          if ($modProgressBar) {
+            $modProgressBar.Value = 100
+            $modProgressBar.Foreground = New-Brush '#059669'
+            $modProgressBar.Background = New-Brush '#D1FAE5'
+          }
+          if ($modProgressPercentText) {
+            $modProgressPercentText.Foreground = New-Brush '#059669'
+            $modProgressPercentText.Text = '100%'
+          }
+          if ($modProgressStatusText) { $modProgressStatusText.Text = $detail }
+          if ($modProgressSubText) { $modProgressSubText.Text = 'Hoàn tất thành công ngay trên tab Cài từng phần!' }
+          if ($modFailureActions) { $modFailureActions.Visibility = [System.Windows.Visibility]::Collapsed }
+          Set-NavActive 'modular'
+          Show-Info $detail 'Thực hiện thành công'
+          return
+        }
         if ($wasManage -eq 'factory-reset') {
           $script:isManageMode = $false
           $script:installCompleted = $false
@@ -4313,6 +4805,10 @@ $installTimer.Add_Tick({
           if ($modOwnersBox) { $modOwnersBox.Text = '' }
           if ($modGroupBox) { $modGroupBox.Text = '' }
           if ($modTgStatusNote) { $modTgStatusNote.Visibility = [System.Windows.Visibility]::Collapsed; $modTgStatusNote.Text = '' }
+          if ($modProgressCard) { $modProgressCard.Visibility = [System.Windows.Visibility]::Collapsed }
+          if ($modFailureActions) { $modFailureActions.Visibility = [System.Windows.Visibility]::Collapsed }
+          $script:activeModularComponents = @()
+          $script:lastModularSelected = @()
           $manageEditBanner.Visibility = [System.Windows.Visibility]::Collapsed
           $savedDraftBanner.Visibility = [System.Windows.Visibility]::Collapsed
           $liveCheckBanner.Visibility = [System.Windows.Visibility]::Collapsed
@@ -4381,15 +4877,22 @@ $installTimer.Add_Tick({
         }
         $safeManageDetail = Sanitize-WizardFailureSummary -Summary $detail -ExitCode $code -LastStepIndex $script:lastActiveStepIndex
         $statusText.Text = "Chưa hoàn tất: $safeManageDetail"
-        Show-RichFailureDiagnostics -SummaryMessage $safeManageDetail -DiagPayload $diagPayload -IsManageFailure $true
-        $viewDashboard.Visibility   = [System.Windows.Visibility]::Collapsed
-        $viewSetupForm.Visibility   = [System.Windows.Visibility]::Collapsed
-        $viewModular.Visibility     = [System.Windows.Visibility]::Collapsed
-        $viewCodex.Visibility       = [System.Windows.Visibility]::Collapsed
-        $viewDiagnostics.Visibility = [System.Windows.Visibility]::Collapsed
-        $viewZaloQr.Visibility      = [System.Windows.Visibility]::Collapsed
-        $viewProgress.Visibility    = [System.Windows.Visibility]::Visible
-        Set-Buttons
+        if ($wasOrigin -eq 'modular') {
+          $script:activeModularComponents = @()
+          [void](Update-ModularCards)
+          Show-ModularFailureDiagnostics -SummaryMessage $safeManageDetail -DiagPayload $diagPayload
+          Set-NavActive 'modular'
+        } else {
+          Show-RichFailureDiagnostics -SummaryMessage $safeManageDetail -DiagPayload $diagPayload -IsManageFailure $true
+          $viewDashboard.Visibility   = [System.Windows.Visibility]::Collapsed
+          $viewSetupForm.Visibility   = [System.Windows.Visibility]::Collapsed
+          $viewModular.Visibility     = [System.Windows.Visibility]::Collapsed
+          $viewCodex.Visibility       = [System.Windows.Visibility]::Collapsed
+          $viewDiagnostics.Visibility = [System.Windows.Visibility]::Collapsed
+          $viewZaloQr.Visibility      = [System.Windows.Visibility]::Collapsed
+          $viewProgress.Visibility    = [System.Windows.Visibility]::Visible
+          Set-Buttons
+        }
       }
       return
     }
@@ -4407,7 +4910,42 @@ $installTimer.Add_Tick({
       Apply-ManageModeUI
       [void](Update-CodexAvailability)
       [void](Update-ModularCards)
-      if ($detail -match '^Hoàn tất: Đã cài đặt thành công phần đã chọn') {
+      if ($wasOrigin -eq 'modular') {
+        $script:activeModularComponents = @()
+        if ($modProgressCard) {
+          $modProgressCard.Background = New-Brush '#ECFDF5'
+          $modProgressCard.BorderBrush = New-Brush '#A7F3D0'
+          $modProgressCard.Visibility = [System.Windows.Visibility]::Visible
+        }
+        if ($modActiveCompPill) {
+          $modActiveCompPill.Background = New-Brush '#D1FAE5'
+          $modActiveCompPill.BorderBrush = New-Brush '#A7F3D0'
+        }
+        if ($modActiveCompText) {
+          $modActiveCompText.Foreground = New-Brush '#065F46'
+          $modActiveCompText.Text = '✓ Hoàn tất'
+        }
+        if ($modProgressBar) {
+          $modProgressBar.Value = 100
+          $modProgressBar.Foreground = New-Brush '#059669'
+          $modProgressBar.Background = New-Brush '#D1FAE5'
+        }
+        if ($modProgressPercentText) {
+          $modProgressPercentText.Foreground = New-Brush '#059669'
+          $modProgressPercentText.Text = '100%'
+        }
+        if ($modProgressStatusText) { $modProgressStatusText.Text = $detail }
+        if ($modProgressSubText) {
+          $modProgressSubText.Text = if ($detail -match '/zaloqr') {
+            'Đã hoàn tất! Có thể mở tab Tổng quan để quét QR Zalo hoặc dùng ngay.'
+          } else {
+            'Đã hoàn tất thành công ngay trên tab Cài từng phần!'
+          }
+        }
+        if ($modFailureActions) { $modFailureActions.Visibility = [System.Windows.Visibility]::Collapsed }
+        Set-NavActive 'modular'
+        Show-Info "$detail`n`nBạn có thể cài tiếp các thành phần khác ngay tại tab này hoặc mở tab Công cụ Codex CLI." 'Cài đặt thành phần hoàn tất'
+      } elseif ($detail -match '^Hoàn tất: Đã cài đặt') {
         Show-Info "$detail`n`nBạn có thể cài tiếp các thành phần khác hoặc mở tab Công cụ Codex CLI ngay!" 'Cài đặt thành phần hoàn tất'
         Set-NavActive 'modular'
       } elseif ($detail -match '/zaloqr') {
@@ -4426,16 +4964,30 @@ $installTimer.Add_Tick({
       $retryEditorPanel.Visibility = [System.Windows.Visibility]::Visible
       $script:lastActiveStepIndex = 2
       $safeRetrySummary = Sanitize-WizardFailureSummary -Summary $statusText.Text -ExitCode $code -LastStepIndex 2
-      Show-RichFailureDiagnostics -SummaryMessage $safeRetrySummary -DiagPayload $diagPayload -IsManageFailure $false
-      Set-Buttons
+      if ($wasOrigin -eq 'modular') {
+        $script:activeModularComponents = @()
+        [void](Update-ModularCards)
+        Show-ModularFailureDiagnostics -SummaryMessage $safeRetrySummary -DiagPayload $diagPayload
+        Set-NavActive 'modular'
+      } else {
+        Show-RichFailureDiagnostics -SummaryMessage $safeRetrySummary -DiagPayload $diagPayload -IsManageFailure $false
+        Set-Buttons
+      }
     } else {
       $detail = Sanitize-WizardFailureSummary -Summary $detail -ExitCode $code -LastStepIndex $script:lastActiveStepIndex
       if ($null -eq $diagPayload) {
         $diagPayload = New-UnexpectedExitDiagnosticPayload -Summary $detail -ExitCode $code -LastStepIndex $script:lastActiveStepIndex
       }
-      $statusText.Text = "Cài đặt chưa hoàn tất — xem chi tiết nguyên nhân ngay bên dưới."
-      Show-RichFailureDiagnostics -SummaryMessage $detail -DiagPayload $diagPayload -IsManageFailure $false
-      Set-Buttons
+      if ($wasOrigin -eq 'modular') {
+        $script:activeModularComponents = @()
+        [void](Update-ModularCards)
+        Show-ModularFailureDiagnostics -SummaryMessage $detail -DiagPayload $diagPayload
+        Set-NavActive 'modular'
+      } else {
+        $statusText.Text = "Cài đặt chưa hoàn tất — xem chi tiết nguyên nhân ngay bên dưới."
+        Show-RichFailureDiagnostics -SummaryMessage $detail -DiagPayload $diagPayload -IsManageFailure $false
+        Set-Buttons
+      }
     }
   }
 })
@@ -5474,6 +6026,31 @@ $btnOpenCodexFromError.Add_Click({ Set-NavActive 'codex' })
 $btnBackToSetup.Add_Click({ Set-NavActive 'home' })
 $btnInstallAutoHeal.Add_Click({ Start-ManageAction 'auto-heal' $script:lastInstallErrorDetail })
 $btnProgressExport.Add_Click({ Invoke-ExportSupportReportAction })
+
+if ($modCopyErrorBtn) {
+  $modCopyErrorBtn.Add_Click({
+    if (-not [string]::IsNullOrWhiteSpace($script:lastFullErrorReport)) {
+      try {
+        [System.Windows.Clipboard]::SetText($script:lastFullErrorReport)
+        $modCopyErrorBtn.Content = '✓ Đã sao chép'
+      } catch { }
+    }
+  })
+}
+if ($modOpenCodexBtn) { $modOpenCodexBtn.Add_Click({ Set-NavActive 'codex' }) }
+if ($modExportBtn) { $modExportBtn.Add_Click({ Invoke-ExportSupportReportAction }) }
+if ($modAutoHealBtn) {
+  $modAutoHealBtn.Add_Click({
+    Start-ManageAction 'auto-heal' $script:lastInstallErrorDetail -Origin 'modular'
+  })
+}
+if ($modRetryBtn) {
+  $modRetryBtn.Add_Click({
+    if ($script:lastModularSelected.Count -gt 0) {
+      Start-ModularInstall $script:lastModularSelected -ForceReinstall:$script:lastModularForceReinstall
+    }
+  })
+}
 
 $codexBrowseBtn.Add_Click({
   $dialog = New-Object System.Windows.Forms.FolderBrowserDialog

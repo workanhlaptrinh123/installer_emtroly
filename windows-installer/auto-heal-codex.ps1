@@ -53,26 +53,100 @@ function Remove-SensitiveStrings {
   return $clean
 }
 
+function Test-EmTroLyCodexBinaryRunnable {
+  param([string]$Executable)
+  if ([string]::IsNullOrWhiteSpace($Executable) -or -not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
+    return $false
+  }
+  $norm = $Executable.Replace('/', '\')
+  if ($norm -match '\\AutoHealCli\\node_modules\\\.bin\\codex\.cmd$') {
+    $healRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $Executable))
+    $jsEntry = Join-Path $healRoot 'node_modules\@openai\codex\bin\codex.js'
+    if (Test-Path -LiteralPath $jsEntry -PathType Leaf) {
+      $winOptPkg = Join-Path $healRoot 'node_modules\@openai\codex-win32-x64'
+      if (-not (Test-Path -LiteralPath $winOptPkg -PathType Container)) {
+        return $false
+      }
+      try {
+        $psiProbe = New-Object System.Diagnostics.ProcessStartInfo
+        $psiProbe.FileName = Join-Path $env:SystemRoot 'System32\cmd.exe'
+        $psiProbe.Arguments = '/d /s /c ""' + $Executable + '" --version"'
+        $psiProbe.UseShellExecute = $false
+        $psiProbe.CreateNoWindow = $true
+        $psiProbe.RedirectStandardOutput = $true
+        $psiProbe.RedirectStandardError = $true
+        [void]$psiProbe.EnvironmentVariables.Remove('NODE_OPTIONS')
+        $pProbe = [System.Diagnostics.Process]::Start($psiProbe)
+        if (-not $pProbe.WaitForExit(15000)) {
+          try { $pProbe.Kill() } catch { }
+          try { $pProbe.Dispose() } catch { }
+          return $false
+        }
+        $ecProbe = $pProbe.ExitCode
+        try { $pProbe.Dispose() } catch { }
+        return ($ecProbe -eq 0)
+      } catch {
+        return $false
+      }
+    }
+  }
+  return $true
+}
+
 function Ensure-AutoHealCodexBinary {
   param([string]$PayloadRoot = '')
   if (Get-Command Find-EmTroLyCodexCli -ErrorAction SilentlyContinue) {
     $found = Find-EmTroLyCodexCli
-    if ($found.Available -and $found.Executable -and (Test-Path -LiteralPath $found.Executable -PathType Leaf)) {
+    if ($found.Available -and $found.Executable -and (Test-EmTroLyCodexBinaryRunnable -Executable $found.Executable)) {
       return $found.Executable
     }
   }
   foreach ($cmdName in @('codex.exe', 'codex.cmd')) {
     $cmd = @(Get-Command $cmdName -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1)
-    if ($cmd.Count -gt 0 -and $cmd[0].Source -and (Test-Path -LiteralPath $cmd[0].Source -PathType Leaf)) {
+    if ($cmd.Count -gt 0 -and $cmd[0].Source -and (Test-EmTroLyCodexBinaryRunnable -Executable $cmd[0].Source)) {
       return $cmd[0].Source
     }
   }
 
   if (-not $env:LOCALAPPDATA) { return '' }
-  $autoHealRoot = Join-Path $env:LOCALAPPDATA 'EmTroLy\AutoHealCli'
+
+  # Fast offline win: if a cached Codex VSIX already exists in EmTroLy, extract standalone codex.exe directly
+  $emTroLyDir = Join-Path $env:LOCALAPPDATA 'EmTroLy'
+  $standaloneCodex = Join-Path $emTroLyDir 'Codex\bin\codex.exe'
+  if (-not (Test-Path -LiteralPath $standaloneCodex -PathType Leaf) -and (Test-Path -LiteralPath $emTroLyDir -PathType Container)) {
+    $cachedVsix = @(Get-ChildItem -LiteralPath $emTroLyDir -Filter 'codex-*.vsix' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1)
+    if ($cachedVsix.Count -gt 0) {
+      try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
+        [void][IO.Directory]::CreateDirectory((Split-Path -Parent $standaloneCodex))
+        $zip = [System.IO.Compression.ZipFile]::OpenRead($cachedVsix[0].FullName)
+        try {
+          $entry = $zip.Entries | Where-Object { $_.FullName -replace '\\','/' -ieq 'extension/bin/windows-x86_64/codex.exe' } | Select-Object -First 1
+          if ($entry) {
+            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $standaloneCodex, $true)
+          }
+        } finally {
+          $zip.Dispose()
+        }
+        if (Test-Path -LiteralPath $standaloneCodex -PathType Leaf) {
+          return $standaloneCodex
+        }
+      } catch { }
+    }
+  }
+
+  $autoHealRoot = Join-Path $emTroLyDir 'AutoHealCli'
   $cachedCmd = Join-Path $autoHealRoot 'node_modules\.bin\codex.cmd'
-  if (Test-Path -LiteralPath $cachedCmd -PathType Leaf) {
+  if (Test-EmTroLyCodexBinaryRunnable -Executable $cachedCmd) {
     return $cachedCmd
+  }
+
+  # Clean broken npm AutoHealCli lacking @openai/codex-win32-x64 before reinstalling
+  if (Test-Path -LiteralPath (Join-Path $autoHealRoot 'node_modules\@openai\codex\bin\codex.js') -PathType Leaf) {
+    try {
+      Remove-Item -LiteralPath (Join-Path $autoHealRoot 'node_modules') -Recurse -Force -ErrorAction SilentlyContinue
+      Remove-Item -LiteralPath (Join-Path $autoHealRoot 'package-lock.json') -Force -ErrorAction SilentlyContinue
+    } catch { }
   }
 
   $npmCmd = @(Get-Command npm.cmd -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1)
@@ -102,18 +176,21 @@ function Ensure-AutoHealCodexBinary {
     $oldHealIa32 = if ($hadHealIa32) { $env:OPENSSL_ia32cap } else { $null }
     try {
       $ErrorActionPreference = 'Continue'
-      & $npmCmd[0].Source install --prefix $autoHealRoot '@openai/codex' --no-audit --no-fund --maxsockets=3 *> $null
-      if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $cachedCmd -PathType Leaf)) {
+      & $npmCmd[0].Source install --prefix $autoHealRoot --include=optional '@openai/codex' '@openai/codex-win32-x64' --no-audit --no-fund --maxsockets=3 *> $null
+      if ($LASTEXITCODE -ne 0 -or -not (Test-EmTroLyCodexBinaryRunnable -Executable $cachedCmd)) {
+        if (Test-Path -LiteralPath (Join-Path $autoHealRoot 'node_modules') -PathType Container) {
+          Remove-Item -LiteralPath (Join-Path $autoHealRoot 'node_modules') -Recurse -Force -ErrorAction SilentlyContinue
+        }
         $env:OPENSSL_ia32cap = '~0x200000200000000'
         $env:NODE_OPTIONS = '--tls-max-v1.2 --tls-cipher-list=ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-CHACHA20-POLY1305:DEFAULT'
-        & $npmCmd[0].Source install --prefix $autoHealRoot '@openai/codex' --no-audit --no-fund --maxsockets=1 --registry=https://registry.npmmirror.com/ *> $null
+        & $npmCmd[0].Source install --prefix $autoHealRoot --include=optional '@openai/codex' '@openai/codex-win32-x64' --no-audit --no-fund --maxsockets=1 --registry=https://registry.npmmirror.com/ *> $null
       }
     } finally {
       $ErrorActionPreference = $prevEA
       if ($hadHealNodeOpts) { $env:NODE_OPTIONS = $oldHealNodeOpts } elseif (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
       if ($hadHealIa32) { $env:OPENSSL_ia32cap = $oldHealIa32 } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
     }
-    if (Test-Path -LiteralPath $cachedCmd -PathType Leaf) {
+    if (Test-EmTroLyCodexBinaryRunnable -Executable $cachedCmd) {
       return $cachedCmd
     }
   } catch { }

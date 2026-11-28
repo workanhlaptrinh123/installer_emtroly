@@ -1034,7 +1034,20 @@ def main():
         for b_ref in mod_single_btns.values():
             b_ref.state(["disabled"])
         exit_btn.configure(text="Dừng & Thoát")
-        mod_progress_var.set("Đang bắt đầu cài đặt thành phần: " + ", ".join(selected_list) + "...")
+        friendly_mod = {
+            "codex-cli": "1. Codex CLI",
+            "antigravity-ide": "2. Antigravity IDE",
+            "codex-extension": "3. Codex Extension",
+            "openclaw": "4. OpenClaw",
+        }
+        active_titles = [friendly_mod.get(c, c) for c in selected_list]
+        for ck, s_btn in mod_single_btns.items():
+            if ck in selected_list:
+                mod_status_vars[ck].set("⟳ Đang chờ cài đặt...")
+                s_btn.configure(text="Đang cài...")
+        mod_progress_bar.configure(mode="indeterminate")
+        mod_progress_bar.start(14)
+        mod_progress_var.set("Đang cài riêng: " + " · ".join(active_titles) + "...")
 
         def _mod_worker():
             try:
@@ -1074,11 +1087,13 @@ def main():
         mod_single_btns[comp_key] = single_b
 
     mod_progress_var = tk.StringVar(value="Mẹo: Tích chọn các phần bạn cần hoặc bấm 'Cài phần này' ở từng dòng.")
-    ttk.Label(tab_modular, textvariable=mod_progress_var, style="Hint.TLabel", wraplength=760, padding=10).grid(
-        row=6, column=0, columnspan=3, sticky="ew", pady=(8, 10)
+    ttk.Label(tab_modular, textvariable=mod_progress_var, style="Hint.TLabel", wraplength=760, padding=(10, 8, 10, 2)).grid(
+        row=6, column=0, columnspan=3, sticky="ew", pady=(8, 2)
     )
+    mod_progress_bar = ttk.Progressbar(tab_modular, orient="horizontal", mode="determinate", maximum=100, value=0)
+    mod_progress_bar.grid(row=7, column=0, columnspan=3, sticky="ew", padx=10, pady=(2, 8))
     mod_footer = ttk.Frame(tab_modular, style="Card.TFrame")
-    mod_footer.grid(row=7, column=0, columnspan=3, sticky="ew")
+    mod_footer.grid(row=8, column=0, columnspan=3, sticky="ew")
     ttk.Button(mod_footer, text="Làm mới trạng thái", style="Secondary.TButton", command=refresh_modular_status).pack(side="left")
     mod_run_selected_btn = ttk.Button(
         mod_footer,
@@ -1378,6 +1393,11 @@ def main():
                 for b_ref in mod_single_btns.values():
                     b_ref.state(["!disabled"])
                 exit_btn.configure(text="Thoát")
+                try:
+                    mod_progress_bar.stop()
+                    mod_progress_bar.configure(mode="determinate", value=(100 if kind == "mod_success" else 20))
+                except Exception:
+                    pass
                 refresh_codex_state()
                 refresh_modular_status()
                 if kind == "mod_success":
