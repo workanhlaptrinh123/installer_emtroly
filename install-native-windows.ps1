@@ -339,22 +339,38 @@ Write-NativeInstallStatus $status
 $runtimePackage = @{ name='member-openclaw-runtime'; version='1.0.0'; private=$true; allowScripts=@{ '@google/genai'=$true; esbuild=$true; koffi=$true; openclaw=$true; protobufjs=$true; 'tree-sitter-bash'=$true } }
 [IO.File]::WriteAllText((Join-Path $runtime 'package.json'), ($runtimePackage | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
 $isolatedNpmrc = Join-Path $runtime '.npmrc.emtroly'
-[IO.File]::WriteAllText($isolatedNpmrc, "registry=https://registry.npmjs.org/`nfetch-retries=5`nfetch-retry-mintimeout=2000`nfetch-retry-maxtimeout=15000`naudit=false`nfund=false`n", [Text.UTF8Encoding]::new($false))
 $npmCacheDir = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'MemberInstaller\npm-cache' } else { Join-Path $root 'npm-cache' }
 New-Item -ItemType Directory -Force -Path $npmCacheDir | Out-Null
 $npmLogFile = Join-Path $logsDir 'npm-install.log'
 $previousErrorAction = $ErrorActionPreference
-$oldNpmCache = $env:NPM_CONFIG_CACHE
-$oldNpmUserCfg = $env:NPM_CONFIG_USERCONFIG
-$oldNpmPrefix = $env:NPM_CONFIG_PREFIX
-$oldNodeOptions = $env:NODE_OPTIONS
+$hadNpmCache = Test-Path Env:NPM_CONFIG_CACHE
+$oldNpmCache = if ($hadNpmCache) { $env:NPM_CONFIG_CACHE } else { $null }
+$hadNpmUserCfg = Test-Path Env:NPM_CONFIG_USERCONFIG
+$oldNpmUserCfg = if ($hadNpmUserCfg) { $env:NPM_CONFIG_USERCONFIG } else { $null }
+$hadNpmPrefix = Test-Path Env:NPM_CONFIG_PREFIX
+$oldNpmPrefix = if ($hadNpmPrefix) { $env:NPM_CONFIG_PREFIX } else { $null }
+$hadNodeOptions = Test-Path Env:NODE_OPTIONS
+$oldNodeOptions = if ($hadNodeOptions) { $env:NODE_OPTIONS } else { $null }
+$hadIa32Cap = Test-Path Env:OPENSSL_ia32cap
+$oldIa32Cap = if ($hadIa32Cap) { $env:OPENSSL_ia32cap } else { $null }
 $npmExitCode = 1
 try {
   $env:NPM_CONFIG_CACHE = $npmCacheDir
   $env:NPM_CONFIG_USERCONFIG = $isolatedNpmrc
-  Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue
-  Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue
+  if (Test-Path Env:NPM_CONFIG_PREFIX) { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
+  if (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
   for ($npmTry = 1; $npmTry -le 3; $npmTry++) {
+    $registryUrl = if ($npmTry -ge 3) { 'https://registry.npmmirror.com/' } else { 'https://registry.npmjs.org/' }
+    $maxSockets = if ($npmTry -eq 1) { 6 } elseif ($npmTry -eq 2) { 2 } else { 1 }
+    [IO.File]::WriteAllText($isolatedNpmrc, "registry=$registryUrl`nmaxsockets=$maxSockets`nfetch-retries=5`nfetch-retry-mintimeout=2000`nfetch-retry-maxtimeout=15000`nfetch-timeout=600000`naudit=false`nfund=false`n", [Text.UTF8Encoding]::new($false))
+    if ($npmTry -ge 2) {
+      # Work around OpenSSL 3 AES-GCM / VAES / TLS 1.3 cipher failures on affected Windows CPUs, VPNs, and AV SSL proxies
+      $env:OPENSSL_ia32cap = '~0x200000200000000'
+      $env:NODE_OPTIONS = '--tls-max-v1.2 --tls-cipher-list=ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-CHACHA20-POLY1305:DEFAULT'
+    } else {
+      if (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
+      if ($hadIa32Cap) { $env:OPENSSL_ia32cap = $oldIa32Cap } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
+    }
     $ErrorActionPreference = 'Continue'
     & npm.cmd install --prefix $runtime "openclaw@$OpenClawVersion" --no-audit --no-fund --prefer-offline --loglevel=error *> $npmLogFile
     $npmExitCode = $LASTEXITCODE
@@ -363,7 +379,16 @@ try {
     $npmTail = if (Test-Path -LiteralPath $npmLogFile -PathType Leaf) { (@(Get-Content -LiteralPath $npmLogFile -Tail 20 -ErrorAction SilentlyContinue) -join ' | ') } else { '' }
     Write-NativeInstallLog -Entry ("npm install attempt $npmTry/3 failed (exit=$npmExitCode): $npmTail") -Secrets @($tg, $key)
     if ($npmTry -lt 3) {
-      Write-NativeInstallStatus "Windows đang quét tệp hoặc mạng chập chờn — đang tự động thử cài lại OpenClaw (lần $($npmTry + 1)/3)..."
+      if ($npmTail -match 'ERR_SSL_CIPHER_OPERATION_FAILED|ossl_gcm_stream_update|ciphercommon_gcm|cipher operation failed') {
+        $retryStatus = if ($npmTry -eq 1) {
+          'Phát hiện lỗi giải mã TLS/SSL — đang tự động thử cài lại OpenClaw ở chế độ TLS 1.2 / ChaCha20 (lần 2/3)...'
+        } else {
+          'Đang chuyển sang máy chủ npm dự phòng với chế độ bảo toàn kết nối TLS (lần 3/3)...'
+        }
+        Write-NativeInstallStatus $retryStatus
+      } else {
+        Write-NativeInstallStatus "Windows đang quét tệp hoặc mạng chập chờn — đang tự động thử cài lại OpenClaw (lần $($npmTry + 1)/3)..."
+      }
       $partialModules = Join-Path $runtime 'node_modules'
       if (Test-Path -LiteralPath $partialModules) {
         $cmdClean = Join-Path $env:SystemRoot 'System32\cmd.exe'
@@ -381,10 +406,11 @@ try {
   }
 } finally {
   $ErrorActionPreference = $previousErrorAction
-  if ($null -ne $oldNpmCache) { $env:NPM_CONFIG_CACHE = $oldNpmCache } else { Remove-Item Env:NPM_CONFIG_CACHE -ErrorAction SilentlyContinue }
-  if ($null -ne $oldNpmUserCfg) { $env:NPM_CONFIG_USERCONFIG = $oldNpmUserCfg } else { Remove-Item Env:NPM_CONFIG_USERCONFIG -ErrorAction SilentlyContinue }
-  if ($null -ne $oldNpmPrefix) { $env:NPM_CONFIG_PREFIX = $oldNpmPrefix } else { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
-  if ($null -ne $oldNodeOptions) { $env:NODE_OPTIONS = $oldNodeOptions } else { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
+  if ($hadNpmCache) { $env:NPM_CONFIG_CACHE = $oldNpmCache } elseif (Test-Path Env:NPM_CONFIG_CACHE) { Remove-Item Env:NPM_CONFIG_CACHE -ErrorAction SilentlyContinue }
+  if ($hadNpmUserCfg) { $env:NPM_CONFIG_USERCONFIG = $oldNpmUserCfg } elseif (Test-Path Env:NPM_CONFIG_USERCONFIG) { Remove-Item Env:NPM_CONFIG_USERCONFIG -ErrorAction SilentlyContinue }
+  if ($hadNpmPrefix) { $env:NPM_CONFIG_PREFIX = $oldNpmPrefix } elseif (Test-Path Env:NPM_CONFIG_PREFIX) { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
+  if ($hadNodeOptions) { $env:NODE_OPTIONS = $oldNodeOptions } elseif (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
+  if ($hadIa32Cap) { $env:OPENSSL_ia32cap = $oldIa32Cap } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
   Remove-Item -LiteralPath $isolatedNpmrc -Force -ErrorAction SilentlyContinue
 }
 if ($npmExitCode -ne 0) { throw 'Private OpenClaw installation failed.' }

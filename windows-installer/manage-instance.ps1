@@ -1287,8 +1287,33 @@ try {
       [IO.File]::WriteAllText((Join-Path $rtTarget 'package.json'), ($rtPkg | ConvertTo-Json -Depth 4), $utf8NoBom)
 
       Write-ManageStatus $StatusPath "Đang tải và nâng cấp OpenClaw lên phiên bản v$targetVer (giữ nguyên toàn bộ dữ liệu cũ)..."
-      & $npmCmd install --prefix $rtTarget "openclaw@$targetVer" --no-audit --no-fund *> $null
-      if ($LASTEXITCODE -ne 0) { throw 'openclaw-upgrade-install-failed' }
+      $upgExit = 1
+      $hadUpgNodeOpts = Test-Path Env:NODE_OPTIONS
+      $oldUpgNodeOpts = if ($hadUpgNodeOpts) { $env:NODE_OPTIONS } else { $null }
+      $hadUpgIa32 = Test-Path Env:OPENSSL_ia32cap
+      $oldUpgIa32 = if ($hadUpgIa32) { $env:OPENSSL_ia32cap } else { $null }
+      try {
+        for ($uTry = 1; $uTry -le 3; $uTry++) {
+          if ($uTry -ge 2) {
+            $env:OPENSSL_ia32cap = '~0x200000200000000'
+            $env:NODE_OPTIONS = '--tls-max-v1.2 --tls-cipher-list=ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-CHACHA20-POLY1305:DEFAULT'
+          }
+          if ($uTry -ge 3) {
+            & $npmCmd install --prefix $rtTarget "openclaw@$targetVer" --no-audit --no-fund --maxsockets=1 --registry=https://registry.npmmirror.com/ *> $null
+          } elseif ($uTry -eq 2) {
+            & $npmCmd install --prefix $rtTarget "openclaw@$targetVer" --no-audit --no-fund --maxsockets=2 *> $null
+          } else {
+            & $npmCmd install --prefix $rtTarget "openclaw@$targetVer" --no-audit --no-fund *> $null
+          }
+          $upgExit = $LASTEXITCODE
+          if ($upgExit -eq 0) { break }
+          if ($uTry -lt 3) { Start-Sleep -Seconds (2 * $uTry) }
+        }
+      } finally {
+        if ($hadUpgNodeOpts) { $env:NODE_OPTIONS = $oldUpgNodeOpts } elseif (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
+        if ($hadUpgIa32) { $env:OPENSSL_ia32cap = $oldUpgIa32 } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
+      }
+      if ($upgExit -ne 0) { throw 'openclaw-upgrade-install-failed' }
 
       $newCliEntry = Join-Path $rtTarget 'node_modules\openclaw\openclaw.mjs'
       if (-not (Test-Path -LiteralPath $newCliEntry -PathType Leaf)) { throw 'openclaw-upgrade-entry-missing' }

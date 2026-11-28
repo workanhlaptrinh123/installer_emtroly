@@ -116,16 +116,30 @@ Set-ZaloInstallStage 'plugin-inspect'
 $pluginInfo = Get-ZaloPluginInfo -Node $node -CliEntry $env:OPENCLAW_CLI_ENTRY
 if (-not $pluginInfo) {
   Set-ZaloInstallStage 'plugin-install'
-  $oldNpmCacheZ = $env:NPM_CONFIG_CACHE
-  $oldNpmPrefixZ = $env:NPM_CONFIG_PREFIX
-  $oldNodeOptsZ = $env:NODE_OPTIONS
+  $hadNpmCacheZ = Test-Path Env:NPM_CONFIG_CACHE
+  $oldNpmCacheZ = if ($hadNpmCacheZ) { $env:NPM_CONFIG_CACHE } else { $null }
+  $hadNpmPrefixZ = Test-Path Env:NPM_CONFIG_PREFIX
+  $oldNpmPrefixZ = if ($hadNpmPrefixZ) { $env:NPM_CONFIG_PREFIX } else { $null }
+  $hadNodeOptsZ = Test-Path Env:NODE_OPTIONS
+  $oldNodeOptsZ = if ($hadNodeOptsZ) { $env:NODE_OPTIONS } else { $null }
+  $hadIa32Z = Test-Path Env:OPENSSL_ia32cap
+  $oldIa32Z = if ($hadIa32Z) { $env:OPENSSL_ia32cap } else { $null }
+  $hadRegZ = Test-Path Env:NPM_CONFIG_REGISTRY
+  $oldRegZ = if ($hadRegZ) { $env:NPM_CONFIG_REGISTRY } else { $null }
   try {
     $env:NPM_CONFIG_CACHE = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'MemberInstaller\npm-cache' } else { Join-Path $Root 'npm-cache' }
     [void][IO.Directory]::CreateDirectory($env:NPM_CONFIG_CACHE)
-    Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue
-    Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue
+    if (Test-Path Env:NPM_CONFIG_PREFIX) { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
+    if (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
     $installResult = $null
     for ($zTry = 1; $zTry -le 3; $zTry++) {
+      if ($zTry -ge 2) {
+        $env:OPENSSL_ia32cap = '~0x200000200000000'
+        $env:NODE_OPTIONS = '--tls-max-v1.2 --tls-cipher-list=ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-CHACHA20-POLY1305:DEFAULT'
+      }
+      if ($zTry -ge 3) {
+        $env:NPM_CONFIG_REGISTRY = 'https://registry.npmmirror.com/'
+      }
       $installResult = Invoke-ZaloPluginCli -Node $node -CliEntry $env:OPENCLAW_CLI_ENTRY -Arguments @('plugins', 'install', '--pin', "@openclaw/zalouser@$coreVersion")
       if ($installResult.ExitCode -eq 0) { break }
       $pluginInfo = Get-ZaloPluginInfo -Node $node -CliEntry $env:OPENCLAW_CLI_ENTRY
@@ -133,9 +147,11 @@ if (-not $pluginInfo) {
       if ($zTry -lt 3) { Start-Sleep -Seconds (3 * $zTry) }
     }
   } finally {
-    if ($null -ne $oldNpmCacheZ) { $env:NPM_CONFIG_CACHE = $oldNpmCacheZ } else { Remove-Item Env:NPM_CONFIG_CACHE -ErrorAction SilentlyContinue }
-    if ($null -ne $oldNpmPrefixZ) { $env:NPM_CONFIG_PREFIX = $oldNpmPrefixZ } else { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
-    if ($null -ne $oldNodeOptsZ) { $env:NODE_OPTIONS = $oldNodeOptsZ } else { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
+    if ($hadNpmCacheZ) { $env:NPM_CONFIG_CACHE = $oldNpmCacheZ } elseif (Test-Path Env:NPM_CONFIG_CACHE) { Remove-Item Env:NPM_CONFIG_CACHE -ErrorAction SilentlyContinue }
+    if ($hadNpmPrefixZ) { $env:NPM_CONFIG_PREFIX = $oldNpmPrefixZ } elseif (Test-Path Env:NPM_CONFIG_PREFIX) { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
+    if ($hadNodeOptsZ) { $env:NODE_OPTIONS = $oldNodeOptsZ } elseif (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
+    if ($hadIa32Z) { $env:OPENSSL_ia32cap = $oldIa32Z } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
+    if ($hadRegZ) { $env:NPM_CONFIG_REGISTRY = $oldRegZ } elseif (Test-Path Env:NPM_CONFIG_REGISTRY) { Remove-Item Env:NPM_CONFIG_REGISTRY -ErrorAction SilentlyContinue }
   }
   Set-ZaloInstallStage 'plugin-inspect'
   if (-not $pluginInfo) { $pluginInfo = Get-ZaloPluginInfo -Node $node -CliEntry $env:OPENCLAW_CLI_ENTRY }

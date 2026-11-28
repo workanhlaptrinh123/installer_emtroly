@@ -2411,9 +2411,12 @@ function Update-ProgressFromStatus([string]$Message) {
     $activeStep = 2
     $pct = if ($subPct -ge 0) { 20 + [int][Math]::Round($subPct * 0.22) } else { 30 }
     if ($subPct -ge 0) { $activeBadge = "Đang tải $subPct%" }
-  } else {
+  } elseif ($Message -match 'kiểm tra API|bot Telegram|máy chủ AI|đầu vào|bắt đầu|thông tin') {
     $activeStep = 1
     $pct = 12
+  } else {
+    $activeStep = [Math]::Max(1, [Math]::Min(5, [int]$script:lastActiveStepIndex))
+    $pct = [Math]::Max(12, [int]$installProgressBar.Value)
   }
   $script:lastActiveStepIndex = $activeStep
 
@@ -3547,9 +3550,35 @@ function Show-RichFailureDiagnostics([string]$SummaryMessage, [object]$DiagPaylo
   $progressPercentText.Text = 'Gặp sự cố'
   $progressPercentText.Foreground = New-Brush '#DC2626'
 
-  $stepIdx = [Math]::Max(1, [Math]::Min(5, [int]$script:lastActiveStepIndex))
+  $stageToStep = @{
+    'input' = 1; 'provider' = 1; 'telegram' = 1; 'step1' = 1
+    'codex-cli' = 2; 'editor' = 2; 'codex' = 2; 'step2' = 2
+    'dependencies' = 3; 'step3' = 3
+    'install' = 4; 'openclaw' = 4; 'command' = 4; 'step4' = 4
+    'zalo-verify' = 5; 'zalo' = 5; 'telegram-menu' = 5; 'step5' = 5
+  }
+  $diagStageKey = if ($DiagPayload -and $DiagPayload.stage) { ([string]$DiagPayload.stage).Trim() } else { '' }
+  $stepIdx = if ($diagStageKey -and $stageToStep.ContainsKey($diagStageKey)) {
+    [int]$stageToStep[$diagStageKey]
+  } else {
+    [Math]::Max(1, [Math]::Min(5, [int]$script:lastActiveStepIndex))
+  }
+  $script:lastActiveStepIndex = $stepIdx
   if (-not $IsManageFailure) {
-    Set-ChecklistStep $stepIdx 'error' 'Gặp lỗi'
+    $zaloSelectedNow = ($zaloCheck -and $zaloCheck.Checked)
+    $editorSkippedNow = ($existingEditorCheck -and $existingEditorCheck.Checked)
+    for ($s = 1; $s -le 5; $s++) {
+      if ($s -lt $stepIdx) {
+        if ($s -eq 2 -and $editorSkippedNow) { Set-ChecklistStep 2 'done' 'Đã cài Codex CLI' }
+        else { Set-ChecklistStep $s 'done' }
+      } elseif ($s -eq $stepIdx) {
+        Set-ChecklistStep $s 'error' 'Gặp lỗi'
+      } elseif ($s -eq 5 -and -not $zaloSelectedNow) {
+        Set-ChecklistStep 5 'skipped'
+      } else {
+        Set-ChecklistStep $s 'pending'
+      }
+    }
   }
 
   $stageMap = @{

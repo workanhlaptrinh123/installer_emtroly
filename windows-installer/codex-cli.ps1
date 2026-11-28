@@ -332,6 +332,23 @@ requires_openai_auth = true
               Remove-Item -LiteralPath $tmpVsix -Force -ErrorAction SilentlyContinue
             }
           } catch {
+            $curlFallback = Join-Path $env:SystemRoot 'System32\curl.exe'
+            if ((Test-Path -LiteralPath $curlFallback -PathType Leaf) -and $extensionUrl -match '^https://') {
+              try {
+                & $writeMsg 'Kết nối tải bị gián đoạn — đang dùng chế độ tải nối tiếp TLS 1.2 (Codex VSIX)...'
+                & $curlFallback --fail --location --http1.1 --tlsv1.2 --retry 2 --connect-timeout 30 --max-time 900 -A 'AnhLapTrinh-EmTroLy-Installer/1.0' -C - -o $tmpVsix $extensionUrl *> $null
+                if ($LASTEXITCODE -ne 0) {
+                  if (Test-Path -LiteralPath $tmpVsix -PathType Leaf) { Remove-Item -LiteralPath $tmpVsix -Force -ErrorAction SilentlyContinue }
+                  & $curlFallback --fail --location --http1.1 --tlsv1.2 --retry 2 --connect-timeout 30 --max-time 900 -A 'AnhLapTrinh-EmTroLy-Installer/1.0' -o $tmpVsix $extensionUrl *> $null
+                }
+                if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $tmpVsix -PathType Leaf) -and
+                    ((Get-FileHash -LiteralPath $tmpVsix -Algorithm SHA256).Hash -ieq $extensionHash)) {
+                  Move-Item -LiteralPath $tmpVsix -Destination $cachedVsix -Force
+                  $vsixReady = $true
+                  break
+                }
+              } catch { }
+            }
             if ($dlTry -lt 3) { Start-Sleep -Seconds (2 * $dlTry) }
           }
         }
@@ -747,13 +764,15 @@ requires_openai_auth = true
     [void]$proc.Start()
     [IO.File]::WriteAllText($pidFile, [string]$proc.Id, [Text.Encoding]::ASCII)
 
-    $proc.StandardInput.WriteLine($prompt)
-    $proc.StandardInput.Flush()
-    $proc.StandardInput.Close()
-
     $stderrSeenLines = New-Object 'System.Collections.Generic.HashSet[string]'
     $outTask = $proc.StandardOutput.ReadLineAsync()
     $errTask = $proc.StandardError.ReadLineAsync()
+    try {
+      $proc.StandardInput.WriteLine($prompt)
+      $proc.StandardInput.Flush()
+    } catch { } finally {
+      try { $proc.StandardInput.Close() } catch { }
+    }
     while ($null -ne $outTask -or $null -ne $errTask) {
       $activeTasks = @()
       if ($null -ne $outTask) { $activeTasks += $outTask }

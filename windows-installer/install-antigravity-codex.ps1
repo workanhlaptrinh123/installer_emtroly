@@ -146,6 +146,26 @@ function Get-VerifiedDownload([string]$Url, [string]$Path, [string]$Hash) {
       if ($outStream) { try { $outStream.Dispose() } catch { } }
       if ($inStream) { try { $inStream.Dispose() } catch { } }
       if ($resp) { try { $resp.Close() } catch { } }
+      $curlExe = Join-Path $env:SystemRoot 'System32\curl.exe'
+      if (-not $useLegacy -and (Test-Path -LiteralPath $curlExe -PathType Leaf)) {
+        try {
+          if ((Get-Command Write-EditorStatus -ErrorAction SilentlyContinue) -and $StatusFile) {
+            try { Write-EditorStatus "Kết nối tải $label bị gián đoạn — đang tải nối tiếp bằng TLS 1.2..." } catch { }
+          }
+          & $curlExe --fail --location --http1.1 --tlsv1.2 --retry 2 --connect-timeout 30 --max-time 900 -A 'AnhLapTrinh-EmTroLy-Installer/1.0' -C - -o $partPath $Url *> $null
+          if ($LASTEXITCODE -ne 0) {
+            if (Test-Path -LiteralPath $partPath -PathType Leaf) { Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue }
+            & $curlExe --fail --location --http1.1 --tlsv1.2 --retry 2 --connect-timeout 30 --max-time 900 -A 'AnhLapTrinh-EmTroLy-Installer/1.0' -o $partPath $Url *> $null
+          }
+          if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $partPath -PathType Leaf)) {
+            if ((Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash -ieq $Hash) {
+              Move-Item -LiteralPath $partPath -Destination $Path -Force
+              $downloaded = $true
+              break
+            }
+          }
+        } catch { }
+      }
       if (Test-Path -LiteralPath $partPath -PathType Leaf) { Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue }
       if (Test-Path -LiteralPath $Path -PathType Leaf) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
       if ($attempt -lt $maxAttempts) { Start-Sleep -Milliseconds (500 * $attempt) }

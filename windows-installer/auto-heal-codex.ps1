@@ -96,11 +96,22 @@ function Ensure-AutoHealCodexBinary {
       [IO.File]::WriteAllText($pkgFile, '{"name":"emtroly-autoheal-codex","private":true}', (New-Object System.Text.UTF8Encoding($false)))
     }
     $prevEA = $ErrorActionPreference
+    $hadHealNodeOpts = Test-Path Env:NODE_OPTIONS
+    $oldHealNodeOpts = if ($hadHealNodeOpts) { $env:NODE_OPTIONS } else { $null }
+    $hadHealIa32 = Test-Path Env:OPENSSL_ia32cap
+    $oldHealIa32 = if ($hadHealIa32) { $env:OPENSSL_ia32cap } else { $null }
     try {
       $ErrorActionPreference = 'Continue'
-      & $npmCmd[0].Source install --prefix $autoHealRoot '@openai/codex' --no-audit --no-fund *> $null
+      & $npmCmd[0].Source install --prefix $autoHealRoot '@openai/codex' --no-audit --no-fund --maxsockets=3 *> $null
+      if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $cachedCmd -PathType Leaf)) {
+        $env:OPENSSL_ia32cap = '~0x200000200000000'
+        $env:NODE_OPTIONS = '--tls-max-v1.2 --tls-cipher-list=ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-CHACHA20-POLY1305:DEFAULT'
+        & $npmCmd[0].Source install --prefix $autoHealRoot '@openai/codex' --no-audit --no-fund --maxsockets=1 --registry=https://registry.npmmirror.com/ *> $null
+      }
     } finally {
       $ErrorActionPreference = $prevEA
+      if ($hadHealNodeOpts) { $env:NODE_OPTIONS = $oldHealNodeOpts } elseif (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
+      if ($hadHealIa32) { $env:OPENSSL_ia32cap = $oldHealIa32 } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
     }
     if (Test-Path -LiteralPath $cachedCmd -PathType Leaf) {
       return $cachedCmd
@@ -366,12 +377,17 @@ requires_openai_auth = true
     $proc = New-Object System.Diagnostics.Process
     $proc.StartInfo = $psi
     [void]$proc.Start()
-    $proc.StandardInput.WriteLine($prompt)
-    $proc.StandardInput.Flush()
-    $proc.StandardInput.Close()
-
     $outTask = $proc.StandardOutput.ReadToEndAsync()
     $errTask = $proc.StandardError.ReadToEndAsync()
+    $stdinPipeFailed = $false
+    try {
+      $proc.StandardInput.WriteLine($prompt)
+      $proc.StandardInput.Flush()
+    } catch {
+      $stdinPipeFailed = $true
+    } finally {
+      try { $proc.StandardInput.Close() } catch { }
+    }
     if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
       try {
         $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'

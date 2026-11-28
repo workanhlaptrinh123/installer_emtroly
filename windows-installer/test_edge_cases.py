@@ -1802,6 +1802,14 @@ class Step3CleanPcAndFailureUiTests(unittest.TestCase):
         self.assertIn("OpenTelegramWebBtn", wizard_src)
         self.assertIn("https://web.telegram.org/", wizard_src)
         self.assertIn("'dependencies'", wizard_src)
+        self.assertIn("ERR_SSL_CIPHER_OPERATION_FAILED", runner_src)
+        native_src = (ROOT / "install-native-windows.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("--tls-max-v1.2", native_src)
+        self.assertIn("OPENSSL_ia32cap", native_src)
+        self.assertIn("registry.npmmirror.com", native_src)
+        self.assertIn("if (Test-Path Env:NODE_OPTIONS)", native_src)
+        heal_src = (ROOT / "windows-installer" / "auto-heal-codex.ps1").read_text(encoding="utf-8-sig")
+        self.assertIn("$stdinPipeFailed", heal_src)
         self.assertIn("$stage = 'dependencies'", runner_src)
 
         if not sys.platform.startswith("win"):
@@ -1888,6 +1896,101 @@ class Step3CleanPcAndFailureUiTests(unittest.TestCase):
         finally:
             server.shutdown()
             server.server_close()
+
+    def test_openclaw_ssl_failure_stays_step4_and_autoheal_broken_pipe_never_masks_root_error(self):
+        if not sys.platform.startswith("win"):
+            return
+
+        with tempfile.TemporaryDirectory(prefix="emtroly-ssl-pipe-") as td:
+            root = Path(td)
+            home = root / "home"
+            local = root / "local"
+            payload = root / "payload"
+            heal_bin = local / "EmTroLy/AutoHealCli/node_modules/.bin"
+            for d in (home, local, payload / "windows-installer", heal_bin):
+                d.mkdir(parents=True, exist_ok=True)
+
+            # Copy production runner & helpers
+            for fname in ("run-native-install.ps1", "validation.ps1", "wizard-helpers.ps1", "auto-heal-codex.ps1"):
+                shutil.copy2(ROOT / "windows-installer" / fname, payload / "windows-installer" / fname)
+            (payload / "windows-installer/verify-openclaw-command.ps1").write_text("exit 0\n", encoding="utf-8-sig")
+
+            # Broken codex.cmd that exits immediately without reading stdin (triggers WriteLine broken pipe if unguarded)
+            (heal_bin / "codex.cmd").write_text("@echo off\r\necho immediate-exit\r\nexit /b 1\r\n", encoding="ascii")
+
+            # Fake installer emitting historical Step 3 line + OpenClaw ERR_SSL_CIPHER_OPERATION_FAILED
+            (payload / "install-native-windows.ps1").write_text(
+                "param($Name,$OwnerIds,$GroupId,$AssistantName,$BaseUrl,$Model,$Profile,$Modules,$QrOwnerId,$OpenClawVersion,$InstallMode,$InstallRoot,$GatewayPort,$Audience,$Addressing,$Style,[switch]$UserInstall,$CredentialData)\n"
+                "if ($env:EMTROLY_INSTALL_LOG_FILE) {\n"
+                "  [IO.File]::AppendAllText($env:EMTROLY_INSTALL_LOG_FILE, \"[native] STATUS: Đang kiểm tra và cài Node.js, Python, FFmpeg nếu máy còn thiếu…`r`n\", [Text.UTF8Encoding]::new($false))\n"
+                "  [IO.File]::AppendAllText($env:EMTROLY_INSTALL_LOG_FILE, \"[native] npm install attempt 3/3 failed (exit=1): npm error code ERR_SSL_CIPHER_OPERATION_FAILED`r`n\", [Text.UTF8Encoding]::new($false))\n"
+                "}\n"
+                "throw 'Private OpenClaw installation failed.'\n",
+                encoding="utf-8-sig",
+            )
+
+            settings_path = root / "settings.json"
+            status_path = root / "status.txt"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "member": "emtroly",
+                        "assistant_name": "Em Tro Ly",
+                        "base_url": "https://provider.example/v1",
+                        "model": "gpt-6.2-sol",
+                        "owner_ids": "123456789",
+                        "group_id": "",
+                        "gateway_port": "0",
+                        "audience": "",
+                        "addressing": "",
+                        "style": "",
+                        "accept_full_access": True,
+                        "configure_zalo": False,
+                        "skip_editor": True,
+                        "qr_owner_id": "",
+                        "telegram_token": "123456:SSL_TEST_TOKEN_ABCDEFGHIJKLMNO",
+                        "ai_api_key": "sk-ssl-test-key-123456",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            clean_ssl_path = os.pathsep.join(
+                p for p in os.environ.get("PATH", "").split(os.pathsep) if "openclaw" not in p.lower()
+            )
+            env = {
+                **os.environ,
+                "USERPROFILE": str(home),
+                "LOCALAPPDATA": str(local),
+                "PATH": str(heal_bin) + os.pathsep + clean_ssl_path,
+            }
+            driver = root / "run_ssl_pipe.ps1"
+            driver.write_text(
+                "$ErrorActionPreference = 'Stop'\n"
+                "function global:Invoke-RestMethod {\n"
+                "  param([switch]$UseBasicParsing, $Method, $Uri, $Headers, $TimeoutSec, $MaximumRedirection)\n"
+                "  if ($Uri -match '/models$') { return @{ data = @(@{ id = 'gpt-6.2-sol' }) } }\n"
+                "  if ($Uri -match '/getMe$') { return @{ ok = $true; result = @{ is_bot = $true } } }\n"
+                "  throw $Uri\n"
+                "}\n"
+                f"& '{payload / 'windows-installer/run-native-install.ps1'}' -SettingsFile '{settings_path}' -PayloadRoot '{payload}' -LogFile '{status_path}'\n"
+                "exit $LASTEXITCODE\n",
+                encoding="utf-8-sig",
+            )
+            res = subprocess.run(
+                ["powershell.exe", "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(driver)],
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=45,
+            )
+            self.assertNotEqual(res.returncode, 0)
+            diag_data = json.loads(Path(str(status_path) + ".diag.json").read_text(encoding="utf-8"))
+            self.assertEqual(diag_data["stage"], "install", diag_data)
+            self.assertEqual(diag_data["code"], "Private OpenClaw installation failed.", diag_data)
+            self.assertNotIn("The pipe has been ended", diag_data["code"])
+            self.assertIn("ERR_SSL_CIPHER_OPERATION_FAILED", diag_data["friendlyMessage"])
 
 
 if __name__ == "__main__":
