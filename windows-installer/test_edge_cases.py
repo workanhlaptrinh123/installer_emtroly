@@ -1808,6 +1808,7 @@ class Step3CleanPcAndFailureUiTests(unittest.TestCase):
         self.assertIn("OPENSSL_ia32cap", native_src)
         self.assertIn("registry.npmmirror.com", native_src)
         self.assertIn("if (Test-Path Env:NODE_OPTIONS)", native_src)
+        self.assertNotIn("New-Object System.Diagnostics.ProcessStartInfo(", native_src)
         heal_src = (ROOT / "windows-installer" / "auto-heal-codex.ps1").read_text(encoding="utf-8-sig")
         self.assertIn("$stdinPipeFailed", heal_src)
         self.assertIn("$stage = 'dependencies'", runner_src)

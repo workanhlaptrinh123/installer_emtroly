@@ -359,14 +359,18 @@ try {
   $env:NPM_CONFIG_USERCONFIG = $isolatedNpmrc
   if (Test-Path Env:NPM_CONFIG_PREFIX) { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
   if (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
-  for ($npmTry = 1; $npmTry -le 3; $npmTry++) {
-    $registryUrl = if ($npmTry -ge 3) { 'https://registry.npmmirror.com/' } else { 'https://registry.npmjs.org/' }
+  for ($npmTry = 1; $npmTry -le 4; $npmTry++) {
+    $registryUrl = if ($npmTry -eq 3) { 'https://registry.npmmirror.com/' } else { 'https://registry.npmjs.org/' }
     $maxSockets = if ($npmTry -eq 1) { 6 } elseif ($npmTry -eq 2) { 2 } else { 1 }
-    [IO.File]::WriteAllText($isolatedNpmrc, "registry=$registryUrl`nmaxsockets=$maxSockets`nfetch-retries=5`nfetch-retry-mintimeout=2000`nfetch-retry-maxtimeout=15000`nfetch-timeout=600000`naudit=false`nfund=false`n", [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($isolatedNpmrc, "registry=$registryUrl`nmaxsockets=$maxSockets`nfetch-retries=10`nfetch-retry-mintimeout=1000`nfetch-retry-maxtimeout=6000`nfetch-timeout=600000`naudit=false`nfund=false`n", [Text.UTF8Encoding]::new($false))
     if ($npmTry -ge 2) {
       # Work around OpenSSL 3 AES-GCM / VAES / TLS 1.3 cipher failures on affected Windows CPUs, VPNs, and AV SSL proxies
-      $env:OPENSSL_ia32cap = '~0x200000200000000'
-      $env:NODE_OPTIONS = '--tls-max-v1.2 --tls-cipher-list=ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-CHACHA20-POLY1305:DEFAULT'
+      $env:OPENSSL_ia32cap = if ($npmTry -ge 4) { '0:0' } else { '~0x200000200000000' }
+      if ($npmTry -eq 4) {
+        $env:NODE_OPTIONS = '--tls-max-v1.2'
+      } else {
+        $env:NODE_OPTIONS = '--tls-max-v1.2 --tls-cipher-list=ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-CHACHA20-POLY1305:DEFAULT'
+      }
     } else {
       if (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
       if ($hadIa32Cap) { $env:OPENSSL_ia32cap = $oldIa32Cap } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
@@ -377,31 +381,34 @@ try {
     $ErrorActionPreference = $previousErrorAction
     if ($npmExitCode -eq 0) { break }
     $npmTail = if (Test-Path -LiteralPath $npmLogFile -PathType Leaf) { (@(Get-Content -LiteralPath $npmLogFile -Tail 20 -ErrorAction SilentlyContinue) -join ' | ') } else { '' }
-    Write-NativeInstallLog -Entry ("npm install attempt $npmTry/3 failed (exit=$npmExitCode): $npmTail") -Secrets @($tg, $key)
-    if ($npmTry -lt 3) {
-      if ($npmTail -match 'ERR_SSL_CIPHER_OPERATION_FAILED|ossl_gcm_stream_update|ciphercommon_gcm|cipher operation failed') {
-        $retryStatus = if ($npmTry -eq 1) {
-          'Phát hiện lỗi giải mã TLS/SSL — đang tự động thử cài lại OpenClaw ở chế độ TLS 1.2 / ChaCha20 (lần 2/3)...'
-        } else {
-          'Đang chuyển sang máy chủ npm dự phòng với chế độ bảo toàn kết nối TLS (lần 3/3)...'
+    Write-NativeInstallLog -Entry ("npm install attempt $npmTry/4 failed (exit=$npmExitCode): $npmTail") -Secrets @($tg, $key)
+    if ($npmTry -lt 4) {
+      if ($npmTail -match 'ERR_SSL_CIPHER_OPERATION_FAILED|ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC|ossl_gcm_stream_update|ciphercommon_gcm|bad record mac|cipher operation failed') {
+        $retryStatus = switch ($npmTry) {
+          1 { 'Phát hiện lỗi giải mã TLS/SSL — đang thử lại chế độ TLS 1.2 / ChaCha20 (lần 2/4)...' }
+          2 { 'Đang chuyển sang máy chủ npm dự phòng với chế độ bảo toàn kết nối TLS (lần 3/4)...' }
+          default { 'Đang thử lại tải nối tiếp từ bộ nhớ đệm npm (lần 4/4)...' }
         }
         Write-NativeInstallStatus $retryStatus
       } else {
-        Write-NativeInstallStatus "Windows đang quét tệp hoặc mạng chập chờn — đang tự động thử cài lại OpenClaw (lần $($npmTry + 1)/3)..."
+        Write-NativeInstallStatus "Windows đang quét tệp hoặc mạng chập chờn — đang tự động thử cài lại OpenClaw (lần $($npmTry + 1)/4)..."
       }
       $partialModules = Join-Path $runtime 'node_modules'
       if (Test-Path -LiteralPath $partialModules) {
         $cmdClean = Join-Path $env:SystemRoot 'System32\cmd.exe'
         if (Test-Path -LiteralPath $cmdClean -PathType Leaf) {
           try {
-            $psiNpm = New-Object System.Diagnostics.ProcessStartInfo($cmdClean, '/d /s /c "rmdir /s /q "' + $partialModules + '""')
-            $psiNpm.UseShellExecute = $false; $psiNpm.CreateNoWindow = $true
+            $psiNpm = New-Object System.Diagnostics.ProcessStartInfo
+            $psiNpm.FileName = $cmdClean
+            $psiNpm.Arguments = '/d /s /c "rmdir /s /q "' + $partialModules + '""'
+            $psiNpm.UseShellExecute = $false
+            $psiNpm.CreateNoWindow = $true
             $pNpm = [System.Diagnostics.Process]::Start($psiNpm); [void]$pNpm.WaitForExit(15000); $pNpm.Dispose()
           } catch { }
         }
         Remove-Item -LiteralPath $partialModules -Recurse -Force -ErrorAction SilentlyContinue
       }
-      Start-Sleep -Seconds (3 * $npmTry)
+      Start-Sleep -Seconds (2 * $npmTry)
     }
   }
 } finally {
