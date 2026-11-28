@@ -921,6 +921,127 @@ sys.exit(99)
             httpd.shutdown()
             httpd.server_close()
 
+    def test_schannel_bridge_resumes_truncated_tarball_via_http_range_and_rejects_broken_dp0_cmd_and_locked_ico(self) -> None:
+        import hashlib
+
+        full_payload = b"EMTROLY_STREAMED_TARBALL_CHUNK_" * 8192  # ~253 KB
+        expected_sha256 = hashlib.sha256(full_payload).hexdigest().lower()
+        range_state = {"calls": 0, "saw_range": False}
+        range_lock = threading.Lock()
+
+        class _RangeHandler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, format, *args):
+                pass
+
+            def do_GET(self):
+                if self.path == "/pkg/-/large.tgz":
+                    rng = self.headers.get("Range", "")
+                    with range_lock:
+                        range_state["calls"] += 1
+                        call_num = range_state["calls"]
+                        if rng.startswith("bytes="):
+                            range_state["saw_range"] = True
+                    if call_num == 1:
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/octet-stream")
+                        self.send_header("Content-Length", str(len(full_payload)))
+                        self.end_headers()
+                        self.wfile.write(full_payload[:90000])
+                        self.wfile.flush()
+                        self.close_connection = True
+                        return
+                    if rng.startswith("bytes="):
+                        start_offset = int(rng.split("=", 1)[1].split("-", 1)[0])
+                        rem = full_payload[start_offset:]
+                        self.send_response(206)
+                        self.send_header("Content-Type", "application/octet-stream")
+                        self.send_header("Content-Range", f"bytes {start_offset}-{len(full_payload)-1}/{len(full_payload)}")
+                        self.send_header("Content-Length", str(len(rem)))
+                        self.end_headers()
+                        self.wfile.write(rem)
+                        return
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Length", str(len(full_payload)))
+                    self.end_headers()
+                    self.wfile.write(full_payload)
+                else:
+                    self.send_response(404)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+
+        class _ThreadServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+
+        httpd = _ThreadServer(("127.0.0.1", 0), _RangeHandler)
+        mock_port = httpd.server_address[1]
+        t = threading.Thread(target=httpd.serve_forever, daemon=True)
+        t.start()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                broken_bin = base / "broken-npm"
+                broken_bin.mkdir(parents=True, exist_ok=True)
+                broken_cmd = broken_bin / "codex.cmd"
+                broken_cmd.write_text(
+                    '@echo off\r\n"%~dp0\\missing-subdir\\node.exe" "%~dp0\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n',
+                    encoding="ascii",
+                )
+                ui_dir = base / "EmTroLyUI"
+
+                ps = textwrap.dedent(
+                    f"""
+                    $ErrorActionPreference = 'Stop'
+                    . {_ps_quote(str(ROOT / 'native' / 'openclaw-npm.ps1'))}
+                    . {_ps_quote(str(ROOT / 'windows-installer' / 'auto-heal-codex.ps1'))}
+                    . {_ps_quote(str(ROOT / 'windows-installer' / 'codex-cli.ps1'))}
+
+                    # 1. Broken %~dp0 codex.cmd must be rejected cleanly (no 'cannot find the path specified' leak)
+                    $runnable = Test-EmTroLyCodexBinaryRunnable -Executable {_ps_quote(str(broken_cmd))}
+                    if ($runnable) {{ throw 'broken-dp0-cmd-accepted' }}
+
+                    # 2. SChannel bridge must resume truncated tarball via HTTP 206 Range and deliver exact SHA-256
+                    $b = Start-EmTroLyNpmSChannelBridge -UpstreamRegistryUrl {_ps_quote(f'http://127.0.0.1:{mock_port}/')}
+                    if (-not $b) {{ throw 'bridge-init-failed' }}
+                    $dlOut = Join-Path {_ps_quote(str(base))} 'downloaded.tgz'
+                    try {{
+                      Invoke-WebRequest -UseBasicParsing -Uri ($b.ProxyUrl + '__tarball__/http/127.0.0.1:' + {mock_port} + '/pkg/-/large.tgz') -OutFile $dlOut -TimeoutSec 25
+                    }} finally {{
+                      $b.Dispose()
+                    }}
+                    $actualSha = (Get-FileHash -LiteralPath $dlOut -Algorithm SHA256).Hash.ToLowerInvariant()
+
+                    # 3. Sync-EmTroLyUiPayload must not throw IOException when alt.ico is already open with Read share
+                    $icoTarget = Join-Path {_ps_quote(str(ui_dir))} 'windows-installer\\alt.ico'
+                    [void][IO.Directory]::CreateDirectory((Split-Path -Parent $icoTarget))
+                    Copy-Item -LiteralPath {_ps_quote(str(ROOT / 'windows-installer' / 'alt.ico'))} -Destination $icoTarget -Force
+                    $lockFs = [IO.File]::Open($icoTarget, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+                    try {{
+                      Copy-EmTroLyFileIfChanged -SourcePath {_ps_quote(str(ROOT / 'windows-installer' / 'alt.ico'))} -DestinationPath $icoTarget
+                    }} finally {{
+                      $lockFs.Dispose()
+                    }}
+
+                    [pscustomobject]@{{
+                      Runnable = $runnable
+                      Sha256 = $actualSha
+                      Size = (Get-Item -LiteralPath $dlOut).Length
+                    }} | ConvertTo-Json
+                    """
+                )
+                proc = self._run_ps(ps)
+                self.assertEqual(proc.returncode, 0, msg=proc.stdout + "\n" + proc.stderr)
+                out = json.loads(proc.stdout)
+                self.assertFalse(out["Runnable"])
+                self.assertEqual(out["Size"], len(full_payload))
+                self.assertEqual(out["Sha256"], expected_sha256)
+                self.assertTrue(range_state["saw_range"], "Expected SChannel bridge to send HTTP Range header on retry")
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

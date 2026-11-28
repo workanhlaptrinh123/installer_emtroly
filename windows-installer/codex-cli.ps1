@@ -988,6 +988,164 @@ function Start-CodexInteractiveWindow {
   [void][Diagnostics.Process]::Start($startInfo)
 }
 
+function Get-EmTroLyFileSha256Shared {
+  param([string]$FilePath = '')
+  if ([string]::IsNullOrWhiteSpace($FilePath) -or -not (Test-Path -LiteralPath $FilePath -PathType Leaf)) { return '' }
+  $sha = $null
+  $fs = $null
+  try {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $share = [System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete
+    $fs = [System.IO.File]::Open($FilePath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, $share)
+    $hashBytes = $sha.ComputeHash($fs)
+    return ([BitConverter]::ToString($hashBytes).Replace('-', '').ToLowerInvariant())
+  } catch {
+    return ''
+  } finally {
+    if ($fs) { try { $fs.Dispose() } catch { } }
+    if ($sha) { try { $sha.Dispose() } catch { } }
+  }
+}
+
+function Copy-EmTroLyFileIfChanged {
+  param(
+    [Parameter(Mandatory=$true)][string]$SourcePath,
+    [Parameter(Mandatory=$true)][string]$DestinationPath
+  )
+  if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { return }
+  $destParent = Split-Path -Parent $DestinationPath
+  if ($destParent) { [void][IO.Directory]::CreateDirectory($destParent) }
+
+  if (Test-Path -LiteralPath $DestinationPath -PathType Leaf) {
+    try {
+      $srcLen = ([IO.FileInfo]$SourcePath).Length
+      $dstLen = ([IO.FileInfo]$DestinationPath).Length
+      if ($srcLen -eq $dstLen) {
+        $srcHash = Get-EmTroLyFileSha256Shared -FilePath $SourcePath
+        $dstHash = Get-EmTroLyFileSha256Shared -FilePath $DestinationPath
+        if ($srcHash -and $srcHash -ceq $dstHash) { return }
+      }
+    } catch { }
+  }
+
+  for ($attempt = 1; $attempt -le 5; $attempt++) {
+    try {
+      [System.IO.File]::Copy($SourcePath, $DestinationPath, $true)
+      return
+    } catch {
+      if ($attempt -ge 5) { throw }
+      Start-Sleep -Milliseconds (120 * $attempt)
+    }
+  }
+}
+
+function Write-EmTroLyUtf8BomIfChanged {
+  param(
+    [Parameter(Mandatory=$true)][string]$SourcePath,
+    [Parameter(Mandatory=$true)][string]$DestinationPath
+  )
+  if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) { return }
+  $destParent = Split-Path -Parent $DestinationPath
+  if ($destParent) { [void][IO.Directory]::CreateDirectory($destParent) }
+
+  $utf8WithBom = New-Object System.Text.UTF8Encoding($true)
+  $txt = [IO.File]::ReadAllText($SourcePath, [System.Text.Encoding]::UTF8)
+  $preamble = $utf8WithBom.GetPreamble()
+  $bodyBytes = $utf8WithBom.GetBytes($txt)
+  $allBytes = New-Object byte[] ($preamble.Length + $bodyBytes.Length)
+  [Array]::Copy($preamble, 0, $allBytes, 0, $preamble.Length)
+  [Array]::Copy($bodyBytes, 0, $allBytes, $preamble.Length, $bodyBytes.Length)
+
+  if (Test-Path -LiteralPath $DestinationPath -PathType Leaf) {
+    try {
+      if (([IO.FileInfo]$DestinationPath).Length -eq $allBytes.Length) {
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+          $srcHash = [BitConverter]::ToString($sha.ComputeHash($allBytes)).Replace('-', '').ToLowerInvariant()
+        } finally {
+          $sha.Dispose()
+        }
+        $dstHash = Get-EmTroLyFileSha256Shared -FilePath $DestinationPath
+        if ($srcHash -and $srcHash -ceq $dstHash) { return }
+      }
+    } catch { }
+  }
+
+  for ($attempt = 1; $attempt -le 5; $attempt++) {
+    try {
+      [IO.File]::WriteAllBytes($DestinationPath, $allBytes)
+      return
+    } catch {
+      if ($attempt -ge 5) { throw }
+      Start-Sleep -Milliseconds (120 * $attempt)
+    }
+  }
+}
+
+function Copy-EmTroLyDirectoryTreeIfChanged {
+  param(
+    [Parameter(Mandatory=$true)][string]$SourceDir,
+    [Parameter(Mandatory=$true)][string]$DestinationDir
+  )
+  if (-not (Test-Path -LiteralPath $SourceDir -PathType Container)) { return }
+  $destExisted = (Test-Path -LiteralPath $DestinationDir -PathType Container) -and (@(Get-ChildItem -LiteralPath $DestinationDir -Force -ErrorAction SilentlyContinue | Select-Object -First 1).Count -gt 0)
+  [void][IO.Directory]::CreateDirectory($DestinationDir)
+  if (-not $destExisted) {
+    Copy-Item -Path (Join-Path $SourceDir '*') -Destination $DestinationDir -Recurse -Force -ErrorAction Stop
+    return
+  }
+  $srcFull = [IO.Path]::GetFullPath($SourceDir).TrimEnd('\')
+  foreach ($dirItem in @(Get-ChildItem -LiteralPath $srcFull -Directory -Recurse -Force -ErrorAction SilentlyContinue)) {
+    $relDir = $dirItem.FullName.Substring($srcFull.Length).TrimStart('\')
+    if ($relDir) {
+      [void][IO.Directory]::CreateDirectory((Join-Path $DestinationDir $relDir))
+    }
+  }
+  foreach ($fileItem in @(Get-ChildItem -LiteralPath $srcFull -File -Recurse -Force -ErrorAction SilentlyContinue)) {
+    $relFile = $fileItem.FullName.Substring($srcFull.Length).TrimStart('\')
+    if ($relFile) {
+      Copy-EmTroLyFileIfChanged -SourcePath $fileItem.FullName -DestinationPath (Join-Path $DestinationDir $relFile)
+    }
+  }
+}
+
+function Sync-EmTroLyUiPayload {
+  param(
+    [Parameter(Mandatory=$true)][string]$PayloadRoot,
+    [string]$UiDir = ''
+  )
+  if ([string]::IsNullOrWhiteSpace($PayloadRoot) -or -not (Test-Path -LiteralPath $PayloadRoot -PathType Container)) { return }
+  $emUiDir = if (-not [string]::IsNullOrWhiteSpace($UiDir)) { $UiDir } elseif ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'EmTroLyUI' } else { '' }
+  if ([string]::IsNullOrWhiteSpace($emUiDir)) { return }
+  $emWinDir = Join-Path $emUiDir 'windows-installer'
+  [void][IO.Directory]::CreateDirectory($emWinDir)
+
+  $isSameRoot = $false
+  try {
+    $isSameRoot = ([IO.Path]::GetFullPath($PayloadRoot).TrimEnd('\') -ieq [IO.Path]::GetFullPath($emUiDir).TrimEnd('\'))
+  } catch { }
+  if ($isSameRoot) { return }
+
+  foreach ($name in @(
+    'wizard.ps1', 'wizard-helpers.ps1', 'codex-cli.ps1', 'auto-heal-codex.ps1',
+    'manage-instance.ps1', 'validation.ps1', 'repair-antigravity-shortcut.ps1',
+    'install-antigravity-codex.ps1', 'run-native-install.ps1', 'verify-openclaw-command.ps1'
+  )) {
+    Write-EmTroLyUtf8BomIfChanged -SourcePath (Join-Path $PayloadRoot ('windows-installer\' + $name)) -DestinationPath (Join-Path $emWinDir $name)
+  }
+  foreach ($assetName in @('zalo-qr-session.mjs', 'alt.ico', 'launch-wizard.vbs')) {
+    Copy-EmTroLyFileIfChanged -SourcePath (Join-Path $PayloadRoot ('windows-installer\' + $assetName)) -DestinationPath (Join-Path $emWinDir $assetName)
+  }
+  Copy-EmTroLyDirectoryTreeIfChanged -SourceDir (Join-Path $PayloadRoot 'windows-installer\activation-probe') -DestinationDir (Join-Path $emWinDir 'activation-probe')
+  foreach ($rf in @('alt.png', 'MANIFEST.txt', 'configure.py')) {
+    Copy-EmTroLyFileIfChanged -SourcePath (Join-Path $PayloadRoot $rf) -DestinationPath (Join-Path $emUiDir $rf)
+  }
+  Write-EmTroLyUtf8BomIfChanged -SourcePath (Join-Path $PayloadRoot 'install-native-windows.ps1') -DestinationPath (Join-Path $emUiDir 'install-native-windows.ps1')
+  foreach ($subDir in @('native', 'modules', 'profiles', 'zalo')) {
+    Copy-EmTroLyDirectoryTreeIfChanged -SourceDir (Join-Path $PayloadRoot $subDir) -DestinationDir (Join-Path $emUiDir $subDir)
+  }
+}
+
 function Register-EmTroLyCodexCli {
   param([string]$PayloadRoot = '')
   $info = Find-EmTroLyCodexCli
@@ -1050,58 +1208,7 @@ function Register-EmTroLyCodexCli {
     try {
       $emUiDir = Join-Path $env:LOCALAPPDATA 'EmTroLyUI'
       $emWinDir = Join-Path $emUiDir 'windows-installer'
-      [void][IO.Directory]::CreateDirectory($emWinDir)
-      $isSameRoot = $false
-      if (Test-Path -LiteralPath $PayloadRoot -PathType Container) {
-        try {
-          $isSameRoot = ([IO.Path]::GetFullPath($PayloadRoot).TrimEnd('\') -ieq [IO.Path]::GetFullPath($emUiDir).TrimEnd('\'))
-        } catch { }
-      }
-      if (-not $isSameRoot -and (Test-Path -LiteralPath $PayloadRoot -PathType Container)) {
-        $utf8WithBom = New-Object System.Text.UTF8Encoding($true)
-        foreach ($name in @(
-          'wizard.ps1', 'wizard-helpers.ps1', 'codex-cli.ps1', 'auto-heal-codex.ps1',
-          'manage-instance.ps1', 'validation.ps1', 'repair-antigravity-shortcut.ps1',
-          'install-antigravity-codex.ps1', 'run-native-install.ps1', 'verify-openclaw-command.ps1'
-        )) {
-          $srcFile = Join-Path $PayloadRoot ('windows-installer\' + $name)
-          if (Test-Path -LiteralPath $srcFile -PathType Leaf) {
-            $txt = [IO.File]::ReadAllText($srcFile, [System.Text.Encoding]::UTF8)
-            [IO.File]::WriteAllText((Join-Path $emWinDir $name), $txt, $utf8WithBom)
-          }
-        }
-        foreach ($assetName in @('zalo-qr-session.mjs', 'alt.ico', 'launch-wizard.vbs')) {
-          $assetSrc = Join-Path $PayloadRoot ('windows-installer\' + $assetName)
-          if (Test-Path -LiteralPath $assetSrc -PathType Leaf) {
-            Copy-Item -LiteralPath $assetSrc -Destination (Join-Path $emWinDir $assetName) -Force
-          }
-        }
-        $probeSrc = Join-Path $PayloadRoot 'windows-installer\activation-probe'
-        if (Test-Path -LiteralPath $probeSrc -PathType Container) {
-          $probeDst = Join-Path $emWinDir 'activation-probe'
-          [void][IO.Directory]::CreateDirectory($probeDst)
-          Copy-Item -Path (Join-Path $probeSrc '*') -Destination $probeDst -Recurse -Force
-        }
-        foreach ($rf in @('alt.png', 'MANIFEST.txt', 'configure.py')) {
-          $rSrc = Join-Path $PayloadRoot $rf
-          if (Test-Path -LiteralPath $rSrc -PathType Leaf) {
-            Copy-Item -LiteralPath $rSrc -Destination (Join-Path $emUiDir $rf) -Force
-          }
-        }
-        $nativeRootPs = Join-Path $PayloadRoot 'install-native-windows.ps1'
-        if (Test-Path -LiteralPath $nativeRootPs -PathType Leaf) {
-          $nativeTxt = [IO.File]::ReadAllText($nativeRootPs, [System.Text.Encoding]::UTF8)
-          [IO.File]::WriteAllText((Join-Path $emUiDir 'install-native-windows.ps1'), $nativeTxt, $utf8WithBom)
-        }
-        foreach ($subDir in @('native', 'modules', 'profiles', 'zalo')) {
-          $subSrc = Join-Path $PayloadRoot $subDir
-          if (Test-Path -LiteralPath $subSrc -PathType Container) {
-            $subDst = Join-Path $emUiDir $subDir
-            [void][IO.Directory]::CreateDirectory($subDst)
-            Copy-Item -Path (Join-Path $subSrc '*') -Destination $subDst -Recurse -Force
-          }
-        }
-      }
+      Sync-EmTroLyUiPayload -PayloadRoot $PayloadRoot -UiDir $emUiDir
       $uiLauncher = Join-Path $binDir 'emtroly-ui.cmd'
       $uiWizard = Join-Path $emWinDir 'wizard.ps1'
       $uiVbs = Join-Path $emUiDir 'launch-emtroly-codex-ui.vbs'

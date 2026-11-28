@@ -92,10 +92,12 @@ function Test-EmTroLyCodexBinaryRunnable {
   }
   if ($norm -match '\.(cmd|bat)$') {
     try {
+      $cmdDir = Split-Path -Parent $Executable
       $cmdBody = [IO.File]::ReadAllText($Executable, [System.Text.Encoding]::UTF8)
-      foreach ($m in [regex]::Matches($cmdBody, '"([A-Za-z]:\\[^"\r\n]+\.(?:exe|js))"')) {
-        $refPath = $m.Groups[1].Value
-        if ($refPath -and -not (Test-Path -LiteralPath $refPath -PathType Leaf)) {
+      foreach ($m in [regex]::Matches($cmdBody, '"((?:%~dp0|%dp0%|[A-Za-z]:)[^"\r\n]+\.(?:exe|js|mjs|cjs|py|cmd|bat))"')) {
+        $rawRef = $m.Groups[1].Value
+        $expandedRef = $rawRef -replace '(?i)^%~dp0\\?', ($cmdDir.TrimEnd('\') + '\') -replace '(?i)^%dp0%\\?', ($cmdDir.TrimEnd('\') + '\')
+        if ($expandedRef -and -not (Test-Path -LiteralPath $expandedRef -PathType Leaf)) {
           return $false
         }
       }

@@ -135,7 +135,10 @@ if (-not $pluginInfo) {
   $oldIa32Z = if ($hadIa32Z) { $env:OPENSSL_ia32cap } else { $null }
   $hadRegZ = Test-Path Env:NPM_CONFIG_REGISTRY
   $oldRegZ = if ($hadRegZ) { $env:NPM_CONFIG_REGISTRY } else { $null }
+  $hadUserCfgZ = Test-Path Env:NPM_CONFIG_USERCONFIG
+  $oldUserCfgZ = if ($hadUserCfgZ) { $env:NPM_CONFIG_USERCONFIG } else { $null }
   $zaloCacheRoot = Join-Path $Root 'npm-cache\zalo'
+  $zaloNpmrc = Join-Path $zaloCacheRoot '.npmrc.zalo'
   [void][IO.Directory]::CreateDirectory($zaloCacheRoot)
   try {
     if (Test-Path Env:NPM_CONFIG_PREFIX) { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
@@ -176,6 +179,8 @@ if (-not $pluginInfo) {
         $zEffectiveRegistry = 'https://registry.npmmirror.com/'
       }
       try {
+        [IO.File]::WriteAllText($zaloNpmrc, ("registry=$zEffectiveRegistry`nmaxsockets=$($zStep.MaxSockets)`nfetch-timeout=600000`naudit=false`nfund=false`n"), [Text.UTF8Encoding]::new($false))
+        $env:NPM_CONFIG_USERCONFIG = $zaloNpmrc
         $env:NPM_CONFIG_REGISTRY = $zEffectiveRegistry
         $env:NPM_CONFIG_MAXSOCKETS = $zStep.MaxSockets
         if ($zStep.Ia32) { $env:OPENSSL_ia32cap = $zStep.Ia32 } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
@@ -198,12 +203,14 @@ if (-not $pluginInfo) {
       }
     }
   } finally {
+    Remove-Item -LiteralPath $zaloNpmrc -Force -ErrorAction SilentlyContinue
     if ($hadNpmCacheZ) { $env:NPM_CONFIG_CACHE = $oldNpmCacheZ } elseif (Test-Path Env:NPM_CONFIG_CACHE) { Remove-Item Env:NPM_CONFIG_CACHE -ErrorAction SilentlyContinue }
     if ($hadNpmPrefixZ) { $env:NPM_CONFIG_PREFIX = $oldNpmPrefixZ } elseif (Test-Path Env:NPM_CONFIG_PREFIX) { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
     if ($hadNpmMaxSocketsZ) { $env:NPM_CONFIG_MAXSOCKETS = $oldNpmMaxSocketsZ } elseif (Test-Path Env:NPM_CONFIG_MAXSOCKETS) { Remove-Item Env:NPM_CONFIG_MAXSOCKETS -ErrorAction SilentlyContinue }
     if ($hadNodeOptsZ) { $env:NODE_OPTIONS = $oldNodeOptsZ } elseif (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
     if ($hadIa32Z) { $env:OPENSSL_ia32cap = $oldIa32Z } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
     if ($hadRegZ) { $env:NPM_CONFIG_REGISTRY = $oldRegZ } elseif (Test-Path Env:NPM_CONFIG_REGISTRY) { Remove-Item Env:NPM_CONFIG_REGISTRY -ErrorAction SilentlyContinue }
+    if ($hadUserCfgZ) { $env:NPM_CONFIG_USERCONFIG = $oldUserCfgZ } elseif (Test-Path Env:NPM_CONFIG_USERCONFIG) { Remove-Item Env:NPM_CONFIG_USERCONFIG -ErrorAction SilentlyContinue }
   }
   if (-not $pluginInfo -and $installResult -and $installResult.ExitCode -ne 0) { Set-ZaloCliFailureDetail $installResult; throw 'Zalo plugin installation failed.' }
   Set-ZaloInstallStage 'plugin-inspect'

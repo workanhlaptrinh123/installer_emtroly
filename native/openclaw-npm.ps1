@@ -616,6 +616,26 @@ namespace EmTroLy {
           }
 
           Interlocked.Increment(ref _requestCount);
+          if (isTarball && method == "GET") {
+            int tbStatus;
+            string tbReason;
+            string tbContentType;
+            long tbLength;
+            string tbTempFile = FetchTarballToTempFileWithRetry(upstreamUri, acceptHeader, out tbStatus, out tbReason, out tbContentType, out tbLength);
+            try {
+              if (tbTempFile != null && File.Exists(tbTempFile)) {
+                WriteFileHttpResponse(ns, tbStatus, tbReason, tbContentType, tbTempFile, tbLength);
+              } else {
+                WriteHttpResponse(ns, tbStatus, tbReason, tbContentType, new byte[0], false);
+              }
+            } finally {
+              if (!string.IsNullOrEmpty(tbTempFile)) {
+                try { if (File.Exists(tbTempFile)) { File.Delete(tbTempFile); } } catch { }
+              }
+            }
+            return;
+          }
+
           int statusCode;
           string reason;
           string contentType;
@@ -724,7 +744,7 @@ namespace EmTroLy {
         HttpWebRequest req = (HttpWebRequest)WebRequest.Create(curUri);
         req.Method = method;
         req.AllowAutoRedirect = false;
-        req.KeepAlive = false;
+        req.KeepAlive = !IsLoopbackHost(curUri.Host);
         req.Timeout = 90000;
         req.ReadWriteTimeout = 90000;
         req.UserAgent = "npm/11 node/v24 emtroly-schannel-bridge";
@@ -914,6 +934,311 @@ namespace EmTroLy {
       }
     }
 
+    private string FetchTarballToTempFileWithRetry(Uri uri, string acceptHeader, out int statusCode, out string reason, out string contentType, out long totalLength) {
+      string tmpFile = Path.Combine(Path.GetTempPath(), "emtroly-npm-tb-" + Guid.NewGuid().ToString("N") + ".tgz");
+      Exception lastEx = null;
+      bool canCurl = !string.IsNullOrEmpty(_curlPath) && File.Exists(_curlPath);
+      int maxAttempts = canCurl ? 4 : 3;
+
+      try {
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+          try {
+            if (attempt >= 3 && canCurl) {
+              Interlocked.Increment(ref _curlFallbackCount);
+              FetchTarballToFileViaCurl(uri, tmpFile, attempt >= 4, out statusCode, out reason, out contentType, out totalLength);
+            } else {
+              FetchTarballToFileViaHttpWebRequest(uri, tmpFile, out statusCode, out reason, out contentType, out totalLength);
+            }
+            return tmpFile;
+          } catch (Exception ex) {
+            lastEx = ex;
+            _lastError = ex.Message;
+            if (attempt < maxAttempts) {
+              Thread.Sleep(250 * Math.Min(4, attempt));
+            }
+          }
+        }
+
+        if (_fallbackUri != null && !string.Equals(_fallbackUri.Authority, uri.Authority, StringComparison.OrdinalIgnoreCase)) {
+          try { if (File.Exists(tmpFile)) { File.Delete(tmpFile); } } catch { }
+          string fbPrefix = _fallbackUri.AbsolutePath.TrimEnd('/');
+          string fbUrl = _fallbackUri.Scheme + "://" + _fallbackUri.Authority + fbPrefix + uri.PathAndQuery;
+          Uri fbUri = new Uri(fbUrl);
+          if (IsAllowedSchemeForHost(fbUri.Scheme, fbUri.Authority)) {
+            for (int fbAttempt = 1; fbAttempt <= 2; fbAttempt++) {
+              try {
+                if (fbAttempt == 2 && canCurl) {
+                  Interlocked.Increment(ref _curlFallbackCount);
+                  FetchTarballToFileViaCurl(fbUri, tmpFile, false, out statusCode, out reason, out contentType, out totalLength);
+                } else {
+                  FetchTarballToFileViaHttpWebRequest(fbUri, tmpFile, out statusCode, out reason, out contentType, out totalLength);
+                }
+                return tmpFile;
+              } catch (Exception fbEx) {
+                lastEx = fbEx;
+                _lastError = fbEx.Message;
+              }
+            }
+          }
+        }
+      } catch {
+        try { if (File.Exists(tmpFile)) { File.Delete(tmpFile); } } catch { }
+        throw;
+      }
+
+      try { if (File.Exists(tmpFile)) { File.Delete(tmpFile); } } catch { }
+      throw new IOException("All upstream SChannel tarball attempts failed for " + uri.AbsoluteUri + ": " + (lastEx != null ? lastEx.Message : "unknown"));
+    }
+
+    private void FetchTarballToFileViaHttpWebRequest(Uri startUri, string destFile, out int statusCode, out string reason, out string contentType, out long totalLength) {
+      try {
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | (SecurityProtocolType)12288;
+      } catch {
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+      }
+      ServicePointManager.DefaultConnectionLimit = 32;
+      ServicePointManager.Expect100Continue = false;
+
+      long existingOffset = 0;
+      if (File.Exists(destFile)) {
+        try { existingOffset = new FileInfo(destFile).Length; } catch { existingOffset = 0; }
+      }
+
+      Uri curUri = startUri;
+      for (int hop = 0; hop <= 5; hop++) {
+        HttpWebRequest req = (HttpWebRequest)WebRequest.Create(curUri);
+        req.Method = "GET";
+        req.AllowAutoRedirect = false;
+        req.KeepAlive = !IsLoopbackHost(curUri.Host);
+        req.Timeout = 45000;
+        req.ReadWriteTimeout = 90000;
+        req.UserAgent = "npm/11 node/v24 emtroly-schannel-bridge";
+        req.Accept = "*/*";
+        req.AutomaticDecompression = DecompressionMethods.None;
+        if (existingOffset > 0) {
+          req.AddRange(existingOffset);
+        }
+
+        try {
+          using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse()) {
+            int code = (int)resp.StatusCode;
+            if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+              string loc = resp.Headers["Location"];
+              if (string.IsNullOrWhiteSpace(loc)) {
+                throw new IOException("Redirect response missing Location header.");
+              }
+              Uri nextUri = new Uri(curUri, loc);
+              if (!IsAllowedSchemeForHost(nextUri.Scheme, nextUri.Host)) {
+                throw new InvalidOperationException("Blocked redirect to disallowed upstream host: " + nextUri.AbsoluteUri);
+              }
+              curUri = nextUri;
+              continue;
+            }
+
+            bool isPartial = (code == 206 && existingOffset > 0);
+            long contentLen = resp.ContentLength;
+            long expectedFinalLen = -1;
+            if (isPartial) {
+              if (contentLen >= 0) {
+                expectedFinalLen = existingOffset + contentLen;
+              }
+            } else {
+              existingOffset = 0;
+              expectedFinalLen = contentLen;
+            }
+
+            using (Stream rs = resp.GetResponseStream())
+            using (FileStream fs = new FileStream(destFile, isPartial ? FileMode.Append : FileMode.Create, FileAccess.Write, FileShare.Read, 65536)) {
+              if (rs != null) {
+                byte[] chunk = new byte[65536];
+                int n;
+                while ((n = rs.Read(chunk, 0, chunk.Length)) > 0) {
+                  fs.Write(chunk, 0, n);
+                }
+              }
+              fs.Flush();
+            }
+
+            long actualLen = new FileInfo(destFile).Length;
+            if (expectedFinalLen >= 0 && actualLen != expectedFinalLen) {
+              throw new IOException("Truncated upstream tarball: expected " + expectedFinalLen + " bytes, got " + actualLen + ".");
+            }
+
+            statusCode = 200;
+            reason = "OK";
+            contentType = string.IsNullOrEmpty(resp.ContentType) ? "application/octet-stream" : resp.ContentType;
+            totalLength = actualLen;
+            return;
+          }
+        } catch (WebException wex) {
+          HttpWebResponse errResp = wex.Response as HttpWebResponse;
+          if (errResp != null) {
+            using (errResp) {
+              int errCode = (int)errResp.StatusCode;
+              if (errCode == 416 && existingOffset > 0) {
+                try { if (File.Exists(destFile)) { File.Delete(destFile); } } catch { }
+                throw new IOException("Range 416 reset; retrying full tarball.");
+              }
+              if (errCode < 500) {
+                try { if (File.Exists(destFile)) { File.Delete(destFile); } } catch { }
+                using (Stream es = errResp.GetResponseStream())
+                using (FileStream efs = new FileStream(destFile, FileMode.Create, FileAccess.Write, FileShare.Read)) {
+                  if (es != null) { es.CopyTo(efs); }
+                }
+                statusCode = errCode;
+                reason = string.IsNullOrEmpty(errResp.StatusDescription) ? "Status" : errResp.StatusDescription;
+                contentType = string.IsNullOrEmpty(errResp.ContentType) ? "application/json" : errResp.ContentType;
+                totalLength = File.Exists(destFile) ? new FileInfo(destFile).Length : 0;
+                return;
+              }
+            }
+          }
+          throw;
+        }
+      }
+      throw new IOException("Too many redirects fetching tarball " + startUri.AbsoluteUri);
+    }
+
+    private void FetchTarballToFileViaCurl(Uri uri, string destFile, bool forceIpv4, out int statusCode, out string reason, out string contentType, out long totalLength) {
+      string hdrFile = Path.Combine(Path.GetTempPath(), "emtroly-cb-" + Guid.NewGuid().ToString("N") + ".hdr");
+      try {
+        long existingLen = File.Exists(destFile) ? new FileInfo(destFile).Length : 0;
+        for (int curlMode = (existingLen > 0 ? 0 : 1); curlMode <= 1; curlMode++) {
+          bool useContinue = (curlMode == 0 && existingLen > 0);
+          if (!useContinue && File.Exists(destFile)) {
+            try { File.Delete(destFile); } catch { }
+          }
+          if (File.Exists(hdrFile)) {
+            try { File.Delete(hdrFile); } catch { }
+          }
+
+          List<string> args = new List<string>();
+          args.Add("--silent");
+          args.Add("--show-error");
+          args.Add("--location");
+          args.Add("--max-redirs"); args.Add("5");
+          args.Add("--http1.1");
+          args.Add("--connect-timeout"); args.Add("25");
+          args.Add("--max-time"); args.Add("420");
+          if (string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase)) {
+            args.Add("--proto"); args.Add("=https");
+            args.Add("--proto-redir"); args.Add("=https");
+          }
+          if (forceIpv4) { args.Add("--ipv4"); }
+          if (useContinue) { args.Add("-C"); args.Add("-"); }
+          args.Add("-A"); args.Add("npm/11 node/v24 emtroly-curl-schannel");
+          args.Add("-D"); args.Add(hdrFile);
+          args.Add("-o"); args.Add(destFile);
+          args.Add(uri.AbsoluteUri);
+
+          StringBuilder argLine = new StringBuilder();
+          for (int i = 0; i < args.Count; i++) {
+            if (i > 0) { argLine.Append(' '); }
+            argLine.Append(QuoteCurlArg(args[i]));
+          }
+
+          ProcessStartInfo psi = new ProcessStartInfo();
+          psi.FileName = _curlPath;
+          psi.Arguments = argLine.ToString();
+          psi.UseShellExecute = false;
+          psi.CreateNoWindow = true;
+          psi.RedirectStandardOutput = true;
+          psi.RedirectStandardError = true;
+          int ec;
+          string stderrText = "";
+          using (Process p = Process.Start(psi)) {
+            string sErr = p.StandardError.ReadToEnd();
+            p.StandardOutput.ReadToEnd();
+            if (!p.WaitForExit(430000)) {
+              try { p.Kill(); } catch { }
+              throw new IOException("curl.exe tarball timed out");
+            }
+            ec = p.ExitCode;
+            stderrText = (sErr ?? "").Trim();
+          }
+
+          if (ec != 0) {
+            if (useContinue) { continue; }
+            throw new IOException("curl.exe failed (exit " + ec + "): " + stderrText);
+          }
+
+          int finalStatus = 200;
+          string finalReason = "OK";
+          string finalCt = "application/octet-stream";
+          long hdrContentLen = -1;
+          if (File.Exists(hdrFile)) {
+            string rawHdr = File.ReadAllText(hdrFile, Encoding.ASCII);
+            string[] blocks = Regex.Split(rawHdr.Trim(), @"\r?\n\r?\n");
+            if (blocks.Length > 0) {
+              string lastBlock = blocks[blocks.Length - 1];
+              string[] lines = lastBlock.Split(new string[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+              if (lines.Length > 0) {
+                Match sm = Regex.Match(lines[0], @"^HTTP/\S+\s+(\d{3})(?:\s+(.*))?$");
+                if (sm.Success) {
+                  int.TryParse(sm.Groups[1].Value, out finalStatus);
+                  if (!string.IsNullOrWhiteSpace(sm.Groups[2].Value)) { finalReason = sm.Groups[2].Value.Trim(); }
+                }
+              }
+              for (int li = 1; li < lines.Length; li++) {
+                int cPos = lines[li].IndexOf(':');
+                if (cPos <= 0) { continue; }
+                string k = lines[li].Substring(0, cPos).Trim();
+                string v = lines[li].Substring(cPos + 1).Trim();
+                if (string.Equals(k, "Content-Type", StringComparison.OrdinalIgnoreCase)) { finalCt = v; }
+                else if (string.Equals(k, "Content-Length", StringComparison.OrdinalIgnoreCase)) { long.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out hdrContentLen); }
+              }
+            }
+          }
+
+          if (useContinue && finalStatus != 206) {
+            continue;
+          }
+          if (finalStatus >= 500) {
+            throw new IOException("Upstream HTTP " + finalStatus);
+          }
+
+          long actualLen = File.Exists(destFile) ? new FileInfo(destFile).Length : 0;
+          long expectedTotal = (useContinue && finalStatus == 206 && hdrContentLen >= 0) ? (existingLen + hdrContentLen) : hdrContentLen;
+          if (expectedTotal >= 0 && actualLen != expectedTotal) {
+            if (useContinue) { continue; }
+            throw new IOException("curl.exe truncated tarball: expected " + expectedTotal + ", got " + actualLen);
+          }
+
+          statusCode = (finalStatus == 206) ? 200 : finalStatus;
+          reason = (finalStatus == 206) ? "OK" : finalReason;
+          contentType = finalCt;
+          totalLength = actualLen;
+          return;
+        }
+        throw new IOException("curl.exe tarball download did not complete");
+      } finally {
+        try { if (File.Exists(hdrFile)) { File.Delete(hdrFile); } } catch { }
+      }
+    }
+
+    private static void WriteFileHttpResponse(NetworkStream ns, int code, string reason, string contentType, string filePath, long fileLength) {
+      string safeReason = string.IsNullOrWhiteSpace(reason) ? "OK" : Regex.Replace(reason, @"[\r\n]+", " ").Trim();
+      string safeCt = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : Regex.Replace(contentType, @"[\r\n]+", " ").Trim();
+      StringBuilder sb = new StringBuilder();
+      sb.Append("HTTP/1.1 ").Append(code.ToString(CultureInfo.InvariantCulture)).Append(' ').Append(safeReason).Append("\r\n");
+      sb.Append("Content-Type: ").Append(safeCt).Append("\r\n");
+      sb.Append("Content-Length: ").Append(fileLength.ToString(CultureInfo.InvariantCulture)).Append("\r\n");
+      sb.Append("Cache-Control: no-store\r\n");
+      sb.Append("Connection: close\r\n\r\n");
+      byte[] hdr = Encoding.ASCII.GetBytes(sb.ToString());
+      ns.Write(hdr, 0, hdr.Length);
+      if (fileLength > 0 && File.Exists(filePath)) {
+        using (FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 65536)) {
+          byte[] chunk = new byte[65536];
+          int n;
+          while ((n = fs.Read(chunk, 0, chunk.Length)) > 0) {
+            ns.Write(chunk, 0, n);
+          }
+        }
+      }
+      ns.Flush();
+    }
+
     private static void SendSimpleResponse(NetworkStream ns, int code, string reason, string msg, bool headOnly) {
       byte[] body = Encoding.UTF8.GetBytes(msg ?? "");
       WriteHttpResponse(ns, code, reason, "text/plain; charset=utf-8", body, headOnly);
@@ -977,7 +1302,7 @@ function Invoke-EmTroLyNpmAttempt {
     [string]$AttemptLabel = 'attempt',
     [int]$AttemptNumber = 1,
     [string]$RuntimeCleanupDir = '',
-    [int]$TimeoutSeconds = 600,
+    [int]$TimeoutSeconds = 900,
     [string[]]$SecretsToRedact = @(),
     [switch]$UseSChannelBridge,
     [string[]]$AllowedBridgeHosts = @()
@@ -1010,7 +1335,7 @@ function Invoke-EmTroLyNpmAttempt {
     "fetch-retries=$FetchRetries",
     "fetch-retry-mintimeout=$retryMinTimeout",
     "fetch-retry-maxtimeout=$retryMaxTimeout",
-    'fetch-timeout=600000',
+    'fetch-timeout=900000',
     'audit=false',
     'fund=false'
   ) -join "`n"
