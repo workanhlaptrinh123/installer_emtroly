@@ -1002,8 +1002,15 @@ requires_openai_auth = true
         if ($createdRootInThisRun -and -not (Test-Path -LiteralPath (Join-Path $root 'openclaw.json') -PathType Leaf)) {
           Remove-IncompleteOpenClawDirectory -DirPath $root
         }
-        $healResult = Invoke-CodexAutoHeal -Stage $stage -ErrorCode $coreErr -ErrorDetail $captureDetail -OpenClawRoot $root -PayloadRoot $PayloadRoot -Settings $settings -StatusFile $LogFile -Attempt $healTry
-        if (-not $healResult.Invoked) { break }
+        $healResult = $null
+        try {
+          $healResult = Invoke-CodexAutoHeal -Stage $stage -ErrorCode $coreErr -ErrorDetail $captureDetail -OpenClawRoot $root -PayloadRoot $PayloadRoot -Settings $settings -StatusFile $LogFile -Attempt $healTry
+        } catch {
+          $healErrMsg = [string]$_.Exception.Message
+          Write-RedactedInstallLog -Entry ("AUTO_HEAL_SKIPPED ($healErrMsg) while handling core error: $coreErr")
+          break
+        }
+        if (-not $healResult -or -not $healResult.Invoked) { break }
         if ($healResult.Summary) { $lastAutoHealSummary = $healResult.Summary }
         if ($healResult.PSObject.Properties['Transcript'] -and $healResult.Transcript) {
           $lastTechnicalDetail = ($lastTechnicalDetail + "`r`n`r`n--- Nhật ký Codex tự sửa lỗi (lần $healTry) ---`r`n" + $healResult.Transcript).Trim()
@@ -1185,6 +1192,9 @@ requires_openai_auth = true
     'telegram-command-menu-not-registered' = 'Chưa xác nhận được /zaloqr và /zalostatus trong menu Telegram. Hãy kiểm tra kết nối Telegram; dữ liệu đã tạo được giữ nguyên.'
   }
   $message = if ($safeMessages.ContainsKey($code)) { $safeMessages[$code] } else { "Chưa hoàn tất bước $stage. Dữ liệu đã tạo được giữ nguyên." }
+  if ($code -eq 'Private OpenClaw installation failed.' -and $lastTechnicalDetail -match 'ERR_SSL_CIPHER_OPERATION_FAILED|ossl_gcm_stream_update|ciphercommon_gcm|decryption operation failed') {
+    $message = 'Không cài được OpenClaw do kết nối mạng hoặc phần mềm diệt virus đang làm sai lệch giải mã HTTPS/TLS (ERR_SSL_CIPHER_OPERATION_FAILED). Hãy tạm tắt tính năng quét HTTPS/SSL trong Antivirus/VPN hoặc đổi mạng ổn định rồi thử lại.'
+  }
   if ($safeMessages.ContainsKey($code) -and $code -cmatch '^[a-z0-9-]+$') { $message += " Mã chẩn đoán: $code." }
   if (-not [string]::IsNullOrWhiteSpace($lastAutoHealSummary)) {
     $message += " Ghi chú từ Codex tự sửa lỗi: $lastAutoHealSummary"
@@ -1205,8 +1215,9 @@ requires_openai_auth = true
     $lastTechnicalDetail = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
   }
   if ($stage -eq 'install') {
-    $depErrBlob = ($code + "`n" + $message + "`n" + $lastTechnicalDetail)
-    if ($depErrBlob -match 'Node\.js|Portable Node|Python|FFmpeg|dependency verification failed|download failed|checksum verification failed|signature verification failed') {
+    $primaryTrace = ($lastTechnicalDetail -split '--- Nhật ký tiến trình cài đặt gần nhất ---', 2)[0]
+    $depErrBlob = ($code + "`n" + $primaryTrace)
+    if ($depErrBlob -match 'Node\.js/npm dependency verification failed|Node\.js download failed|Portable Node checksum verification failed|Python download failed|Python dependency verification failed|Python installer signature verification failed|Python user installation failed|FFmpeg download failed|FFmpeg checksum verification failed|FFmpeg dependency verification failed') {
       $stage = 'dependencies'
     }
   }

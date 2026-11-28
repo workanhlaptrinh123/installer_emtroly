@@ -211,6 +211,23 @@ function Invoke-FastDependencyDownload {
       if ($attempt -lt $totalTries) { Start-Sleep -Milliseconds (500 * $attempt) }
     }
   }
+  $curlExe = if ($env:SystemRoot) { Join-Path $env:SystemRoot 'System32\curl.exe' } else { '' }
+  if ($curlExe -and (Test-Path -LiteralPath $curlExe -PathType Leaf)) {
+    foreach ($targetUri in $candidates) {
+      if ($targetUri -notmatch '^https://') { continue }
+      try {
+        if ($DisplayName) { Write-DependencyInstallStatus "Đang tải $DisplayName (TLS 1.2 dự phòng)..." }
+        if (Test-Path -LiteralPath $partFile -PathType Leaf) { Remove-Item -LiteralPath $partFile -Force -ErrorAction SilentlyContinue }
+        & $curlExe --fail --location --http1.1 --tlsv1.2 --retry 2 --connect-timeout 30 --max-time $TimeoutSec -A 'AnhLapTrinh-EmTroLy-Installer/1.0' -o $partFile $targetUri *> $null
+        if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $partFile -PathType Leaf) -and (Get-Item -LiteralPath $partFile).Length -gt 0) {
+          Move-Item -LiteralPath $partFile -Destination $OutFile -Force
+          return
+        }
+      } catch { } finally {
+        if (Test-Path -LiteralPath $partFile -PathType Leaf) { Remove-Item -LiteralPath $partFile -Force -ErrorAction SilentlyContinue }
+      }
+    }
+  }
   throw $lastErr
 }
 
