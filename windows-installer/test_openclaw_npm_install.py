@@ -1,11 +1,16 @@
+import http.server
 import json
 import os
 import shutil
+import socketserver
 import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -138,7 +143,7 @@ def write_full_artifacts():
 
 scenario = {scenario!r}
 
-if scenario == "tls_fail_twice_then_succeed":
+if scenario == "tls_fail_once_then_succeed":
     if count == 1:
         broken_sentinel.parent.mkdir(parents=True, exist_ok=True)
         broken_sentinel.write_text("partial", encoding="utf-8")
@@ -146,12 +151,9 @@ if scenario == "tls_fail_twice_then_succeed":
         sys.stderr.write("npm error ossl_gcm_stream_update: cipher operation failed\\n")
         sys.stderr.write("leaked-token=tok_secret_value_123456\\n")
         sys.exit(1)
-    elif count == 2:
-        sys.stderr.write("npm error ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC ciphercommon_gcm\\n")
-        sys.exit(1)
     else:
         write_full_artifacts()
-        sys.stdout.write("added 42 packages in 1s\\n")
+        sys.stdout.write("added 42 packages on single retry\\n")
         sys.exit(0)
 
 elif scenario == "lts_succeeds_after_v24_tls_fail":
@@ -183,6 +185,31 @@ elif scenario == "exit_zero_missing_openclaw_cmd":
     oc_dir.mkdir(parents=True, exist_ok=True)
     (oc_dir / "package.json").write_text('{{"name":"openclaw","version":"2026.11.4"}}', encoding="utf-8")
     sys.exit(0)
+
+elif scenario == "openssl_fails_all_then_schannel_bridge_succeeds":
+    reg_env = os.environ.get("NPM_CONFIG_REGISTRY", "")
+    if reg_env.startswith("http://127.0.0.1:") and count == 2:
+        import urllib.request
+        pkg_meta = json.loads(urllib.request.urlopen(reg_env.rstrip("/") + "/openclaw", timeout=10).read().decode("utf-8"))
+        dist = pkg_meta["versions"]["2026.11.4"]["dist"]
+        tb_url = dist["tarball"]
+        if not tb_url.startswith(reg_env.rstrip("/") + "/__tarball__/"):
+            sys.stderr.write(f"Tarball URL was not rewritten: {{tb_url}}\\n")
+            sys.exit(2)
+        if dist.get("integrity") != "sha512-TEST_INTEGRITY_KEEP_123==":
+            sys.stderr.write("Integrity field was altered!\\n")
+            sys.exit(3)
+        tb_bytes = urllib.request.urlopen(tb_url, timeout=10).read()
+        if tb_bytes != b"FAKE-TGZ-PAYLOAD-BYTES-OK":
+            sys.stderr.write(f"Unexpected tarball payload: {{tb_bytes!r}}\\n")
+            sys.exit(4)
+        write_full_artifacts()
+        sys.stdout.write("added 42 packages via schannel bridge\\n")
+        sys.exit(0)
+    else:
+        sys.stderr.write("npm error code ERR_SSL_CIPHER_OPERATION_FAILED\\n")
+        sys.stderr.write("npm error ossl_gcm_stream_update: cipher operation failed\\n")
+        sys.exit(1)
 
 sys.exit(99)
 """
@@ -247,7 +274,7 @@ sys.exit(99)
         self.assertIn("node_modules\\.bin\\openclaw.cmd", npm_helper)
         self.assertNotIn("--prefer-offline", npm_helper)
 
-    def test_retry_fails_twice_with_tls_then_succeeds_attempt_3(self) -> None:
+    def test_retry_fails_once_with_tls_then_succeeds_via_single_retry(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             local_app = base / "LocalAppData"
@@ -269,7 +296,7 @@ sys.exit(99)
                 dep_root,
                 "node-v24.21.0-win-x64",
                 use_real_node=True,
-                behavior_py=self._mock_npm_script(state_file, attempts_jsonl, "tls_fail_twice_then_succeed"),
+                behavior_py=self._mock_npm_script(state_file, attempts_jsonl, "tls_fail_once_then_succeed"),
                 state_file=state_file,
             )
 
@@ -306,14 +333,14 @@ sys.exit(99)
             self.assertEqual(proc.returncode, 0, msg=proc.stdout + "\n" + proc.stderr)
             out = json.loads(proc.stdout)
             self.assertTrue(out["Success"])
-            self.assertEqual(out["AttemptCount"], 3)
+            self.assertEqual(out["AttemptCount"], 2)
             self.assertEqual(Path(out["UsedNodeExe"]).resolve(), node24.resolve())
             self.assertEqual(Path(out["UsedNpmCmd"]).resolve(), npm24.resolve())
 
             records = [json.loads(line) for line in attempts_jsonl.read_text(encoding="utf-8").splitlines() if line.strip()]
-            self.assertEqual(len(records), 3)
+            self.assertEqual(len(records), 2)
 
-            r1, r2, r3 = records
+            r1, r2 = records
             # Attempt 1: bundled Node, primary registry, maxsockets=2, attempt-1 cache
             self.assertEqual(Path(r1["script_dir"]).resolve(), (dep_root / "node-v24.21.0-win-x64").resolve())
             self.assertEqual(r1["userconfig_registry"], "https://registry.npmjs.org/")
@@ -325,23 +352,17 @@ sys.exit(99)
             self.assertIn("--no-fund", r1["args"])
             self.assertNotIn("--prefer-offline", r1["args"])
 
-            # Attempt 2: broken.tmp from attempt 1 cleaned up; OPENSSL_ia32cap + maxsockets=1
+            # Attempt 2 (the single retry): broken.tmp cleaned, ia32cap + TLS 1.2 + ChaCha20 + SChannel bridge + attempt-2 cache
             self.assertFalse(r2["broken_tmp_existed_before"])
-            self.assertEqual(r2["userconfig_registry"], "https://registry.npmjs.org/")
+            self.assertTrue(r2["userconfig_registry"].startswith("http://127.0.0.1:"))
             self.assertEqual(r2["maxsockets"], "1")
             self.assertEqual(r2["ia32cap"], "~0x200000200000000")
-            self.assertEqual(r2["node_options"], "")
+            self.assertIn("--tls-max-v1.2", r2["node_options"])
+            self.assertIn("!AESGCM:!GCM", r2["node_options"])
             self.assertTrue(r2["cache"].endswith(r"openclaw\npm-cache\attempt-2"))
 
-            # Attempt 3: TLS 1.2 + OPENSSL_ia32cap + fresh attempt-3 cache -> succeeded
-            self.assertEqual(r3["userconfig_registry"], "https://registry.npmjs.org/")
-            self.assertEqual(r3["maxsockets"], "1")
-            self.assertEqual(r3["ia32cap"], "~0x200000200000000")
-            self.assertEqual(r3["node_options"], "--tls-max-v1.2")
-            self.assertTrue(r3["cache"].endswith(r"openclaw\npm-cache\attempt-3"))
-
             # Separate per-attempt logs exist and secrets are scrubbed
-            for idx in (1, 2, 3):
+            for idx in (1, 2):
                 lf = logs_dir / f"npm-install-attempt-{idx}.log"
                 self.assertTrue(lf.is_file(), msg=f"Missing {lf}")
             log1_txt = (logs_dir / "npm-install-attempt-1.log").read_text(encoding="utf-8")
@@ -349,10 +370,9 @@ sys.exit(99)
             self.assertNotIn("tok_secret_value_123456", log1_txt)
             self.assertIn("[REDACTED_SECRET]", log1_txt)
 
-            # Failed caches cleaned up, winning cache intact, user data & shared cache untouched
+            # Failed cache cleaned up, winning cache intact, user data & shared cache untouched
             self.assertFalse((oc_root / "npm-cache" / "attempt-1").exists())
-            self.assertFalse((oc_root / "npm-cache" / "attempt-2").exists())
-            self.assertTrue((oc_root / "npm-cache" / "attempt-3").exists())
+            self.assertTrue((oc_root / "npm-cache" / "attempt-2").exists())
             self.assertEqual(shared_cache_keep.read_text(encoding="utf-8"), "do-not-delete-shared-cache")
             self.assertEqual(user_cfg.read_text(encoding="utf-8"), '{"preserve":true}')
             self.assertTrue((rt_dir / "node_modules" / "openclaw" / "package.json").is_file())
@@ -443,23 +463,21 @@ sys.exit(99)
                 out["Labels"],
                 [
                     "primary-default",
-                    "ia32cap-maxsockets1",
-                    "ia32cap-tls12",
-                    "ia32cap-tls12-chacha20",
-                    "fallback-registry-scalar-tls12-chacha20",
+                    "tls-single-retry-schannel",
                 ],
             )
             records = [json.loads(line) for line in attempts_jsonl.read_text(encoding="utf-8").splitlines() if line.strip()]
-            self.assertEqual(len(records), 5)
-            # ChaCha20 strict (no AESGCM) on attempt 4, fallback registry + 0:0 scalar on attempt 5
-            self.assertIn("CHACHA20", records[3]["node_options"])
-            self.assertIn("!AESGCM:!GCM", records[3]["node_options"])
-            self.assertEqual(records[3]["userconfig_registry"], "https://registry.npmjs.org/")
-            self.assertEqual(records[4]["userconfig_registry"], "https://registry.npmmirror.com/")
-            self.assertEqual(records[4]["ia32cap"], "0:0")
-            self.assertEqual(records[4]["maxsockets"], "1")
+            self.assertEqual(len(records), 2)
+            # Single retry uses maxsockets=1, ia32cap, ChaCha20 !AESGCM:!GCM, and SChannel bridge
+            self.assertEqual(records[0]["userconfig_registry"], "https://registry.npmjs.org/")
+            self.assertIn("CHACHA20", records[1]["node_options"])
+            self.assertIn("!AESGCM:!GCM", records[1]["node_options"])
+            self.assertEqual(records[1]["ia32cap"], "~0x200000200000000")
+            self.assertEqual(records[1]["maxsockets"], "1")
+            self.assertTrue(records[1]["userconfig_registry"].startswith("http://127.0.0.1:"))
             self.assertFalse((rt_dir / "node_modules").exists())
-            self.assertTrue((logs_dir / "npm-install-attempt-5.log").is_file())
+            self.assertTrue((logs_dir / "npm-install-attempt-2.log").is_file())
+            self.assertFalse((logs_dir / "npm-install-attempt-3.log").exists())
 
     def test_npm_exit_zero_missing_package_json_or_openclaw_cmd_fails_verification(self) -> None:
         for scenario, expected_missing in (
@@ -689,6 +707,219 @@ sys.exit(99)
                         for k in ("friendlyMessage", "primaryInstallerError", "autoHealSummary", "autoHealError", "technicalDetail")
                     )
                     self.assertNotIn("The system cannot find the path specified.", all_text)
+
+    def test_retry_escalates_from_openssl_failures_to_schannel_bridge_and_succeeds(self) -> None:
+        class _MockRegistryHandler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+            server_ref = None
+
+            def log_message(self, format, *args):
+                pass
+
+            def do_GET(self):
+                port = self.server.server_address[1]
+                if self.path == "/openclaw":
+                    payload = json.dumps(
+                        {
+                            "name": "openclaw",
+                            "versions": {
+                                "2026.11.4": {
+                                    "name": "openclaw",
+                                    "version": "2026.11.4",
+                                    "dist": {
+                                        "tarball": f"http://127.0.0.1:{port}/openclaw/-/openclaw-2026.11.4.tgz",
+                                        "integrity": "sha512-TEST_INTEGRITY_KEEP_123==",
+                                    },
+                                }
+                            },
+                        }
+                    ).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                elif self.path == "/openclaw/-/openclaw-2026.11.4.tgz":
+                    body = b"FAKE-TGZ-PAYLOAD-BYTES-OK"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                else:
+                    self.send_response(404)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+
+        class _ThreadServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+
+        httpd = _ThreadServer(("127.0.0.1", 0), _MockRegistryHandler)
+        mock_port = httpd.server_address[1]
+        t = threading.Thread(target=httpd.serve_forever, daemon=True)
+        t.start()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                base = Path(tmp)
+                local_app = base / "LocalAppData"
+                dep_root = local_app / "MemberInstaller" / "dependencies"
+                oc_root = base / "UserProfile" / "openclaw"
+                rt_dir = oc_root / "runtime" / "2026.11.4"
+                logs_dir = oc_root / "logs"
+
+                state_file = base / "npm_count.txt"
+                attempts_jsonl = base / "attempts.jsonl"
+                self._create_mock_toolchain(
+                    dep_root,
+                    "node-v24.21.0-win-x64",
+                    True,
+                    self._mock_npm_script(state_file, attempts_jsonl, "openssl_fails_all_then_schannel_bridge_succeeds"),
+                    state_file,
+                )
+
+                ps = textwrap.dedent(
+                    f"""
+                    $ErrorActionPreference = 'Stop'
+                    . {_ps_quote(str(ROOT / 'native' / 'openclaw-npm.ps1'))}
+                    $res = Invoke-OpenClawNpmInstall `
+                      -RuntimeDir {_ps_quote(str(rt_dir))} `
+                      -OpenClawRoot {_ps_quote(str(oc_root))} `
+                      -OpenClawVersion '2026.11.4' `
+                      -LogsDir {_ps_quote(str(logs_dir))} `
+                      -PrimaryRegistry {_ps_quote(f'http://127.0.0.1:{mock_port}/')}
+                    [pscustomobject]@{{
+                      Success = $res.Success
+                      Labels = @($res.Attempts | ForEach-Object {{ $_.Label }})
+                      UsedBridgeLast = $res.Attempts[-1].UsedBridge
+                    }} | ConvertTo-Json -Depth 4
+                    """
+                )
+                proc = self._run_ps(ps, env_overrides={"LOCALAPPDATA": str(local_app), "EMTROLY_SKIP_PROCESS_SWEEP": "1"})
+                self.assertEqual(proc.returncode, 0, msg=proc.stdout + "\n" + proc.stderr)
+                out = json.loads(proc.stdout)
+                self.assertTrue(out["Success"])
+                self.assertTrue(out["UsedBridgeLast"])
+                self.assertEqual(
+                    out["Labels"],
+                    [
+                        "primary-default",
+                        "tls-single-retry-schannel",
+                    ],
+                )
+                log2 = (logs_dir / "npm-install-attempt-2.log").read_text(encoding="utf-8")
+                self.assertIn("schannel_bridge=true", log2)
+                self.assertTrue((rt_dir / "node_modules" / "openclaw" / "package.json").is_file())
+                self.assertTrue((rt_dir / "node_modules" / ".bin" / "openclaw.cmd").is_file())
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
+
+    def test_schannel_bridge_blocks_disallowed_hosts_and_retries_via_curl_on_truncation(self) -> None:
+        trunc_hits = {"n": 0}
+        trunc_lock = threading.Lock()
+
+        class _TruncHandler(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, format, *args):
+                pass
+
+            def do_GET(self):
+                if self.path == "/pkg/-/trunc.tgz":
+                    with trunc_lock:
+                        trunc_hits["n"] += 1
+                        cur = trunc_hits["n"]
+                    full = b"Z" * 100
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Length", "100")
+                    self.end_headers()
+                    if cur <= 2:
+                        # Simulate abrupt TCP truncation after 10 bytes on first two .NET reads
+                        self.wfile.write(full[:10])
+                        self.wfile.flush()
+                        self.close_connection = True
+                    else:
+                        self.wfile.write(full)
+                elif self.path == "/evil-meta":
+                    port = self.server.server_address[1]
+                    payload = json.dumps(
+                        {
+                            "ok": f"http://127.0.0.1:{port}/pkg/-/trunc.tgz",
+                            "versions": {
+                                "1": {
+                                    "dist": {
+                                        "tarball": "https://evil.example.com/bad.tgz",
+                                        "integrity": "sha512-KEEP",
+                                    }
+                                },
+                                "2": {
+                                    "dist": {
+                                        "tarball": f"http://127.0.0.1:{port}/pkg/-/trunc.tgz",
+                                        "integrity": "sha512-KEEP2",
+                                    }
+                                },
+                            },
+                        }
+                    ).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                else:
+                    self.send_response(404)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+
+        class _ThreadServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+            daemon_threads = True
+
+        httpd = _ThreadServer(("127.0.0.1", 0), _TruncHandler)
+        mock_port = httpd.server_address[1]
+        t = threading.Thread(target=httpd.serve_forever, daemon=True)
+        t.start()
+        try:
+            ps = textwrap.dedent(
+                f"""
+                $ErrorActionPreference = 'Stop'
+                . {_ps_quote(str(ROOT / 'native' / 'openclaw-npm.ps1'))}
+                $b = Start-EmTroLyNpmSChannelBridge -UpstreamRegistryUrl {_ps_quote(f'http://127.0.0.1:{mock_port}/')}
+                if (-not $b) {{ throw 'bridge-init-failed' }}
+                try {{
+                  $metaResp = Invoke-WebRequest -UseBasicParsing -Uri ($b.ProxyUrl + 'evil-meta') -TimeoutSec 15
+                  $meta = $metaResp.Content | ConvertFrom-Json
+                  $forbiddenStatus = 0
+                  try {{
+                    [void](Invoke-WebRequest -UseBasicParsing -Uri ($b.ProxyUrl + '__tarball__/https/evil.example.com/bad.tgz') -TimeoutSec 15)
+                  }} catch {{
+                    if ($_.Exception.Response) {{ $forbiddenStatus = [int]$_.Exception.Response.StatusCode }}
+                  }}
+                  $tgzResp = Invoke-WebRequest -UseBasicParsing -Uri $meta.versions.'2'.dist.tarball -TimeoutSec 20
+                  [pscustomobject]@{{
+                    EvilTarball = [string]$meta.versions.'1'.dist.tarball
+                    GoodTarball = [string]$meta.versions.'2'.dist.tarball
+                    ForbiddenStatus = $forbiddenStatus
+                    TarballLen = $tgzResp.RawContentLength
+                    CurlFallbackCount = $b.CurlFallbackCount
+                  }} | ConvertTo-Json
+                }} finally {{
+                  $b.Dispose()
+                }}
+                """
+            )
+            proc = self._run_ps(ps)
+            self.assertEqual(proc.returncode, 0, msg=proc.stdout + "\n" + proc.stderr)
+            out = json.loads(proc.stdout)
+            self.assertEqual(out["EvilTarball"], "https://evil.example.com/bad.tgz")
+            self.assertTrue(out["GoodTarball"].startswith("http://127.0.0.1:"))
+            self.assertIn("/__tarball__/http/", out["GoodTarball"])
+            self.assertEqual(out["ForbiddenStatus"], 403)
+            self.assertEqual(out["TarballLen"], 100)
+            self.assertGreaterEqual(out["CurlFallbackCount"], 1)
+        finally:
+            httpd.shutdown()
+            httpd.server_close()
 
 
 if __name__ == "__main__":
