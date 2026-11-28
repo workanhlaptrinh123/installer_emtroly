@@ -1799,6 +1799,8 @@ class Step3CleanPcAndFailureUiTests(unittest.TestCase):
         self.assertIn("RunspaceFactory", deps_src)
         self.assertIn("Sanitize-WizardFailureSummary", wizard_src)
         self.assertIn("New-UnexpectedExitDiagnosticPayload", wizard_src)
+        self.assertIn("OpenTelegramWebBtn", wizard_src)
+        self.assertIn("https://web.telegram.org/", wizard_src)
         self.assertIn("'dependencies'", wizard_src)
         self.assertIn("$stage = 'dependencies'", runner_src)
 

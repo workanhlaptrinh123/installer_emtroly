@@ -984,8 +984,11 @@ $xamlText = @'
                 </DockPanel>
 
                 <!-- Primary Input: Bot Token + Auto-fetch IDs + Test Connection -->
-                <TextBlock x:Name="TokenFieldLabel" Style="{StaticResource FieldLabel}" Text="Telegram Bot Token (tạo qua @BotFather — dán mã rồi bấm Lấy ID tự động)" Margin="0,0,0,5"/>
-                <Grid Margin="0,0,0,10">
+                <DockPanel Margin="0,0,0,5">
+                  <Button x:Name="OpenTelegramWebBtn" DockPanel.Dock="Right" Background="Transparent" BorderThickness="0" Padding="6,0" Cursor="Hand" VerticalAlignment="Center" Content="Mở Telegram Web (@BotFather) ↗" FontSize="11.5" FontWeight="SemiBold" Foreground="#2563EB" ToolTip="Mở Telegram Web trên trình duyệt — dùng thay thế ngay nếu Telegram Desktop trên máy chưa cài hoặc báo lỗi update"/>
+                  <TextBlock x:Name="TokenFieldLabel" Style="{StaticResource FieldLabel}" Text="Telegram Bot Token (tạo qua @BotFather — dán mã rồi bấm Lấy ID tự động)" Margin="0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                </DockPanel>
+                <Grid Margin="0,0,0,5">
                   <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="8"/>
@@ -1000,6 +1003,7 @@ $xamlText = @'
                   <Button x:Name="AutoFetchIdBtn" Grid.Column="2" Style="{StaticResource SoftAccentBtn}" Content="Lấy ID tự động" Height="36" Padding="14,0"/>
                   <Button x:Name="TestConnBtn" Grid.Column="4" Style="{StaticResource SecondaryBtn}" Content="Kiểm tra kết nối" Height="36" Padding="13,0"/>
                 </Grid>
+                <TextBlock Text="Mẹo: Nếu Telegram Desktop trên máy báo lỗi update (&quot;Failed to update Telegram / Error code: 3&quot;), bấm Cancel rồi lấy token bằng nút Mở Telegram Web hoặc điện thoại." FontSize="11" Foreground="#64748B" Margin="0,0,0,9" TextWrapping="Wrap"/>
 
                 <!-- Live Verification Feedback Pill -->
                 <Border x:Name="LiveCheckBanner" Background="#F8FAFC" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8" Padding="12,8" Margin="0,0,0,10" Visibility="Collapsed">
@@ -1922,6 +1926,7 @@ $tokenBox           = New-WpfSecretBoxAdapter $tokenPwdBox $tokenPlainBox
 $apiKeyBox          = New-WpfSecretBoxAdapter $apiKeyPwdBox $apiKeyPlainBox
 $autoFetchIdBtn     = Get-Ui 'AutoFetchIdBtn'
 $testConnBtn        = Get-Ui 'TestConnBtn'
+$openTelegramWebBtn = Get-Ui 'OpenTelegramWebBtn'
 $liveCheckBanner    = Get-Ui 'LiveCheckBanner'
 $liveCheckText      = Get-Ui 'LiveCheckText'
 $ownersBox          = Get-Ui 'OwnersBox'
@@ -4849,6 +4854,16 @@ $autoFetchIdBtn.Add_Click({
     }
   }
 })
+
+if ($openTelegramWebBtn) {
+  $openTelegramWebBtn.Add_Click({
+    try {
+      Start-Process -FilePath 'https://web.telegram.org/' | Out-Null
+    } catch {
+      Show-Info "Hãy mở trình duyệt truy cập https://web.telegram.org và nhắn @BotFather để lấy Telegram Bot Token." 'Mở Telegram Web'
+    }
+  })
+}
 
 $testConnBtn.Add_Click({
   if (-not $script:isManageMode -and -not $SmokeTest) { Save-CurrentFormDraft }
