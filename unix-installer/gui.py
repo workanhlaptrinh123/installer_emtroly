@@ -970,6 +970,7 @@ def main():
         ("openclaw", "4. Trợ lý OpenClaw riêng (+ Zalo tùy chọn)", "Cài Node.js, Python, FFmpeg, OpenClaw 2026.11.4 & Gateway (cần điền Telegram ở Tab 1)."),
     ]
     mod_single_btns = {}
+    mod_installed_flags = {}
 
     def refresh_modular_status():
         try:
@@ -978,17 +979,18 @@ def main():
             inst_root = find_installed_instance_root(member_val)
             oc_ver = runner.get_openclaw_version_info(inst_root, source) if inst_root else {}
             oc_btn_lbl = (
-                f"Nâng cấp v{oc_ver.get('target_version', '')}"
+                f"Cập nhật v{oc_ver.get('target_version', '')}"
                 if oc_ver.get("needs_upgrade")
-                else "Đã mới nhất"
+                else "Cập nhật"
             )
             mapping = {
-                "codex-cli": (st_map["codex_cli"], "Cài lại"),
-                "antigravity-ide": (st_map["antigravity_ide"], "Kiểm tra"),
-                "codex-extension": (st_map["codex_extension"], "Đồng bộ"),
+                "codex-cli": (st_map["codex_cli"], "Cập nhật"),
+                "antigravity-ide": (st_map["antigravity_ide"], "Cập nhật"),
+                "codex-extension": (st_map["codex_extension"], "Cập nhật"),
                 "openclaw": (st_map["openclaw"], oc_btn_lbl),
             }
             for comp_id, (info, installed_lbl) in mapping.items():
+                mod_installed_flags[comp_id] = bool(info["installed"])
                 prefix = "✓ " if info["installed"] else "○ "
                 detail_txt = info["detail"]
                 if comp_id == "openclaw" and oc_ver.get("needs_upgrade"):
@@ -999,12 +1001,12 @@ def main():
         except Exception:
             pass
 
-    def start_modular_components(selected_list):
+    def start_modular_components(selected_list, force_reinstall: bool = False):
         nonlocal busy
         if busy:
             return
         if not selected_list:
-            messagebox.showwarning("Chưa chọn thành phần", "Hãy tích chọn ít nhất 1 thành phần để cài đặt.")
+            messagebox.showwarning("Chưa chọn thành phần", "Hãy tích chọn ít nhất 1 thành phần để cài đặt / cập nhật.")
             return
         if "codex-extension" in selected_list and "antigravity-ide" not in selected_list:
             st_now = codex_setup.get_modular_status()
@@ -1043,11 +1045,11 @@ def main():
         active_titles = [friendly_mod.get(c, c) for c in selected_list]
         for ck, s_btn in mod_single_btns.items():
             if ck in selected_list:
-                mod_status_vars[ck].set("⟳ Đang chờ cài đặt...")
-                s_btn.configure(text="Đang cài...")
+                mod_status_vars[ck].set("⟳ Đang chờ xử lý...")
+                s_btn.configure(text="Đang chạy...")
         mod_progress_bar.configure(mode="indeterminate")
         mod_progress_bar.start(14)
-        mod_progress_var.set("Đang cài riêng: " + " · ".join(active_titles) + "...")
+        mod_progress_var.set("Đang xử lý riêng: " + " · ".join(active_titles) + "...")
 
         def _mod_worker():
             try:
@@ -1056,6 +1058,7 @@ def main():
                     vals,
                     source,
                     progress=lambda msg: events.put(("mod_progress", msg)),
+                    force_reinstall=force_reinstall,
                 )
                 events.put(("mod_success", res))
             except Exception as exc:
@@ -1081,12 +1084,12 @@ def main():
             text="Cài phần này",
             width=18,
             style="Secondary.TButton",
-            command=lambda k=comp_key: start_modular_components([k]),
+            command=lambda k=comp_key: start_modular_components([k], force_reinstall=bool(mod_installed_flags.get(k))),
         )
         single_b.grid(row=0, column=3, rowspan=2, sticky="e")
         mod_single_btns[comp_key] = single_b
 
-    mod_progress_var = tk.StringVar(value="Mẹo: Tích chọn các phần bạn cần hoặc bấm 'Cài phần này' ở từng dòng.")
+    mod_progress_var = tk.StringVar(value="Mẹo: Tích chọn các phần bạn cần hoặc bấm 'Cài đặt' / 'Cập nhật' ở từng dòng.")
     ttk.Label(tab_modular, textvariable=mod_progress_var, style="Hint.TLabel", wraplength=760, padding=(10, 8, 10, 2)).grid(
         row=6, column=0, columnspan=3, sticky="ew", pady=(8, 2)
     )
@@ -1097,9 +1100,14 @@ def main():
     ttk.Button(mod_footer, text="Làm mới trạng thái", style="Secondary.TButton", command=refresh_modular_status).pack(side="left")
     mod_run_selected_btn = ttk.Button(
         mod_footer,
-        text="Cài các phần đã tích chọn",
+        text="Cài / Cập nhật các phần đã chọn",
         style="Primary.TButton",
-        command=lambda: start_modular_components([k for k, v in mod_checks.items() if v.get()]),
+        command=lambda: (
+            lambda picked_list: start_modular_components(
+                picked_list,
+                force_reinstall=bool(picked_list and all(mod_installed_flags.get(x) for x in picked_list)),
+            )
+        )([k for k, v in mod_checks.items() if v.get()]),
     )
     mod_run_selected_btn.pack(side="right")
 
@@ -1184,7 +1192,7 @@ def main():
             comps = [c for c in (app_item.get("components") or []) if c]
             if comps:
                 notebook.select(tab_modular)
-                start_modular_components(comps)
+                start_modular_components(comps, force_reinstall=force_reinstall)
             return
         if act_type == "zalo-plugin":
             notebook.select(tab_zalo_qr)
@@ -1271,13 +1279,29 @@ def main():
             ttk.Label(card, text=app_item.get("description", ""), font=font_hint, foreground="#64748B", background="#F8FAFC", wraplength=270).grid(
                 row=1, column=0, sticky="w", pady=(2, 0)
             )
-            btn_lbl = "Mở" if installed else ("Chi tiết" if app_item.get("action_type") == "coming_soon" else "Cài đặt")
-            ttk.Button(
-                card,
-                text=btn_lbl,
-                style="Secondary.TButton",
-                command=lambda item=app_item, inst=installed: invoke_store_app(item, inst),
-            ).grid(row=0, column=1, rowspan=2, sticky="e", padx=(8, 0))
+            if installed:
+                act_wrap = ttk.Frame(card)
+                act_wrap.grid(row=0, column=1, rowspan=2, sticky="e", padx=(8, 0))
+                ttk.Button(
+                    act_wrap,
+                    text="Mở",
+                    style="Secondary.TButton",
+                    command=lambda item=app_item: invoke_store_app(item, True),
+                ).pack(side="left", padx=(0, 4))
+                ttk.Button(
+                    act_wrap,
+                    text="Cập nhật",
+                    style="Secondary.TButton",
+                    command=lambda item=app_item: invoke_store_app(item, True, force_reinstall=True),
+                ).pack(side="left")
+            else:
+                btn_lbl = "Chi tiết" if app_item.get("action_type") == "coming_soon" else "Cài đặt"
+                ttk.Button(
+                    card,
+                    text=btn_lbl,
+                    style="Secondary.TButton",
+                    command=lambda item=app_item: invoke_store_app(item, False),
+                ).grid(row=0, column=1, rowspan=2, sticky="e", padx=(8, 0))
             shown += 1
         if shown == 0:
             ttk.Label(store_cards_frame, text="Không tìm thấy ứng dụng phù hợp.", style="Hint.TLabel", padding=14).grid(

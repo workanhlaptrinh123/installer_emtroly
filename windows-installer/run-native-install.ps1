@@ -456,9 +456,10 @@ requires_openai_auth = true
     }
 
     $statusLabelEd = switch ($ComponentMode) {
-      'ide-only'       { 'Đang cài đặt Antigravity IDE riêng...' }
-      'extension-only' { 'Đang cài đặt Codex Extension trong Antigravity IDE...' }
-      default          { 'Đang cài đặt Antigravity IDE và Codex Extension trên Antigravity...' }
+      'ide-only'         { 'Đang cài đặt / kiểm tra Antigravity IDE riêng...' }
+      'extension-only'   { 'Đang cài đặt Codex Extension trong Antigravity IDE...' }
+      'cli-runtime-only' { 'Đang cập nhật bổ sung Antigravity Runtime CLI (agy.exe)...' }
+      default            { 'Đang cài đặt Antigravity IDE và Codex Extension trên Antigravity...' }
     }
     Write-SafeStatus $statusLabelEd
     $edCallParams = @{ Settings = $EditorSettingsObj; StatusFile = $LogFile }
@@ -530,7 +531,7 @@ requires_openai_auth = true
   }
   $isModularRun = ($requestedComponents.Count -gt 0 -and -not $EditorOnly)
   if ($isModularRun) {
-    $validCompIds = @('codex-cli', 'antigravity-ide', 'codex-extension', 'openclaw')
+    $validCompIds = @('codex-cli', 'antigravity-ide', 'antigravity-cli', 'codex-extension', 'openclaw')
     foreach ($cItem in $requestedComponents) {
       if ($cItem -notin $validCompIds) { throw 'invalid-component-selection' }
     }
@@ -678,12 +679,18 @@ requires_openai_auth = true
 
       $wantIde = ('antigravity-ide' -in $requestedComponents)
       $wantExt = ('codex-extension' -in $requestedComponents)
-      if ($wantIde -or $wantExt) { $stage = 'editor' }
+      $wantAgyCli = ('antigravity-cli' -in $requestedComponents)
+      if ($wantIde -or $wantExt -or $wantAgyCli) { $stage = 'editor' }
       if (-not $forceReinstall -and $modSnapNow) {
         if ($wantIde -and $modSnapNow.AntigravityInstalled) {
           Write-SafeStatus '✓ Antigravity IDE đã cài đặt sẵn — bỏ qua không cài lại.'
           $wantIde = $false
           $skippedLabels += 'Antigravity IDE'
+        }
+        if ($wantAgyCli -and $modSnapNow.PSObject.Properties['AntigravityCliReady'] -and $modSnapNow.AntigravityCliReady) {
+          Write-SafeStatus '✓ Antigravity Runtime CLI (agy.exe) đã sẵn sàng — bỏ qua không tải lại.'
+          $wantAgyCli = $false
+          $skippedLabels += 'Antigravity Runtime CLI'
         }
         if ($wantExt -and $modSnapNow.CodexExtensionInstalled) {
           Write-SafeStatus '✓ Codex Extension đã cài đặt sẵn — bỏ qua không cài lại.'
@@ -709,10 +716,23 @@ requires_openai_auth = true
           Invoke-EditorStepWithCodexAutoHeal -EditorSettingsObj $modEditorSettings -ComponentMode $compMode -AllowUpdateExisting:$forceReinstall
           if ($wantIde) { $completedLabels += 'Antigravity IDE' }
           if ($wantExt) { $completedLabels += 'Codex Extension' }
+          if ($wantAgyCli -and $wantIde) { $wantAgyCli = $false }
         } finally {
           if ($modLocked) { try { $modMutex.ReleaseMutex() } catch { } }
           if ($modMutex) { try { $modMutex.Dispose() } catch { } }
         }
+      }
+
+      if ($wantAgyCli) {
+        $stage = 'editor'
+        $modCliSettings = [pscustomobject]@{
+          model      = [string]$settings.model
+          base_url   = 'https://codex.anhlaptrinh.vn/v1'
+          ai_api_key = [string]$settings.ai_api_key
+          job_id     = $editorJobId
+        }
+        Invoke-EditorStepWithCodexAutoHeal -EditorSettingsObj $modCliSettings -ComponentMode 'cli-runtime-only' -AllowUpdateExisting:$true
+        $completedLabels += 'Antigravity Runtime CLI'
       }
 
       if ($wantOpenClaw -and $openClawSkipUpToDate) {
