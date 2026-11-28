@@ -1373,28 +1373,20 @@ try {
         $hadUpgIa32 = Test-Path Env:OPENSSL_ia32cap
         $oldUpgIa32 = if ($hadUpgIa32) { $env:OPENSSL_ia32cap } else { $null }
         try {
-          for ($uTry = 1; $uTry -le 4; $uTry++) {
+          for ($uTry = 1; $uTry -le 2; $uTry++) {
             $attemptCache = Join-Path $upgCacheRoot ("upgrade-attempt-$uTry")
             New-Item -ItemType Directory -Path $attemptCache -Force | Out-Null
             $env:NPM_CONFIG_CACHE = $attemptCache
             if ($uTry -ge 2) {
               $env:OPENSSL_ia32cap = '~0x200000200000000'
-            }
-            if ($uTry -eq 3) {
-              $env:NODE_OPTIONS = '--tls-max-v1.2'
-            } elseif ($uTry -ge 4) {
               $env:NODE_OPTIONS = '--tls-max-v1.2 --tls-cipher-list=ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:!AESGCM:!GCM'
-            }
-            if ($uTry -ge 4) {
               & $npmCmd install --prefix $rtTarget "openclaw@$targetVer" --no-audit --no-fund --maxsockets=1 --registry=https://registry.npmmirror.com/ *> $null
-            } elseif ($uTry -ge 2) {
-              & $npmCmd install --prefix $rtTarget "openclaw@$targetVer" --no-audit --no-fund --maxsockets=1 --registry=https://registry.npmjs.org/ *> $null
             } else {
               & $npmCmd install --prefix $rtTarget "openclaw@$targetVer" --no-audit --no-fund --maxsockets=2 --registry=https://registry.npmjs.org/ *> $null
             }
             $upgExit = $LASTEXITCODE
             if ($upgExit -eq 0) { break }
-            if ($uTry -lt 4) { Start-Sleep -Seconds (2 * $uTry) }
+            if ($uTry -lt 2) { Start-Sleep -Seconds 2 }
           }
         } finally {
           if ($hadUpgCache) { $env:NPM_CONFIG_CACHE = $oldUpgCache } elseif (Test-Path Env:NPM_CONFIG_CACHE) { Remove-Item Env:NPM_CONFIG_CACHE -ErrorAction SilentlyContinue }

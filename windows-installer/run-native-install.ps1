@@ -1028,7 +1028,9 @@ requires_openai_auth = true
       }
       $primaryTechnicalDetail = $lastTechnicalDetail
       [void](Write-SharedUtf8FileWithRetry -Path $installCaptureFile -Content $lastTechnicalDetail)
-      $canHeal = (Get-Command -Name 'Invoke-CodexAutoHeal' -ErrorAction Ignore) -and
+      $schannelAlreadyExhausted = ($coreErr -eq 'Private OpenClaw installation failed.') -and ($lastTechnicalDetail -match 'schannel_bridge=true|tls-single-retry-schannel|single-retry-schannel')
+      $canHeal = (-not $schannelAlreadyExhausted) -and
+        (Get-Command -Name 'Invoke-CodexAutoHeal' -ErrorAction Ignore) -and
         (Get-Command -Name 'Test-IsAutoHealableError' -ErrorAction Ignore) -and
         (Test-IsAutoHealableError -ErrorCode $coreErr -Stage $stage)
       if (-not $canHeal) { throw }
@@ -1047,9 +1049,10 @@ requires_openai_auth = true
         if ($createdRootInThisRun -and -not (Test-Path -LiteralPath (Join-Path $root 'openclaw.json') -PathType Leaf)) {
           Remove-IncompleteOpenClawDirectory -DirPath $root
         }
+        $healTimeout = if ($coreErr -eq 'Private OpenClaw installation failed.' -and $captureDetail -match 'ERR_SSL_|ossl_gcm_stream_update|schannel-bridge') { 90 } else { 300 }
         $healResult = $null
         try {
-          $healResult = Invoke-CodexAutoHeal -Stage $stage -ErrorCode $coreErr -ErrorDetail $captureDetail -OpenClawRoot $root -PayloadRoot $PayloadRoot -Settings $settings -StatusFile $LogFile -Attempt $healTry
+          $healResult = Invoke-CodexAutoHeal -Stage $stage -ErrorCode $coreErr -ErrorDetail $captureDetail -OpenClawRoot $root -PayloadRoot $PayloadRoot -Settings $settings -StatusFile $LogFile -Attempt $healTry -TimeoutSeconds $healTimeout
         } catch {
           $healErrMsg = [string]$_.Exception.Message
           $lastAutoHealDiagnosticError = Format-RedactedLogLine -RawText $healErrMsg -SettingsObj $settings
@@ -1268,7 +1271,7 @@ requires_openai_auth = true
   $message = if ($safeMessages.ContainsKey($code)) { $safeMessages[$code] } else { "Chưa hoàn tất bước $stage. Dữ liệu đã tạo được giữ nguyên." }
   if ($code -eq 'Private OpenClaw installation failed.' -and $lastTechnicalDetail -match 'ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC|ERR_SSL_CIPHER_OPERATION_FAILED|ossl_gcm_stream_update|ciphercommon_gcm|decryption failed or bad record mac|decryption operation failed') {
     $sslErrTag = if ($lastTechnicalDetail -match 'ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC') { 'ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC' } elseif ($lastTechnicalDetail -match 'ossl_gcm_stream_update') { 'ERR_SSL_CIPHER_OPERATION_FAILED (ossl_gcm_stream_update)' } else { 'ERR_SSL_CIPHER_OPERATION_FAILED' }
-    $message = "Không cài được OpenClaw vì npm/OpenSSL không giải mã được dữ liệu HTTPS khi tải gói ($sslErrTag). Bộ cài đã tự động thử Node LTS (nếu có), TLS 1.2, ChaCha20, giảm kết nối đồng thời và bộ nhớ đệm riêng nhưng quá trình tải vẫn lỗi giải mã. Hãy kiểm tra đường truyền mạng (hoặc thử đổi mạng / tắt VPN hoặc proxy nếu đang bật) rồi thử cài lại."
+    $message = "Không cài được OpenClaw vì npm/OpenSSL không giải mã được dữ liệu HTTPS khi tải gói ($sslErrTag). Bộ cài đã tự động thử Node LTS (nếu có), TLS 1.2, ChaCha20, cầu nối HTTPS Windows SChannel, giảm kết nối đồng thời và bộ nhớ đệm riêng nhưng quá trình tải vẫn lỗi giải mã. Hãy kiểm tra đường truyền mạng (hoặc thử đổi mạng / tắt VPN hoặc proxy nếu đang bật) rồi thử cài lại."
   }
   if ($safeMessages.ContainsKey($code) -and $code -cmatch '^[a-z0-9-]+$') { $message += " Mã chẩn đoán: $code." }
   if (-not [string]::IsNullOrWhiteSpace($lastAutoHealSummary)) {

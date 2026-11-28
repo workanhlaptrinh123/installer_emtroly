@@ -255,7 +255,7 @@ $env:OPENCLAW_STATE_DIR = $root
 $env:OPENCLAW_ROOT = $root
 $env:OPENCLAW_CONFIG_PATH = $configPath
 $env:OPENCLAW_WORKSPACE_DIR = $workspace
-foreach ($selector in @('OPENCLAW_GATEWAY_TOKEN','OPENCLAW_GATEWAY_PASSWORD','OPENCLAW_GATEWAY_PORT','OPENCLAW_SYSTEMD_UNIT','OPENCLAW_LAUNCHD_LABEL','OPENCLAW_WINDOWS_TASK_NAME','OPENCLAW_SERVICE_KIND','OPENCLAW_SERVICE_MARKER')) { Remove-Item "Env:$selector" -ErrorAction SilentlyContinue }
+foreach ($selector in @('OPENCLAW_GATEWAY_TOKEN','OPENCLAW_GATEWAY_PASSWORD','OPENCLAW_GATEWAY_PORT','OPENCLAW_SYSTEMD_UNIT','OPENCLAW_LAUNCHD_LABEL','OPENCLAW_WINDOWS_TASK_NAME','OPENCLAW_SERVICE_KIND','OPENCLAW_SERVICE_MARKER')) { if (Test-Path "Env:$selector") { Remove-Item "Env:$selector" -ErrorAction Ignore } }
 $occupied = @()
 try {
   $occupied = @(Get-NetTCPConnection -State Listen -ErrorAction Stop | Select-Object -ExpandProperty LocalPort)

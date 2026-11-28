@@ -371,6 +371,593 @@ function Format-EmTroLyCmdArg {
   return '"' + $escaped + '"'
 }
 
+$script:EmTroLySChannelBridgeCSharp = @'
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+
+namespace EmTroLy {
+  public sealed class NpmSChannelBridge : IDisposable {
+    private readonly string _upstreamBase;
+    private readonly Uri _upstreamUri;
+    private readonly string _fallbackBase;
+    private readonly Uri _fallbackUri;
+    private readonly bool _allowLocalHttp;
+    private readonly string _curlPath;
+    private readonly HashSet<string> _allowedHosts;
+    private TcpListener _listener;
+    private Thread _acceptThread;
+    private volatile bool _stopped;
+    private int _requestCount;
+    private int _curlFallbackCount;
+    private int _errorCount;
+    private string _lastError = "";
+
+    public int Port { get; private set; }
+    public string ProxyUrl { get; private set; }
+    public int RequestCount { get { return _requestCount; } }
+    public int CurlFallbackCount { get { return _curlFallbackCount; } }
+    public int ErrorCount { get { return _errorCount; } }
+    public string LastError { get { return _lastError; } }
+
+    public NpmSChannelBridge(string upstreamRegistryUrl, string[] allowedHosts, string curlPath)
+      : this(upstreamRegistryUrl, "", allowedHosts, curlPath) {
+    }
+
+    public NpmSChannelBridge(string upstreamRegistryUrl, string fallbackRegistryUrl, string[] allowedHosts, string curlPath) {
+      _upstreamBase = (upstreamRegistryUrl ?? "").Trim().TrimEnd('/');
+      _upstreamUri = new Uri(_upstreamBase + "/");
+      _fallbackBase = (fallbackRegistryUrl ?? "").Trim().TrimEnd('/');
+      _fallbackUri = !string.IsNullOrWhiteSpace(_fallbackBase) ? new Uri(_fallbackBase + "/") : null;
+      _curlPath = curlPath ?? "";
+      _allowedHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+      _allowedHosts.Add("registry.npmjs.org");
+      _allowedHosts.Add("registry.npmmirror.com");
+      _allowedHosts.Add("cdn.npmmirror.com");
+      _allowedHosts.Add("registry.yarnpkg.com");
+      if (!string.IsNullOrEmpty(_upstreamUri.Host)) {
+        _allowedHosts.Add(_upstreamUri.Host);
+      }
+      if (_fallbackUri != null && !string.IsNullOrEmpty(_fallbackUri.Host)) {
+        _allowedHosts.Add(_fallbackUri.Host);
+      }
+      if (allowedHosts != null) {
+        foreach (string h in allowedHosts) {
+          if (!string.IsNullOrWhiteSpace(h)) {
+            _allowedHosts.Add(h.Trim());
+          }
+        }
+      }
+      bool localUp = string.Equals(_upstreamUri.Scheme, "http", StringComparison.OrdinalIgnoreCase) && IsLoopbackHost(_upstreamUri.Host);
+      bool localFb = _fallbackUri != null && string.Equals(_fallbackUri.Scheme, "http", StringComparison.OrdinalIgnoreCase) && IsLoopbackHost(_fallbackUri.Host);
+      _allowLocalHttp = localUp || localFb;
+    }
+
+    public void Start() {
+      if (_listener != null) { return; }
+      _stopped = false;
+      _listener = new TcpListener(IPAddress.Loopback, 0);
+      _listener.Start(64);
+      Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+      ProxyUrl = "http://127.0.0.1:" + Port.ToString(CultureInfo.InvariantCulture) + "/";
+      _acceptThread = new Thread(AcceptLoop);
+      _acceptThread.IsBackground = true;
+      _acceptThread.Start();
+    }
+
+    public void Dispose() {
+      _stopped = true;
+      TcpListener lst = _listener;
+      _listener = null;
+      if (lst != null) {
+        try { lst.Stop(); } catch { }
+      }
+    }
+
+    private static bool IsLoopbackHost(string host) {
+      if (string.IsNullOrEmpty(host)) { return false; }
+      return string.Equals(host, "127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsAllowedHost(string hostPort) {
+      if (string.IsNullOrWhiteSpace(hostPort)) { return false; }
+      if (hostPort.IndexOfAny(new char[] { '/', '\\', '@', ' ', '\t', '\r', '\n' }) >= 0) { return false; }
+      string host = hostPort;
+      int colon = hostPort.IndexOf(':');
+      if (colon > 0) {
+        string portPart = hostPort.Substring(colon + 1);
+        int portNum;
+        if (!int.TryParse(portPart, NumberStyles.Integer, CultureInfo.InvariantCulture, out portNum) || portNum < 1 || portNum > 65535) {
+          return false;
+        }
+        host = hostPort.Substring(0, colon);
+      }
+      if (string.IsNullOrWhiteSpace(host)) { return false; }
+      if (_allowedHosts.Contains(host)) { return true; }
+      string lower = host.ToLowerInvariant();
+      return lower.EndsWith(".npmjs.org") || lower.EndsWith(".npmmirror.com") || lower.EndsWith(".yarnpkg.com");
+    }
+
+    private bool IsAllowedSchemeForHost(string scheme, string hostPort) {
+      string hostOnly = hostPort;
+      int colon = hostPort != null ? hostPort.IndexOf(':') : -1;
+      if (colon > 0) { hostOnly = hostPort.Substring(0, colon); }
+      if (string.Equals(scheme, "https", StringComparison.OrdinalIgnoreCase)) { return IsAllowedHost(hostPort); }
+      if (_allowLocalHttp && string.Equals(scheme, "http", StringComparison.OrdinalIgnoreCase) && IsLoopbackHost(hostOnly)) { return true; }
+      return false;
+    }
+
+    private void AcceptLoop() {
+      while (!_stopped) {
+        TcpListener lst = _listener;
+        if (lst == null) { break; }
+        try {
+          TcpClient client = lst.AcceptTcpClient();
+          ThreadPool.QueueUserWorkItem(HandleClientWork, client);
+        } catch {
+          if (_stopped) { break; }
+          Thread.Sleep(20);
+        }
+      }
+    }
+
+    private void HandleClientWork(object state) {
+      TcpClient client = state as TcpClient;
+      if (client == null) { return; }
+      HandleClient(client);
+    }
+
+    private void HandleClient(TcpClient client) {
+      using (client) {
+        try {
+          client.ReceiveTimeout = 30000;
+          client.SendTimeout = 180000;
+          NetworkStream ns = client.GetStream();
+
+          byte[] buf = new byte[8192];
+          MemoryStream hdrBuf = new MemoryStream();
+          int headerEnd = -1;
+          while (headerEnd < 0 && hdrBuf.Length < 65536) {
+            int read = ns.Read(buf, 0, buf.Length);
+            if (read <= 0) { break; }
+            hdrBuf.Write(buf, 0, read);
+            byte[] cur = hdrBuf.ToArray();
+            for (int i = 0; i <= cur.Length - 4; i++) {
+              if (cur[i] == 13 && cur[i + 1] == 10 && cur[i + 2] == 13 && cur[i + 3] == 10) {
+                headerEnd = i;
+                break;
+              }
+            }
+          }
+          if (headerEnd < 0) { return; }
+
+          byte[] allRead = hdrBuf.ToArray();
+          string headerText = Encoding.ASCII.GetString(allRead, 0, headerEnd);
+          string[] headerLines = headerText.Split(new string[] { "\r\n" }, StringSplitOptions.None);
+          if (headerLines.Length == 0) { return; }
+
+          string[] reqParts = headerLines[0].Split(' ');
+          if (reqParts.Length < 2) {
+            SendSimpleResponse(ns, 400, "Bad Request", "Bad HTTP request line.", false);
+            return;
+          }
+
+          string method = reqParts[0].ToUpperInvariant();
+          string target = reqParts[1];
+          string acceptHeader = "";
+          int reqContentLength = 0;
+
+          for (int i = 1; i < headerLines.Length; i++) {
+            int colon = headerLines[i].IndexOf(':');
+            if (colon <= 0) { continue; }
+            string hName = headerLines[i].Substring(0, colon).Trim();
+            string hVal = headerLines[i].Substring(colon + 1).Trim();
+            if (string.Equals(hName, "Accept", StringComparison.OrdinalIgnoreCase)) {
+              acceptHeader = hVal;
+            } else if (string.Equals(hName, "Content-Length", StringComparison.OrdinalIgnoreCase)) {
+              int.TryParse(hVal, NumberStyles.Integer, CultureInfo.InvariantCulture, out reqContentLength);
+            }
+          }
+
+          int alreadyBody = allRead.Length - (headerEnd + 4);
+          int remainingBody = reqContentLength - alreadyBody;
+          while (remainingBody > 0) {
+            int toRead = Math.Min(remainingBody, buf.Length);
+            int r = ns.Read(buf, 0, toRead);
+            if (r <= 0) { break; }
+            remainingBody -= r;
+          }
+
+          if (method != "GET" && method != "HEAD") {
+            SendSimpleResponse(ns, 405, "Method Not Allowed", "Only GET and HEAD are supported.", method == "HEAD");
+            return;
+          }
+
+          bool isTarball = false;
+          Uri upstreamUri = null;
+          string tarballPrefix = "/__tarball__/";
+          if (target.StartsWith(tarballPrefix, StringComparison.OrdinalIgnoreCase)) {
+            isTarball = true;
+            string rest = target.Substring(tarballPrefix.Length);
+            int s1 = rest.IndexOf('/');
+            if (s1 <= 0) {
+              SendSimpleResponse(ns, 400, "Bad Request", "Malformed tarball proxy URL.", method == "HEAD");
+              return;
+            }
+            string scheme = rest.Substring(0, s1).ToLowerInvariant();
+            string afterScheme = rest.Substring(s1 + 1);
+            int s2 = afterScheme.IndexOf('/');
+            if (s2 <= 0) {
+              SendSimpleResponse(ns, 400, "Bad Request", "Malformed tarball host path.", method == "HEAD");
+              return;
+            }
+            string host = afterScheme.Substring(0, s2);
+            string pathAndQuery = afterScheme.Substring(s2);
+            if (!IsAllowedSchemeForHost(scheme, host)) {
+              SendSimpleResponse(ns, 403, "Forbidden", "Host not allowed.", method == "HEAD");
+              return;
+            }
+            upstreamUri = new Uri(scheme + "://" + host + pathAndQuery);
+          } else {
+            string rel = target.StartsWith("/") ? target : "/" + target;
+            upstreamUri = new Uri(_upstreamBase + rel);
+            if (!IsAllowedSchemeForHost(upstreamUri.Scheme, upstreamUri.Host)) {
+              SendSimpleResponse(ns, 403, "Forbidden", "Registry host not allowed.", method == "HEAD");
+              return;
+            }
+          }
+
+          Interlocked.Increment(ref _requestCount);
+          int statusCode;
+          string reason;
+          string contentType;
+          byte[] bodyBytes;
+          FetchWithRetry(method, upstreamUri, isTarball, acceptHeader, out statusCode, out reason, out contentType, out bodyBytes);
+
+          if (!isTarball && statusCode == 200 && bodyBytes != null && bodyBytes.Length > 0) {
+            bool looksJson = (!string.IsNullOrEmpty(contentType) && contentType.IndexOf("json", StringComparison.OrdinalIgnoreCase) >= 0) || bodyBytes[0] == (byte)'{';
+            if (looksJson) {
+              string jsonText = Encoding.UTF8.GetString(bodyBytes);
+              string proxyNoSlash = ProxyUrl.TrimEnd('/');
+              string rewritten = RewritePackumentJson(jsonText, proxyNoSlash);
+              bodyBytes = Encoding.UTF8.GetBytes(rewritten);
+              if (string.IsNullOrEmpty(contentType)) {
+                contentType = "application/json; charset=utf-8";
+              }
+            }
+          }
+
+          WriteHttpResponse(ns, statusCode, reason, contentType, bodyBytes ?? new byte[0], method == "HEAD");
+        } catch (Exception ex) {
+          Interlocked.Increment(ref _errorCount);
+          _lastError = ex.Message;
+          try {
+            if (client.Connected) {
+              SendSimpleResponse(client.GetStream(), 502, "Bad Gateway", "Upstream SChannel fetch failed: " + ex.Message, false);
+            }
+          } catch { }
+        }
+      }
+    }
+
+    private string RewritePackumentJson(string jsonText, string proxyNoSlash) {
+      Regex rx = new Regex(
+        "\"tarball\"\\s*:\\s*\"(https?)(?::\\/\\/|:\\/\\/)([^\"\\/\\\\\\s]+)((?:\\/|\\\\\\/)[^\"]*)\"",
+        RegexOptions.IgnoreCase
+      );
+      return rx.Replace(jsonText, delegate(Match m) {
+        string scheme = m.Groups[1].Value.ToLowerInvariant();
+        string host = m.Groups[2].Value;
+        string path = m.Groups[3].Value.Replace("\\/", "/");
+        if (!IsAllowedSchemeForHost(scheme, host)) {
+          return m.Value;
+        }
+        return "\"tarball\":\"" + proxyNoSlash + "/__tarball__/" + scheme + "/" + host + path + "\"";
+      });
+    }
+
+    private void FetchWithRetry(string method, Uri uri, bool isTarball, string acceptHeader, out int statusCode, out string reason, out string contentType, out byte[] bodyBytes) {
+      Exception lastEx = null;
+      bool canCurl = !string.IsNullOrEmpty(_curlPath) && File.Exists(_curlPath);
+      int maxAttempts = canCurl ? 4 : 3;
+
+      for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          if (attempt >= 3 && canCurl) {
+            Interlocked.Increment(ref _curlFallbackCount);
+            FetchViaCurl(method, uri, isTarball, acceptHeader, attempt >= 4, out statusCode, out reason, out contentType, out bodyBytes);
+          } else {
+            FetchViaHttpWebRequest(method, uri, isTarball, acceptHeader, out statusCode, out reason, out contentType, out bodyBytes);
+          }
+          return;
+        } catch (Exception ex) {
+          lastEx = ex;
+          _lastError = ex.Message;
+          if (attempt < maxAttempts) {
+            Thread.Sleep(250 * attempt);
+          }
+        }
+      }
+      if (_fallbackUri != null && !string.Equals(_fallbackUri.Authority, uri.Authority, StringComparison.OrdinalIgnoreCase)) {
+        string fbPrefix = _fallbackUri.AbsolutePath.TrimEnd('/');
+        string fbUrl = _fallbackUri.Scheme + "://" + _fallbackUri.Authority + fbPrefix + uri.PathAndQuery;
+        Uri fbUri = new Uri(fbUrl);
+        if (IsAllowedSchemeForHost(fbUri.Scheme, fbUri.Authority)) {
+          for (int fbAttempt = 1; fbAttempt <= 2; fbAttempt++) {
+            try {
+              if (fbAttempt == 2 && canCurl) {
+                Interlocked.Increment(ref _curlFallbackCount);
+                FetchViaCurl(method, fbUri, isTarball, acceptHeader, false, out statusCode, out reason, out contentType, out bodyBytes);
+              } else {
+                FetchViaHttpWebRequest(method, fbUri, isTarball, acceptHeader, out statusCode, out reason, out contentType, out bodyBytes);
+              }
+              return;
+            } catch (Exception fbEx) {
+              lastEx = fbEx;
+              _lastError = fbEx.Message;
+            }
+          }
+        }
+      }
+      throw new IOException("All upstream SChannel attempts failed for " + uri.AbsoluteUri + ": " + (lastEx != null ? lastEx.Message : "unknown"));
+    }
+
+    private void FetchViaHttpWebRequest(string method, Uri startUri, bool isTarball, string acceptHeader, out int statusCode, out string reason, out string contentType, out byte[] bodyBytes) {
+      try {
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | (SecurityProtocolType)12288;
+      } catch {
+        ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+      }
+      ServicePointManager.DefaultConnectionLimit = 32;
+      ServicePointManager.Expect100Continue = false;
+
+      Uri curUri = startUri;
+      for (int hop = 0; hop <= 5; hop++) {
+        HttpWebRequest req = (HttpWebRequest)WebRequest.Create(curUri);
+        req.Method = method;
+        req.AllowAutoRedirect = false;
+        req.KeepAlive = false;
+        req.Timeout = 90000;
+        req.ReadWriteTimeout = 90000;
+        req.UserAgent = "npm/11 node/v24 emtroly-schannel-bridge";
+        if (!isTarball) {
+          req.Accept = !string.IsNullOrWhiteSpace(acceptHeader) ? acceptHeader : "application/vnd.npm.install-v1+json, application/json";
+          req.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+        } else {
+          req.Accept = "*/*";
+          req.AutomaticDecompression = DecompressionMethods.None;
+        }
+
+        try {
+          using (HttpWebResponse resp = (HttpWebResponse)req.GetResponse()) {
+            int code = (int)resp.StatusCode;
+            if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+              string loc = resp.Headers["Location"];
+              if (string.IsNullOrWhiteSpace(loc)) {
+                throw new IOException("Redirect response missing Location header.");
+              }
+              Uri nextUri = new Uri(curUri, loc);
+              if (!IsAllowedSchemeForHost(nextUri.Scheme, nextUri.Host)) {
+                throw new InvalidOperationException("Blocked redirect to disallowed upstream host: " + nextUri.AbsoluteUri);
+              }
+              curUri = nextUri;
+              continue;
+            }
+            statusCode = code;
+            reason = string.IsNullOrEmpty(resp.StatusDescription) ? "OK" : resp.StatusDescription;
+            contentType = string.IsNullOrEmpty(resp.ContentType) ? "application/octet-stream" : resp.ContentType;
+            if (method == "HEAD") {
+              bodyBytes = new byte[0];
+              return;
+            }
+            long expectedLen = resp.ContentLength;
+            using (Stream rs = resp.GetResponseStream()) {
+              MemoryStream ms = new MemoryStream();
+              if (rs != null) {
+                byte[] chunk = new byte[32768];
+                int n;
+                while ((n = rs.Read(chunk, 0, chunk.Length)) > 0) {
+                  ms.Write(chunk, 0, n);
+                }
+              }
+              byte[] result = ms.ToArray();
+              if (expectedLen >= 0 && result.Length != expectedLen) {
+                throw new IOException("Truncated upstream body: expected " + expectedLen + " bytes, got " + result.Length + ".");
+              }
+              bodyBytes = result;
+              return;
+            }
+          }
+        } catch (WebException wex) {
+          HttpWebResponse errResp = wex.Response as HttpWebResponse;
+          if (errResp != null) {
+            using (errResp) {
+              int errCode = (int)errResp.StatusCode;
+              if (errCode < 500) {
+                statusCode = errCode;
+                reason = string.IsNullOrEmpty(errResp.StatusDescription) ? "Status" : errResp.StatusDescription;
+                contentType = string.IsNullOrEmpty(errResp.ContentType) ? "application/json" : errResp.ContentType;
+                if (method == "HEAD") {
+                  bodyBytes = new byte[0];
+                  return;
+                }
+                using (Stream es = errResp.GetResponseStream()) {
+                  MemoryStream ems = new MemoryStream();
+                  if (es != null) { es.CopyTo(ems); }
+                  bodyBytes = ems.ToArray();
+                  return;
+                }
+              }
+            }
+          }
+          throw;
+        }
+      }
+      throw new IOException("Too many redirects fetching " + startUri.AbsoluteUri);
+    }
+
+    private static string QuoteCurlArg(string val) {
+      if (string.IsNullOrEmpty(val)) { return "\"\""; }
+      string s = Regex.Replace(val, @"(\\*)" + "\"", "$1$1\\\"");
+      s = Regex.Replace(s, @"(\\+)$", "$1$1");
+      return "\"" + s + "\"";
+    }
+
+    private void FetchViaCurl(string method, Uri uri, bool isTarball, string acceptHeader, bool forceIpv4, out int statusCode, out string reason, out string contentType, out byte[] bodyBytes) {
+      string tmpDir = Path.GetTempPath();
+      string stamp = Guid.NewGuid().ToString("N");
+      string hdrFile = Path.Combine(tmpDir, "emtroly-cb-" + stamp + ".hdr");
+      string bodyFile = Path.Combine(tmpDir, "emtroly-cb-" + stamp + ".body");
+      try {
+        List<string> args = new List<string>();
+        args.Add("--silent");
+        args.Add("--show-error");
+        args.Add("--location");
+        args.Add("--max-redirs"); args.Add("5");
+        args.Add("--http1.1");
+        args.Add("--connect-timeout"); args.Add("20");
+        args.Add("--max-time"); args.Add("180");
+        if (string.Equals(uri.Scheme, "https", StringComparison.OrdinalIgnoreCase)) {
+          args.Add("--proto"); args.Add("=https");
+          args.Add("--proto-redir"); args.Add("=https");
+        }
+        if (forceIpv4) { args.Add("--ipv4"); }
+        if (!isTarball) { args.Add("--compressed"); }
+        if (method == "HEAD") { args.Add("-I"); }
+        args.Add("-A"); args.Add("npm/11 node/v24 emtroly-curl-schannel");
+        if (!isTarball && !string.IsNullOrWhiteSpace(acceptHeader)) {
+          string cleanAccept = acceptHeader.Replace("\r", " ").Replace("\n", " ").Trim();
+          args.Add("-H"); args.Add("Accept: " + cleanAccept);
+        }
+        args.Add("-D"); args.Add(hdrFile);
+        args.Add("-o"); args.Add(bodyFile);
+        args.Add(uri.AbsoluteUri);
+
+        StringBuilder argLine = new StringBuilder();
+        for (int i = 0; i < args.Count; i++) {
+          if (i > 0) { argLine.Append(' '); }
+          argLine.Append(QuoteCurlArg(args[i]));
+        }
+
+        ProcessStartInfo psi = new ProcessStartInfo();
+        psi.FileName = _curlPath;
+        psi.Arguments = argLine.ToString();
+        psi.UseShellExecute = false;
+        psi.CreateNoWindow = true;
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        string stderrText = "";
+        int ec;
+        using (Process p = Process.Start(psi)) {
+          string sErr = p.StandardError.ReadToEnd();
+          p.StandardOutput.ReadToEnd();
+          if (!p.WaitForExit(190000)) {
+            try { p.Kill(); } catch { }
+            throw new IOException("curl.exe timed out");
+          }
+          ec = p.ExitCode;
+          stderrText = (sErr ?? "").Trim();
+        }
+        if (ec != 0) {
+          throw new IOException("curl.exe failed (exit " + ec + "): " + stderrText);
+        }
+
+        int finalStatus = 200;
+        string finalReason = "OK";
+        string finalCt = "application/octet-stream";
+        long expectedLen = -1;
+        if (File.Exists(hdrFile)) {
+          string rawHdr = File.ReadAllText(hdrFile, Encoding.ASCII);
+          string[] blocks = Regex.Split(rawHdr.Trim(), @"\r?\n\r?\n");
+          if (blocks.Length > 0) {
+            string lastBlock = blocks[blocks.Length - 1];
+            string[] lines = lastBlock.Split(new string[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+            if (lines.Length > 0) {
+              Match sm = Regex.Match(lines[0], @"^HTTP/\S+\s+(\d{3})(?:\s+(.*))?$");
+              if (sm.Success) {
+                int.TryParse(sm.Groups[1].Value, out finalStatus);
+                if (!string.IsNullOrWhiteSpace(sm.Groups[2].Value)) { finalReason = sm.Groups[2].Value.Trim(); }
+              }
+            }
+            for (int li = 1; li < lines.Length; li++) {
+              int cPos = lines[li].IndexOf(':');
+              if (cPos <= 0) { continue; }
+              string k = lines[li].Substring(0, cPos).Trim();
+              string v = lines[li].Substring(cPos + 1).Trim();
+              if (string.Equals(k, "Content-Type", StringComparison.OrdinalIgnoreCase)) { finalCt = v; }
+              else if (string.Equals(k, "Content-Length", StringComparison.OrdinalIgnoreCase)) { long.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out expectedLen); }
+            }
+          }
+        }
+        byte[] result = (method != "HEAD" && File.Exists(bodyFile)) ? File.ReadAllBytes(bodyFile) : new byte[0];
+        if (method != "HEAD" && isTarball && expectedLen >= 0 && result.Length != expectedLen) {
+          throw new IOException("curl.exe truncated tarball: expected " + expectedLen + ", got " + result.Length);
+        }
+        if (finalStatus >= 500) {
+          throw new IOException("Upstream HTTP " + finalStatus);
+        }
+        statusCode = finalStatus;
+        reason = finalReason;
+        contentType = finalCt;
+        bodyBytes = result;
+      } finally {
+        try { if (File.Exists(hdrFile)) { File.Delete(hdrFile); } } catch { }
+        try { if (File.Exists(bodyFile)) { File.Delete(bodyFile); } } catch { }
+      }
+    }
+
+    private static void SendSimpleResponse(NetworkStream ns, int code, string reason, string msg, bool headOnly) {
+      byte[] body = Encoding.UTF8.GetBytes(msg ?? "");
+      WriteHttpResponse(ns, code, reason, "text/plain; charset=utf-8", body, headOnly);
+    }
+
+    private static void WriteHttpResponse(NetworkStream ns, int code, string reason, string contentType, byte[] body, bool headOnly) {
+      string safeReason = string.IsNullOrWhiteSpace(reason) ? "OK" : Regex.Replace(reason, @"[\r\n]+", " ").Trim();
+      string safeCt = string.IsNullOrWhiteSpace(contentType) ? "application/octet-stream" : Regex.Replace(contentType, @"[\r\n]+", " ").Trim();
+      StringBuilder sb = new StringBuilder();
+      sb.Append("HTTP/1.1 ").Append(code.ToString(CultureInfo.InvariantCulture)).Append(' ').Append(safeReason).Append("\r\n");
+      sb.Append("Content-Type: ").Append(safeCt).Append("\r\n");
+      sb.Append("Content-Length: ").Append(body.Length.ToString(CultureInfo.InvariantCulture)).Append("\r\n");
+      sb.Append("Cache-Control: no-store\r\n");
+      sb.Append("Connection: close\r\n\r\n");
+      byte[] hdr = Encoding.ASCII.GetBytes(sb.ToString());
+      ns.Write(hdr, 0, hdr.Length);
+      if (!headOnly && body.Length > 0) {
+        ns.Write(body, 0, body.Length);
+      }
+      ns.Flush();
+    }
+  }
+}
+'@
+
+function Start-EmTroLyNpmSChannelBridge {
+  param(
+    [Parameter(Mandatory=$true)][string]$UpstreamRegistryUrl,
+    [string]$FallbackRegistryUrl = '',
+    [string[]]$AllowedHosts = @()
+  )
+  try {
+    if (-not ('EmTroLy.NpmSChannelBridge' -as [type])) {
+      Add-Type -TypeDefinition $script:EmTroLySChannelBridgeCSharp -Language CSharp -ErrorAction Stop | Out-Null
+    }
+    $curlExe = if ($env:SystemRoot) { Join-Path $env:SystemRoot 'System32\curl.exe' } else { 'curl.exe' }
+    $bridge = New-Object EmTroLy.NpmSChannelBridge($UpstreamRegistryUrl, $FallbackRegistryUrl, [string[]]$AllowedHosts, $curlExe)
+    $bridge.Start()
+    return $bridge
+  } catch {
+    return $null
+  }
+}
+
 function Invoke-EmTroLyNpmAttempt {
   param(
     [Parameter(Mandatory=$true)][string]$NodeExe,
@@ -382,28 +969,47 @@ function Invoke-EmTroLyNpmAttempt {
     [Parameter(Mandatory=$true)][string]$NpmCacheDir,
     [Parameter(Mandatory=$true)][string]$NpmrcPath,
     [Parameter(Mandatory=$true)][string]$RegistryUrl,
+    [string]$FallbackRegistryUrl = '',
     [int]$MaxSockets = 2,
+    [int]$FetchRetries = 5,
     [string]$NodeOptions = '',
     [string]$OpenSslIa32Cap = '',
     [string]$AttemptLabel = 'attempt',
     [int]$AttemptNumber = 1,
     [string]$RuntimeCleanupDir = '',
     [int]$TimeoutSeconds = 600,
-    [string[]]$SecretsToRedact = @()
+    [string[]]$SecretsToRedact = @(),
+    [switch]$UseSChannelBridge,
+    [string[]]$AllowedBridgeHosts = @()
   )
   [void][IO.Directory]::CreateDirectory((Split-Path -Parent $AttemptLogFile))
   [void][IO.Directory]::CreateDirectory($NpmCacheDir)
   $npmrcDir = Split-Path -Parent $NpmrcPath
   if ($npmrcDir) { [void][IO.Directory]::CreateDirectory($npmrcDir) }
 
+  $bridge = $null
+  $effectiveRegistry = $RegistryUrl
+  if ($UseSChannelBridge) {
+    $bridge = Start-EmTroLyNpmSChannelBridge -UpstreamRegistryUrl $RegistryUrl -FallbackRegistryUrl $FallbackRegistryUrl -AllowedHosts $AllowedBridgeHosts
+    if (-not $bridge) {
+      if (-not [string]::IsNullOrWhiteSpace($FallbackRegistryUrl)) {
+        $effectiveRegistry = $FallbackRegistryUrl
+      }
+    } else {
+      $effectiveRegistry = $bridge.ProxyUrl
+    }
+  }
+
+  $retryMinTimeout = if ($FetchRetries -le 2) { 500 } else { 1500 }
+  $retryMaxTimeout = if ($FetchRetries -le 2) { 2000 } else { 10000 }
   $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
   # Strictly enforce npm integrity verification and TLS certificate validation.
   $npmrcContent = @(
-    "registry=$RegistryUrl",
+    "registry=$effectiveRegistry",
     "maxsockets=$MaxSockets",
-    'fetch-retries=5',
-    'fetch-retry-mintimeout=1500',
-    'fetch-retry-maxtimeout=10000',
+    "fetch-retries=$FetchRetries",
+    "fetch-retry-mintimeout=$retryMinTimeout",
+    "fetch-retry-maxtimeout=$retryMaxTimeout",
     'fetch-timeout=600000',
     'audit=false',
     'fund=false'
@@ -440,6 +1046,9 @@ function Invoke-EmTroLyNpmAttempt {
   $psi.EnvironmentVariables['NO_COLOR'] = '1'
   foreach ($rmVar in @('NPM_CONFIG_PREFIX', 'NPM_CONFIG_REGISTRY', 'NODE_OPTIONS', 'OPENSSL_ia32cap', 'NODE_TLS_REJECT_UNAUTHORIZED')) {
     [void]$psi.EnvironmentVariables.Remove($rmVar)
+  }
+  if ($UseSChannelBridge) {
+    $psi.EnvironmentVariables['NPM_CONFIG_REGISTRY'] = $effectiveRegistry
   }
   if (-not [string]::IsNullOrWhiteSpace($OpenSslIa32Cap)) {
     $psi.EnvironmentVariables['OPENSSL_ia32cap'] = $OpenSslIa32Cap
@@ -483,6 +1092,13 @@ function Invoke-EmTroLyNpmAttempt {
     try { if ($errTask.Wait(5000)) { $rawErr = $errTask.Result } } catch { }
   } finally {
     $proc.Dispose()
+    if ($bridge) {
+      $bridgeReqCount = $bridge.RequestCount
+      $bridgeCurlCount = $bridge.CurlFallbackCount
+      $bridgeErrCount = $bridge.ErrorCount
+      $bridgeLastErr = $bridge.LastError
+      try { $bridge.Dispose() } catch { }
+    }
   }
 
   if ($RuntimeCleanupDir) {
@@ -493,11 +1109,20 @@ function Invoke-EmTroLyNpmAttempt {
   if ($timedOut -and $combined -notmatch 'timed out') {
     $combined = ($combined + "`r`nnpm process timed out after $TimeoutSeconds seconds.").Trim()
   }
+  if ($UseSChannelBridge -and $bridgeLastErr -and $exitCode -ne 0) {
+    $combined = ($combined + "`r`nschannel-bridge error: $bridgeLastErr").Trim()
+  }
   $safeCombined = Remove-EmTroLyNpmSecrets -Text $combined -Secrets $SecretsToRedact
+  $bridgeLine = if ($UseSChannelBridge) {
+    "schannel_bridge=true upstream=$RegistryUrl local=$effectiveRegistry requests=$bridgeReqCount curl_fallbacks=$bridgeCurlCount errors=$bridgeErrCount"
+  } else {
+    'schannel_bridge=false'
+  }
   $header = @(
     "attempt=$AttemptNumber label=$AttemptLabel exit=$exitCode",
     "node=$NodeExe npm=$NpmCmd",
-    "registry=$RegistryUrl maxsockets=$MaxSockets",
+    "registry=$RegistryUrl maxsockets=$MaxSockets fetch_retries=$FetchRetries",
+    $bridgeLine,
     "cache=$NpmCacheDir",
     "OPENSSL_ia32cap=$(if ($OpenSslIa32Cap) { $OpenSslIa32Cap } else { '<unset>' })",
     "NODE_OPTIONS=$(if ($NodeOptions) { $NodeOptions } else { '<unset>' })",
@@ -527,6 +1152,7 @@ function Invoke-EmTroLyNpmAttempt {
     CacheDir       = $NpmCacheDir
     NodeOptions    = $NodeOptions
     OpenSslIa32Cap = $OpenSslIa32Cap
+    UsedBridge     = [bool]$UseSChannelBridge
   }
 }
 
@@ -562,97 +1188,33 @@ function New-EmTroLyNpmRetryPlan {
   $chaChaCompat = '--tls-max-v1.2 --tls-cipher-list=ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DEFAULT'
 
   $plan = New-Object System.Collections.Generic.List[object]
+  $retryToolchain = if ($ltsTc) { $ltsTc } else { $primaryTc }
   if ($IsTlsError) {
-    if ($ltsTc) {
-      [void]$plan.Add([pscustomobject]@{
-        Label          = "node-lts-$($ltsTc.Major)"
-        Toolchain      = $ltsTc
-        Registry       = $PrimaryRegistry
-        MaxSockets     = 1
-        OpenSslIa32Cap = ''
-        NodeOptions    = ''
-        StatusMessage  = "Phát hiện lỗi giải mã TLS/OpenSSL — đang thử lại với Node $($ltsTc.Version) LTS và giảm kết nối đồng thời..."
-      })
-    }
+    $ltsNote = if ($ltsTc) { " + Node $($ltsTc.Version) LTS" } else { '' }
     [void]$plan.Add([pscustomobject]@{
-      Label          = 'ia32cap-maxsockets1'
-      Toolchain      = $primaryTc
-      Registry       = $PrimaryRegistry
-      MaxSockets     = 1
-      OpenSslIa32Cap = '~0x200000200000000'
-      NodeOptions    = ''
-      StatusMessage  = 'Đang thử lại OpenClaw với OPENSSL_ia32cap (~0x200000200000000) và maxsockets=1...'
+      Label             = 'tls-single-retry-schannel'
+      Toolchain         = $retryToolchain
+      Registry          = $PrimaryRegistry
+      FallbackRegistry  = $FallbackRegistry
+      MaxSockets        = 1
+      FetchRetries      = 3
+      OpenSslIa32Cap    = '~0x200000200000000'
+      NodeOptions       = $chaChaStrict
+      UseSChannelBridge = $true
+      StatusMessage     = "Lỗi giải mã TLS/OpenSSL — đang thử lại 1 lần duy nhất qua cầu nối HTTPS Windows SChannel$ltsNote (TLS 1.2 / ChaCha20, maxsockets=1)..."
     })
-    [void]$plan.Add([pscustomobject]@{
-      Label          = 'ia32cap-tls12'
-      Toolchain      = $primaryTc
-      Registry       = $PrimaryRegistry
-      MaxSockets     = 1
-      OpenSslIa32Cap = '~0x200000200000000'
-      NodeOptions    = '--tls-max-v1.2'
-      StatusMessage  = 'Đang thử lại OpenClaw với chế độ TLS 1.2 (--tls-max-v1.2) và bộ nhớ đệm riêng mới...'
-    })
-    [void]$plan.Add([pscustomobject]@{
-      Label          = 'ia32cap-tls12-chacha20'
-      Toolchain      = $primaryTc
-      Registry       = $PrimaryRegistry
-      MaxSockets     = 1
-      OpenSslIa32Cap = '~0x200000200000000'
-      NodeOptions    = $chaChaStrict
-      StatusMessage  = 'Đang thử lại OpenClaw với cipher ChaCha20 (TLS 1.2, loại trừ AES-GCM)...'
-    })
-    if ($ltsTc) {
-      [void]$plan.Add([pscustomobject]@{
-        Label          = "node-lts-$($ltsTc.Major)-tls12-chacha20"
-        Toolchain      = $ltsTc
-        Registry       = $PrimaryRegistry
-        MaxSockets     = 1
-        OpenSslIa32Cap = '~0x200000200000000'
-        NodeOptions    = $chaChaStrict
-        StatusMessage  = "Đang thử lại với Node $($ltsTc.Version) LTS cùng TLS 1.2 / ChaCha20..."
-      })
-    }
-    if (-not [string]::IsNullOrWhiteSpace($FallbackRegistry)) {
-      $fbTc = if ($ltsTc) { $ltsTc } else { $primaryTc }
-      [void]$plan.Add([pscustomobject]@{
-        Label          = 'fallback-registry-scalar-tls12-chacha20'
-        Toolchain      = $fbTc
-        Registry       = $FallbackRegistry
-        MaxSockets     = 1
-        OpenSslIa32Cap = '0:0'
-        NodeOptions    = $chaChaStrict
-        StatusMessage  = 'Đang chuyển sang máy chủ npm dự phòng với chế độ bảo toàn toàn vẹn và TLS 1.2 / ChaCha20...'
-      })
-    }
   } else {
     [void]$plan.Add([pscustomobject]@{
-      Label          = 'retry-maxsockets1'
-      Toolchain      = $primaryTc
-      Registry       = $PrimaryRegistry
-      MaxSockets     = 1
-      OpenSslIa32Cap = ''
-      NodeOptions    = ''
-      StatusMessage  = 'Kết nối tải gói OpenClaw tạm gián đoạn — đang tự động thử lại (maxsockets=1)...'
-    })
-    if (-not [string]::IsNullOrWhiteSpace($FallbackRegistry)) {
-      [void]$plan.Add([pscustomobject]@{
-        Label          = 'fallback-registry-tls12'
-        Toolchain      = $primaryTc
-        Registry       = $FallbackRegistry
-        MaxSockets     = 1
-        OpenSslIa32Cap = '~0x200000200000000'
-        NodeOptions    = '--tls-max-v1.2'
-        StatusMessage  = 'Đang chuyển sang máy chủ npm dự phòng với chế độ TLS 1.2...'
-      })
-    }
-    [void]$plan.Add([pscustomobject]@{
-      Label          = 'scalar-tls12-chacha20'
-      Toolchain      = $primaryTc
-      Registry       = $PrimaryRegistry
-      MaxSockets     = 1
-      OpenSslIa32Cap = '0:0'
-      NodeOptions    = $chaChaStrict
-      StatusMessage  = 'Đang thử lại tải gói OpenClaw với chế độ TLS 1.2 / ChaCha20...'
+      Label             = 'single-retry-schannel'
+      Toolchain         = $retryToolchain
+      Registry          = $PrimaryRegistry
+      FallbackRegistry  = $FallbackRegistry
+      MaxSockets        = 1
+      FetchRetries      = 3
+      OpenSslIa32Cap    = ''
+      NodeOptions       = ''
+      UseSChannelBridge = $true
+      StatusMessage     = 'Tải gói OpenClaw tạm gián đoạn — đang thử lại 1 lần qua cầu nối HTTPS Windows SChannel (maxsockets=1)...'
     })
   }
   return $plan.ToArray()
@@ -696,13 +1258,23 @@ function Invoke-EmTroLyNpmPackageWithTlsRetry {
   }
 
   $firstStep = [pscustomobject]@{
-    Label          = 'primary-default'
-    Toolchain      = $toolchains.Primary
-    Registry       = $PrimaryRegistry
-    MaxSockets     = $initialSockets
-    OpenSslIa32Cap = ''
-    NodeOptions    = ''
-    StatusMessage  = ''
+    Label             = 'primary-default'
+    Toolchain         = $toolchains.Primary
+    Registry          = $PrimaryRegistry
+    FallbackRegistry  = ''
+    MaxSockets        = $initialSockets
+    FetchRetries      = 2
+    OpenSslIa32Cap    = ''
+    NodeOptions       = ''
+    UseSChannelBridge = $false
+    StatusMessage     = ''
+  }
+
+  $allowedBridgeHosts = @()
+  foreach ($rUri in @($PrimaryRegistry, $FallbackRegistry)) {
+    if (-not [string]::IsNullOrWhiteSpace($rUri)) {
+      try { $allowedBridgeHosts += ([uri]$rUri).Host } catch { }
+    }
   }
 
   $queue = New-Object System.Collections.Generic.List[object]
@@ -737,6 +1309,9 @@ function Invoke-EmTroLyNpmPackageWithTlsRetry {
       $attemptLog = Join-Path $LogsDir ("$LogFilePrefix-attempt-$attemptIndex.log")
       [void]$attemptLogs.Add($attemptLog)
 
+      $stepFetchRetries = if ($step.PSObject.Properties['FetchRetries'] -and $step.FetchRetries) { [int]$step.FetchRetries } else { 5 }
+      $stepUseBridge = ($step.PSObject.Properties['UseSChannelBridge'] -and [bool]$step.UseSChannelBridge)
+      $stepFallbackReg = if ($step.PSObject.Properties['FallbackRegistry'] -and $step.FallbackRegistry) { [string]$step.FallbackRegistry } else { '' }
       $npmArgs = @('install', '--prefix', $PrefixDir) + $Packages + @('--no-audit', '--no-fund', '--loglevel=error') + $ExtraNpmFlags
       $res = Invoke-EmTroLyNpmAttempt `
         -NodeExe $step.Toolchain.NodeExe `
@@ -748,13 +1323,17 @@ function Invoke-EmTroLyNpmPackageWithTlsRetry {
         -NpmCacheDir $attemptCache `
         -NpmrcPath $isolatedNpmrc `
         -RegistryUrl $step.Registry `
+        -FallbackRegistryUrl $stepFallbackReg `
         -MaxSockets $step.MaxSockets `
+        -FetchRetries $stepFetchRetries `
         -NodeOptions $step.NodeOptions `
         -OpenSslIa32Cap $step.OpenSslIa32Cap `
         -AttemptLabel $step.Label `
         -AttemptNumber $attemptIndex `
         -RuntimeCleanupDir $PrefixDir `
-        -SecretsToRedact $SecretsToRedact
+        -SecretsToRedact $SecretsToRedact `
+        -UseSChannelBridge:$stepUseBridge `
+        -AllowedBridgeHosts $allowedBridgeHosts
 
       [void]$attempts.Add($res)
 

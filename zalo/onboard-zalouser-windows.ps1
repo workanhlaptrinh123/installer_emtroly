@@ -146,14 +146,15 @@ if (-not $pluginInfo) {
     $chaChaStrictZ = '--tls-max-v1.2 --tls-cipher-list=ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA384:DHE-RSA-CHACHA20-POLY1305:!AESGCM:!GCM'
 
     $zaloAttempts = New-Object System.Collections.Generic.List[object]
-    [void]$zaloAttempts.Add([pscustomobject]@{ NodeExe=$node; Registry='https://registry.npmjs.org/'; MaxSockets='2'; Ia32=''; NodeOpts='' })
-    if ($ltsZNode) {
-      [void]$zaloAttempts.Add([pscustomobject]@{ NodeExe=$ltsZNode; Registry='https://registry.npmjs.org/'; MaxSockets='1'; Ia32=''; NodeOpts='' })
-    }
-    [void]$zaloAttempts.Add([pscustomobject]@{ NodeExe=$node; Registry='https://registry.npmjs.org/'; MaxSockets='1'; Ia32='~0x200000200000000'; NodeOpts='' })
-    [void]$zaloAttempts.Add([pscustomobject]@{ NodeExe=$node; Registry='https://registry.npmjs.org/'; MaxSockets='1'; Ia32='~0x200000200000000'; NodeOpts='--tls-max-v1.2' })
-    [void]$zaloAttempts.Add([pscustomobject]@{ NodeExe=$node; Registry='https://registry.npmjs.org/'; MaxSockets='1'; Ia32='~0x200000200000000'; NodeOpts=$chaChaStrictZ })
-    [void]$zaloAttempts.Add([pscustomobject]@{ NodeExe=$(if ($ltsZNode) { $ltsZNode } else { $node }); Registry='https://registry.npmmirror.com/'; MaxSockets='1'; Ia32='0:0'; NodeOpts=$chaChaStrictZ })
+    [void]$zaloAttempts.Add([pscustomobject]@{ NodeExe=$node; Registry='https://registry.npmjs.org/'; MaxSockets='2'; Ia32=''; NodeOpts=''; Bridge=$false })
+    [void]$zaloAttempts.Add([pscustomobject]@{
+      NodeExe    = $(if ($ltsZNode) { $ltsZNode } else { $node })
+      Registry   = 'https://registry.npmjs.org/'
+      MaxSockets = '1'
+      Ia32       = '~0x200000200000000'
+      NodeOpts   = $chaChaStrictZ
+      Bridge     = [bool](Get-Command -Name 'Start-EmTroLyNpmSChannelBridge' -ErrorAction SilentlyContinue)
+    })
 
     $installResult = $null
     for ($zIdx = 0; $zIdx -lt $zaloAttempts.Count; $zIdx++) {
@@ -162,12 +163,28 @@ if (-not $pluginInfo) {
       $zAttemptCache = Join-Path $zaloCacheRoot ("attempt-$zTry")
       [void][IO.Directory]::CreateDirectory($zAttemptCache)
       $env:NPM_CONFIG_CACHE = $zAttemptCache
-      $env:NPM_CONFIG_REGISTRY = $zStep.Registry
-      $env:NPM_CONFIG_MAXSOCKETS = $zStep.MaxSockets
-      if ($zStep.Ia32) { $env:OPENSSL_ia32cap = $zStep.Ia32 } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
-      if ($zStep.NodeOpts) { $env:NODE_OPTIONS = $zStep.NodeOpts } elseif (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
+      $zBridge = $null
+      $zEffectiveRegistry = $zStep.Registry
+      if ($zStep.Bridge) {
+        $zBridge = Start-EmTroLyNpmSChannelBridge -UpstreamRegistryUrl $zStep.Registry -FallbackRegistryUrl 'https://registry.npmmirror.com/' -AllowedHosts @('registry.npmjs.org', 'registry.npmmirror.com', 'cdn.npmmirror.com')
+        if ($zBridge) {
+          $zEffectiveRegistry = $zBridge.ProxyUrl
+        } else {
+          $zEffectiveRegistry = 'https://registry.npmmirror.com/'
+        }
+      } elseif ($zTry -ge 2) {
+        $zEffectiveRegistry = 'https://registry.npmmirror.com/'
+      }
+      try {
+        $env:NPM_CONFIG_REGISTRY = $zEffectiveRegistry
+        $env:NPM_CONFIG_MAXSOCKETS = $zStep.MaxSockets
+        if ($zStep.Ia32) { $env:OPENSSL_ia32cap = $zStep.Ia32 } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
+        if ($zStep.NodeOpts) { $env:NODE_OPTIONS = $zStep.NodeOpts } elseif (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
 
-      $installResult = Invoke-ZaloPluginCli -Node $zStep.NodeExe -CliEntry $env:OPENCLAW_CLI_ENTRY -Arguments @('plugins', 'install', '--pin', "@openclaw/zalouser@$coreVersion")
+        $installResult = Invoke-ZaloPluginCli -Node $zStep.NodeExe -CliEntry $env:OPENCLAW_CLI_ENTRY -Arguments @('plugins', 'install', '--pin', "@openclaw/zalouser@$coreVersion")
+      } finally {
+        if ($zBridge) { try { $zBridge.Dispose() } catch { } }
+      }
       if ($installResult.ExitCode -eq 0) { break }
       $pluginInfo = Get-ZaloPluginInfo -Node $node -CliEntry $env:OPENCLAW_CLI_ENTRY
       if ($pluginInfo) { break }
@@ -176,7 +193,7 @@ if (-not $pluginInfo) {
         Remove-Item -LiteralPath $zAttemptCache -Recurse -Force -ErrorAction SilentlyContinue
       }
       if ($zTry -lt $zaloAttempts.Count) {
-        $zDelayMs = if ($env:EMTROLY_NPM_RETRY_DELAY_MS -match '^[0-9]+$') { [int]$env:EMTROLY_NPM_RETRY_DELAY_MS } else { ([Math]::Min(4, $zTry) * 1000) }
+        $zDelayMs = if ($env:EMTROLY_NPM_RETRY_DELAY_MS -match '^[0-9]+$') { [int]$env:EMTROLY_NPM_RETRY_DELAY_MS } else { ([Math]::Min(2, $zTry) * 1000) }
         if ($zDelayMs -gt 0) { Start-Sleep -Milliseconds $zDelayMs }
       }
     }
