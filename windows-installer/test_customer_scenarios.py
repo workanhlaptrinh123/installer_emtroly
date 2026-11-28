@@ -626,8 +626,9 @@ class WindowsCustomerScenarioTests(unittest.TestCase):
         port = server.server_address[1]
         t = threading.Thread(target=server.serve_forever, daemon=True)
         t.start()
+        td = tempfile.mkdtemp(prefix="emtroly-mod-win-")
         try:
-            with tempfile.TemporaryDirectory(prefix="emtroly-mod-win-") as td:
+            if True:
                 temp = Path(td)
                 home = temp / "home"
                 local = temp / "local"
@@ -734,6 +735,11 @@ class WindowsCustomerScenarioTests(unittest.TestCase):
         finally:
             server.shutdown()
             server.server_close()
+            for _ in range(6):
+                shutil.rmtree(td, ignore_errors=True)
+                if not os.path.exists(td):
+                    break
+                time.sleep(0.25)
 
     def test_factory_reset_wipes_all_emtroly_state_and_returns_ui_to_brand_new_user(self):
         with tempfile.TemporaryDirectory(prefix="emtroly-factory-reset-") as td:

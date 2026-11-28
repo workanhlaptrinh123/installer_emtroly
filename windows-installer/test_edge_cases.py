@@ -2346,8 +2346,9 @@ class Step3CleanPcAndFailureUiTests(unittest.TestCase):
         port = server.server_address[1]
         t = threading.Thread(target=server.serve_forever, daemon=True)
         t.start()
+        td = tempfile.mkdtemp(prefix="emtroly-latest-skip-")
         try:
-            with tempfile.TemporaryDirectory(prefix="emtroly-latest-skip-", ignore_cleanup_errors=True) as td:
+            if True:
                 root = Path(td)
                 home = root / "home"
                 local = root / "local"
@@ -2518,6 +2519,12 @@ class Step3CleanPcAndFailureUiTests(unittest.TestCase):
         finally:
             server.shutdown()
             server.server_close()
+            import time as _time
+            for _ in range(6):
+                shutil.rmtree(td, ignore_errors=True)
+                if not os.path.exists(td):
+                    break
+                _time.sleep(0.25)
 
 
 if __name__ == "__main__":

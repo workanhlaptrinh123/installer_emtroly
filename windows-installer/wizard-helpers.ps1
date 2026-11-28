@@ -767,54 +767,17 @@ function Install-EmTroLyAppShortcut {
   [void][IO.Directory]::CreateDirectory($emWinDir)
 
   if ($PayloadRoot -and (Test-Path -LiteralPath $PayloadRoot -PathType Container)) {
-    $isSameUiRoot = $false
-    try {
-      $isSameUiRoot = ([IO.Path]::GetFullPath($PayloadRoot).TrimEnd('\') -ieq [IO.Path]::GetFullPath($emUiDir).TrimEnd('\'))
-    } catch { }
-    if (-not $isSameUiRoot) {
-      $utf8Bom = New-Object System.Text.UTF8Encoding($true)
-      foreach ($name in @(
-        'wizard.ps1', 'wizard-helpers.ps1', 'codex-cli.ps1', 'auto-heal-codex.ps1',
-        'manage-instance.ps1', 'validation.ps1', 'repair-antigravity-shortcut.ps1',
-        'install-antigravity-codex.ps1', 'run-native-install.ps1', 'verify-openclaw-command.ps1'
-      )) {
-        $srcFile = Join-Path $PayloadRoot ('windows-installer\' + $name)
-        if (Test-Path -LiteralPath $srcFile -PathType Leaf) {
-          $txt = [IO.File]::ReadAllText($srcFile, [System.Text.Encoding]::UTF8)
-          [IO.File]::WriteAllText((Join-Path $emWinDir $name), $txt, $utf8Bom)
-        }
+    if (-not (Get-Command -Name 'Sync-EmTroLyUiPayload' -ErrorAction Ignore)) {
+      $codexCliCandidate = Join-Path $PayloadRoot 'windows-installer\codex-cli.ps1'
+      if (-not (Test-Path -LiteralPath $codexCliCandidate -PathType Leaf) -and $PSScriptRoot) {
+        $codexCliCandidate = Join-Path $PSScriptRoot 'codex-cli.ps1'
       }
-      foreach ($assetName in @('zalo-qr-session.mjs', 'alt.ico', 'launch-wizard.vbs')) {
-        $assetSrc = Join-Path $PayloadRoot ('windows-installer\' + $assetName)
-        if (Test-Path -LiteralPath $assetSrc -PathType Leaf) {
-          Copy-Item -LiteralPath $assetSrc -Destination (Join-Path $emWinDir $assetName) -Force
-        }
+      if (Test-Path -LiteralPath $codexCliCandidate -PathType Leaf) {
+        . ([ScriptBlock]::Create([IO.File]::ReadAllText($codexCliCandidate, [System.Text.Encoding]::UTF8)))
       }
-      $probeSrcDir = Join-Path $PayloadRoot 'windows-installer\activation-probe'
-      if (Test-Path -LiteralPath $probeSrcDir -PathType Container) {
-        $probeDstDir = Join-Path $emWinDir 'activation-probe'
-        [void][IO.Directory]::CreateDirectory($probeDstDir)
-        Copy-Item -Path (Join-Path $probeSrcDir '*') -Destination $probeDstDir -Recurse -Force
-      }
-      foreach ($rootFile in @('alt.png', 'MANIFEST.txt', 'configure.py')) {
-        $srcRoot = Join-Path $PayloadRoot $rootFile
-        if (Test-Path -LiteralPath $srcRoot -PathType Leaf) {
-          Copy-Item -LiteralPath $srcRoot -Destination (Join-Path $emUiDir $rootFile) -Force
-        }
-      }
-      $nativePsSrc = Join-Path $PayloadRoot 'install-native-windows.ps1'
-      if (Test-Path -LiteralPath $nativePsSrc -PathType Leaf) {
-        $nativePsTxt = [IO.File]::ReadAllText($nativePsSrc, [System.Text.Encoding]::UTF8)
-        [IO.File]::WriteAllText((Join-Path $emUiDir 'install-native-windows.ps1'), $nativePsTxt, $utf8Bom)
-      }
-      foreach ($subFolder in @('native', 'modules', 'profiles', 'zalo')) {
-        $subSrc = Join-Path $PayloadRoot $subFolder
-        if (Test-Path -LiteralPath $subSrc -PathType Container) {
-          $subDst = Join-Path $emUiDir $subFolder
-          [void][IO.Directory]::CreateDirectory($subDst)
-          Copy-Item -Path (Join-Path $subSrc '*') -Destination $subDst -Recurse -Force
-        }
-      }
+    }
+    if (Get-Command -Name 'Sync-EmTroLyUiPayload' -ErrorAction Ignore) {
+      Sync-EmTroLyUiPayload -PayloadRoot $PayloadRoot -UiDir $emUiDir
     }
   }
 

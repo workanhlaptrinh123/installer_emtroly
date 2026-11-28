@@ -1148,6 +1148,7 @@ requires_openai_auth = true
         }
         if ($createdRootInThisRun -and -not (Test-Path -LiteralPath (Join-Path $root 'openclaw.json') -PathType Leaf)) {
           Remove-IncompleteOpenClawDirectory -DirPath $root
+          try { [void][IO.Directory]::CreateDirectory($root) } catch { }
         }
         $healTimeout = if ($coreErr -eq 'Private OpenClaw installation failed.' -and $captureDetail -match 'ERR_SSL_|ossl_gcm_stream_update|schannel-bridge') { 90 } else { 300 }
         $healResult = $null
@@ -1211,6 +1212,9 @@ requires_openai_auth = true
         }
       }
       if (-not $healedCore) {
+        if ($createdRootInThisRun -and -not (Test-Path -LiteralPath (Join-Path $root 'openclaw.json') -PathType Leaf)) {
+          Remove-IncompleteOpenClawDirectory -DirPath $root
+        }
         if ($primaryInstallerError -in @('Private OpenClaw installation failed.', 'openclaw-npm-verification-failed')) {
           $coreErr = $primaryInstallerError
         }

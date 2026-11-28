@@ -3892,6 +3892,40 @@ function Update-ModularCards {
   return $ms
 }
 
+function Test-ShouldSelfUpdateBeforeInstall {
+  if ($SmokeTest -or $env:EMTROLY_DISABLE_AUTO_UPDATE_CHECK -eq '1' -or -not [string]::IsNullOrEmpty($env:TEST_MODE)) {
+    return $false
+  }
+  if ($script:appUpdateDownloading -or $script:preInstallUpdateDeclined) {
+    return $false
+  }
+  if ($null -eq $script:latestUpdateInfo -and (Get-Command Get-EmTroLyAppUpdateInfo -ErrorAction SilentlyContinue)) {
+    try {
+      $quickUpd = Get-EmTroLyAppUpdateInfo -PayloadRoot $PayloadRoot -CurrentVersion ([string]$appVersionObj.InstallerVersion)
+      if ($quickUpd -and $quickUpd.Ok) {
+        $script:latestUpdateInfo = $quickUpd
+      }
+    } catch { }
+  }
+  if ($script:latestUpdateInfo -and $script:latestUpdateInfo.HasUpdate) {
+    $updNow = $script:latestUpdateInfo
+    $askLatest = [System.Windows.MessageBox]::Show(
+      $window,
+      "Đã có phiên bản mới Em Trợ Lý v$($updNow.LatestVersion) trên GitHub (phiên bản đang mở: v$($updNow.CurrentVersion)) bao gồm các bản vá lỗi cài đặt mới nhất.`n`nBạn có muốn tự động tải về và nâng cấp lên bản mới nhất trước khi cài đặt để tránh lỗi cũ lặp lại không? (Khuyên dùng)",
+      "Khuyến nghị cập nhật lên v$($updNow.LatestVersion) trước khi cài",
+      [System.Windows.MessageBoxButton]::YesNo,
+      [System.Windows.MessageBoxImage]::Information
+    )
+    if ($askLatest -eq [System.Windows.MessageBoxResult]::Yes) {
+      if (-not $script:isManageMode) { Save-CurrentFormDraft }
+      Start-AppSelfUpdate
+      return $true
+    }
+    $script:preInstallUpdateDeclined = $true
+  }
+  return $false
+}
+
 function Start-ModularInstall([string[]]$SelectedList, [switch]$ForceReinstall) {
   if (-not $script:licenseVerified -and -not $SmokeTest) {
     Show-LicenseGate 'Vui lòng kích hoạt bản quyền trước khi cài đặt thành phần.'
@@ -3907,6 +3941,9 @@ function Start-ModularInstall([string[]]$SelectedList, [switch]$ForceReinstall) 
   $msNow = Update-ModularCards
   if ($cleanSelected.Count -eq 1 -and $cleanSelected[0] -eq 'openclaw' -and $msNow -and $msNow.OpenClawInstalled) {
     Start-ManageAction 'upgrade-openclaw' -Origin 'modular'
+    return
+  }
+  if ('openclaw' -in $cleanSelected -and (Test-ShouldSelfUpdateBeforeInstall)) {
     return
   }
 
@@ -4690,6 +4727,7 @@ function Start-Install {
       return
     }
   } else {
+    if (Test-ShouldSelfUpdateBeforeInstall) { return }
     if (-not $SmokeTest) { Save-CurrentFormDraft }
     if (-not (Test-FormInputs -ForManageConfig $false)) { return }
     if (-not $SmokeTest) { Save-CurrentFormDraft }
