@@ -149,21 +149,30 @@ function Get-VerifiedDownload([string]$Url, [string]$Path, [string]$Hash) {
       $curlExe = Join-Path $env:SystemRoot 'System32\curl.exe'
       if (-not $useLegacy -and (Test-Path -LiteralPath $curlExe -PathType Leaf)) {
         try {
-          if ((Get-Command Write-EditorStatus -ErrorAction SilentlyContinue) -and $StatusFile) {
-            try { Write-EditorStatus "Kết nối tải $label bị gián đoạn — đang tải nối tiếp bằng TLS 1.2..." } catch { }
-          }
-          & $curlExe --fail --location --http1.1 --tlsv1.2 --retry 2 --connect-timeout 30 --max-time 900 -A 'AnhLapTrinh-EmTroLy-Installer/1.0' -C - -o $partPath $Url *> $null
-          if ($LASTEXITCODE -ne 0) {
-            if (Test-Path -LiteralPath $partPath -PathType Leaf) { Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue }
-            & $curlExe --fail --location --http1.1 --tlsv1.2 --retry 2 --connect-timeout 30 --max-time 900 -A 'AnhLapTrinh-EmTroLy-Installer/1.0' -o $partPath $Url *> $null
-          }
-          if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $partPath -PathType Leaf)) {
-            if ((Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash -ieq $Hash) {
-              Move-Item -LiteralPath $partPath -Destination $Path -Force
-              $downloaded = $true
-              break
+          for ($hop = 1; $hop -le 6; $hop++) {
+            $curBytes = if (Test-Path -LiteralPath $partPath -PathType Leaf) { (Get-Item -LiteralPath $partPath).Length } else { 0L }
+            if ((Get-Command Write-EditorStatus -ErrorAction SilentlyContinue) -and $StatusFile) {
+              $mbHop = [Math]::Round($curBytes / 1MB, 1)
+              try { Write-EditorStatus "Kết nối tải $label bị gián đoạn — đang tải nối tiếp từ $mbHop MB (TLS 1.2, chặng $hop/6)..." } catch { }
             }
+            & $curlExe --fail --location --http1.1 --tlsv1.2 --retry 2 --connect-timeout 30 --max-time 600 -A 'AnhLapTrinh-EmTroLy-Installer/1.0' -C - -o $partPath $Url *> $null
+            if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $partPath -PathType Leaf)) {
+              if ((Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash -ieq $Hash) {
+                Move-Item -LiteralPath $partPath -Destination $Path -Force
+                $downloaded = $true
+                break
+              }
+              # Full file completed with wrong hash (corrupt bytes cached in part); reset part once
+              Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue
+              continue
+            }
+            $newBytes = if (Test-Path -LiteralPath $partPath -PathType Leaf) { (Get-Item -LiteralPath $partPath).Length } else { 0L }
+            if ($LASTEXITCODE -eq 33 -or $newBytes -lt $curBytes) {
+              if (Test-Path -LiteralPath $partPath -PathType Leaf) { Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue }
+            }
+            if ($hop -lt 6) { Start-Sleep -Milliseconds 600 }
           }
+          if ($downloaded) { break }
         } catch { }
       }
       if (Test-Path -LiteralPath $partPath -PathType Leaf) { Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue }

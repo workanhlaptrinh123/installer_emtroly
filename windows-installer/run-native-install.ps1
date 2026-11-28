@@ -1192,11 +1192,12 @@ requires_openai_auth = true
     'telegram-command-menu-not-registered' = 'Chưa xác nhận được /zaloqr và /zalostatus trong menu Telegram. Hãy kiểm tra kết nối Telegram; dữ liệu đã tạo được giữ nguyên.'
   }
   $message = if ($safeMessages.ContainsKey($code)) { $safeMessages[$code] } else { "Chưa hoàn tất bước $stage. Dữ liệu đã tạo được giữ nguyên." }
-  if ($code -eq 'Private OpenClaw installation failed.' -and $lastTechnicalDetail -match 'ERR_SSL_CIPHER_OPERATION_FAILED|ossl_gcm_stream_update|ciphercommon_gcm|decryption operation failed') {
-    $message = 'Không cài được OpenClaw do kết nối mạng hoặc phần mềm diệt virus đang làm sai lệch giải mã HTTPS/TLS (ERR_SSL_CIPHER_OPERATION_FAILED). Hãy tạm tắt tính năng quét HTTPS/SSL trong Antivirus/VPN hoặc đổi mạng ổn định rồi thử lại.'
+  if ($code -eq 'Private OpenClaw installation failed.' -and $lastTechnicalDetail -match 'ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC|ERR_SSL_CIPHER_OPERATION_FAILED|ossl_gcm_stream_update|ciphercommon_gcm|decryption failed or bad record mac|decryption operation failed') {
+    $sslErrTag = if ($lastTechnicalDetail -match 'ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC') { 'ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC' } else { 'ERR_SSL_CIPHER_OPERATION_FAILED' }
+    $message = "Không tải được gói OpenClaw do đường truyền/card mạng hoặc phần mềm diệt virus trên máy đang làm hỏng gói mã hóa HTTPS/TLS ($sslErrTag). Khuyến nghị: 1) Tắt tạm tính năng quét HTTPS/SSL trong Antivirus/VPN; 2) Thử phát Wi-Fi/4G từ điện thoại hoặc đổi mạng khác; 3) Nếu dùng mạng dây/Wi-Fi trên máy, tắt Checksum Offload / Large Send Offload trong cài đặt Card mạng rồi thử lại."
   }
   if ($safeMessages.ContainsKey($code) -and $code -cmatch '^[a-z0-9-]+$') { $message += " Mã chẩn đoán: $code." }
-  if (-not [string]::IsNullOrWhiteSpace($lastAutoHealSummary)) {
+  if (-not [string]::IsNullOrWhiteSpace($lastAutoHealSummary) -and $lastAutoHealSummary.Trim() -cne 'The system cannot find the path specified.') {
     $message += " Ghi chú từ Codex tự sửa lỗi: $lastAutoHealSummary"
   }
   if ($stage -eq 'install' -and (Test-Path -LiteralPath $zaloStageFile)) {

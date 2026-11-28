@@ -335,18 +335,26 @@ requires_openai_auth = true
             $curlFallback = Join-Path $env:SystemRoot 'System32\curl.exe'
             if ((Test-Path -LiteralPath $curlFallback -PathType Leaf) -and $extensionUrl -match '^https://') {
               try {
-                & $writeMsg 'Kết nối tải bị gián đoạn — đang dùng chế độ tải nối tiếp TLS 1.2 (Codex VSIX)...'
-                & $curlFallback --fail --location --http1.1 --tlsv1.2 --retry 2 --connect-timeout 30 --max-time 900 -A 'AnhLapTrinh-EmTroLy-Installer/1.0' -C - -o $tmpVsix $extensionUrl *> $null
-                if ($LASTEXITCODE -ne 0) {
-                  if (Test-Path -LiteralPath $tmpVsix -PathType Leaf) { Remove-Item -LiteralPath $tmpVsix -Force -ErrorAction SilentlyContinue }
-                  & $curlFallback --fail --location --http1.1 --tlsv1.2 --retry 2 --connect-timeout 30 --max-time 900 -A 'AnhLapTrinh-EmTroLy-Installer/1.0' -o $tmpVsix $extensionUrl *> $null
+                for ($hop = 1; $hop -le 6; $hop++) {
+                  $curVBytes = if (Test-Path -LiteralPath $tmpVsix -PathType Leaf) { (Get-Item -LiteralPath $tmpVsix).Length } else { 0L }
+                  $mbVHop = [Math]::Round($curVBytes / 1MB, 1)
+                  & $writeMsg "Kết nối tải bị gián đoạn — đang tải nối tiếp Codex VSIX từ $mbVHop MB (TLS 1.2, chặng $hop/6)..."
+                  & $curlFallback --fail --location --http1.1 --tlsv1.2 --retry 2 --connect-timeout 30 --max-time 600 -A 'AnhLapTrinh-EmTroLy-Installer/1.0' -C - -o $tmpVsix $extensionUrl *> $null
+                  if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $tmpVsix -PathType Leaf)) {
+                    if ((Get-FileHash -LiteralPath $tmpVsix -Algorithm SHA256).Hash -ieq $extensionHash) {
+                      Move-Item -LiteralPath $tmpVsix -Destination $cachedVsix -Force
+                      $vsixReady = $true
+                      break
+                    }
+                    Remove-Item -LiteralPath $tmpVsix -Force -ErrorAction SilentlyContinue
+                    continue
+                  }
+                  if ($LASTEXITCODE -eq 33) {
+                    if (Test-Path -LiteralPath $tmpVsix -PathType Leaf) { Remove-Item -LiteralPath $tmpVsix -Force -ErrorAction SilentlyContinue }
+                  }
+                  if ($hop -lt 6) { Start-Sleep -Milliseconds 600 }
                 }
-                if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $tmpVsix -PathType Leaf) -and
-                    ((Get-FileHash -LiteralPath $tmpVsix -Algorithm SHA256).Hash -ieq $extensionHash)) {
-                  Move-Item -LiteralPath $tmpVsix -Destination $cachedVsix -Force
-                  $vsixReady = $true
-                  break
-                }
+                if ($vsixReady) { break }
               } catch { }
             }
             if ($dlTry -lt 3) { Start-Sleep -Seconds (2 * $dlTry) }
