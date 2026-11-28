@@ -2277,6 +2277,248 @@ class Step3CleanPcAndFailureUiTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
+    @unittest.skipUnless(SHELL and os.name == "nt", "Requires Windows PowerShell")
+    def test_codex_cli_and_extension_skip_download_when_latest_and_upgrade_when_older(self):
+        import http.server
+        import io
+        import threading
+        import zipfile
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("extension/package.json", '{"publisher":"openai","name":"chatgpt","version":"26.51120.50957"}')
+            zf.writestr("extension/bin/windows-x86_64/codex.exe", b"MZ_FAKE_CODEX_2651120")
+        vsix_bytes = buf.getvalue()
+        vsix_sha256 = hashlib.sha256(vsix_bytes).hexdigest()
+        counts = {"meta": 0, "vsix": 0, "sha": 0}
+
+        class MockOpenVsxHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path.endswith("/latest"):
+                    counts["meta"] += 1
+                    body = json.dumps(
+                        {
+                            "version": "26.51120.50957",
+                            "files": {
+                                "download": f"http://127.0.0.1:{self.server.server_port}/openai.chatgpt-26.51120.50957@win32-x64.vsix",
+                                "sha256": f"http://127.0.0.1:{self.server.server_port}/openai.chatgpt-26.51120.50957@win32-x64.sha256",
+                            },
+                        }
+                    ).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                if self.path.endswith(".sha256"):
+                    counts["sha"] += 1
+                    body = (vsix_sha256 + "  openai.chatgpt-26.51120.50957@win32-x64.vsix\n").encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                if self.path.endswith(".vsix"):
+                    counts["vsix"] += 1
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/zip")
+                    self.send_header("Content-Length", str(len(vsix_bytes)))
+                    self.end_headers()
+                    self.wfile.write(vsix_bytes)
+                    return
+                if self.path.endswith("/v1/models"):
+                    body = json.dumps({"data": [{"id": "gpt-6.2-sol"}]}).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                self.send_response(404)
+                self.end_headers()
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), MockOpenVsxHandler)
+        port = server.server_address[1]
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        try:
+            with tempfile.TemporaryDirectory(prefix="emtroly-latest-skip-", ignore_cleanup_errors=True) as td:
+                root = Path(td)
+                home = root / "home"
+                local = root / "local"
+                temp_dir = root / "tmp"
+                desktop = home / "Desktop"
+                for d in (home, local, temp_dir, desktop):
+                    d.mkdir(parents=True, exist_ok=True)
+                codex_ps1 = ROOT / "windows-installer/codex-cli.ps1"
+                editor_ps1 = ROOT / "windows-installer/install-antigravity-codex.ps1"
+                status_file = root / "status.txt"
+
+                (home / ".codex").mkdir(parents=True, exist_ok=True)
+                (home / ".codex/config.toml").write_text(
+                    'model = "gpt-5"\n\n[projects.\'d:\\\\demo\']\ntrust_level = "trusted"\n\n[windows]\nsandbox = "elevated"\n',
+                    encoding="utf-8",
+                )
+                env = {
+                    **os.environ,
+                    "USERPROFILE": str(home),
+                    "LOCALAPPDATA": str(local),
+                    "TEMP": str(temp_dir),
+                    "EMTROLY_TEST_DESKTOP_DIR": str(desktop),
+                    "EMTROLY_CODEX_OPENVSX_URL": f"http://127.0.0.1:{port}/api/openai/chatgpt/win32-x64/latest",
+                    "EMTROLY_SKIP_AGY_CLI_PREFETCH": "1",
+                }
+
+                # 1. Fresh Install-EmTroLyCodexCliFirst downloads latest VSIX once & writes version sidecar + links ~/.codex
+                res1 = run_ps(
+                    "$ErrorActionPreference = 'Stop'\n"
+                    f". ([ScriptBlock]::Create([IO.File]::ReadAllText('{codex_ps1}', [Text.Encoding]::UTF8)))\n"
+                    "$s = [pscustomobject]@{ model='gpt-6.2-sol'; base_url='https://codex.anhlaptrinh.vn/v1'; ai_api_key='sk-test-latest'; skip_editor=$true }\n"
+                    f"$r1 = Install-EmTroLyCodexCliFirst -Settings $s -PayloadRoot '{ROOT}' -StatusFile '{status_file}' -ForceConfigUpdate -CheckLatestVersion\n"
+                    "if (-not $r1.Installed -or $r1.Skipped -or $r1.Version -ne '26.51120.50957') { throw ('unexpected-r1:' + ($r1 | ConvertTo-Json -Compress)) }\n"
+                    f"$r2 = Install-EmTroLyCodexCliFirst -Settings $s -PayloadRoot '{ROOT}' -StatusFile '{status_file}' -ForceConfigUpdate -CheckLatestVersion\n"
+                    "if (-not $r2.Installed -or -not $r2.Skipped -or -not $r2.UpToDate -or $r2.Version -ne '26.51120.50957') { throw ('unexpected-r2:' + ($r2 | ConvertTo-Json -Compress)) }\n"
+                    "Write-Output 'CODEX_CLI_LATEST_SKIP_OK'\n",
+                    env=env,
+                )
+                self.assertEqual(res1.returncode, 0, res1.stdout + res1.stderr)
+                self.assertIn("CODEX_CLI_LATEST_SKIP_OK", res1.stdout)
+                self.assertEqual(counts["vsix"], 1, f"Expected 1 VSIX download, got {counts}")
+                self.assertIn("phiên bản mới nhất", status_file.read_text(encoding="utf-8"))
+                user_codex_cfg = (home / ".codex/config.toml").read_text(encoding="utf-8")
+                self.assertIn('base_url = "https://codex.anhlaptrinh.vn/v1"', user_codex_cfg)
+                self.assertIn('model = "gpt-6.2-sol"', user_codex_cfg)
+                self.assertIn("[projects.'d:\\\\demo']", user_codex_cfg)
+                self.assertIn("[windows]", user_codex_cfg)
+                user_codex_auth = json.loads((home / ".codex/auth.json").read_text(encoding="utf-8"))
+                self.assertEqual(user_codex_auth["OPENAI_API_KEY"], "sk-test-latest")
+
+                # 2. Extension already at latest (26.51120.50957): install-antigravity-codex.ps1 must skip download & --install-extension
+                staged_ed = root / "install-antigravity-codex.ps1"
+                ed_src = editor_ps1.read_text(encoding="utf-8-sig").replace("([Environment]::GetFolderPath('Desktop'))", "$env:TEST_DESKTOP")
+                staged_ed.write_text(ed_src, encoding="utf-8-sig")
+                shutil.copytree(ROOT / "windows-installer/activation-probe", root / "activation-probe")
+
+                ide_dir = local / "Programs/EmTroLy-Antigravity-IDE-0123456789abcdef0123456789abcdef"
+                for d in (ide_dir / "bin", ide_dir / "resources/app"):
+                    d.mkdir(parents=True, exist_ok=True)
+                (ide_dir / "Antigravity IDE.exe").write_text("ide-bin", encoding="utf-8")
+                (ide_dir / "bin/antigravity-ide.cmd").write_text("@echo off", encoding="utf-8")
+                (ide_dir / "resources/app/product.json").write_text('{"applicationName":"antigravity-ide","version":"1.107.0","ideVersion":"2.7.0"}', encoding="utf-8")
+
+                em_base = local / "EmTroLy"
+                (em_base / "installer-job.txt").write_text("0123456789abcdef0123456789abcdef", encoding="utf-8")
+                (em_base / "editor-app-path.txt").write_text(str(ide_dir), encoding="utf-8")
+                ext_latest = em_base / "Antigravity/Extensions/openai.chatgpt-26.51120.50957/bin/windows-x86_64"
+                ext_latest.mkdir(parents=True, exist_ok=True)
+                (ext_latest.parent.parent / "package.json").write_text('{"publisher":"openai","name":"chatgpt","version":"26.51120.50957"}', encoding="utf-8")
+                (ext_latest / "codex.exe").write_text("codex-bin", encoding="utf-8")
+
+                env_ed = {**env, "TEST_DESKTOP": str(desktop), "EMTROLY_TEST_DESKTOP_DIR": str(desktop)}
+                res2 = run_ps(
+                    "$ErrorActionPreference = 'Stop'\n"
+                    "function global:Start-Process {\n"
+                    "  param($FilePath, $ArgumentList, $WindowStyle, [switch]$PassThru)\n"
+                    "  if ($FilePath -match 'antigravity-ide-setup\\.exe$') { throw 'should-not-download-ide' }\n"
+                    "  if ($FilePath -match 'cmd\\.exe$' -and $ArgumentList -match '--install-extension') { throw 'should-not-reinstall-latest-extension' }\n"
+                    "  if ($FilePath -match 'Antigravity IDE\\.exe$') { throw 'should-not-launch-activation-when-skipped' }\n"
+                    "  $p = [pscustomobject]@{ ExitCode = 0 }; $p | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { param($m) return $true }; return $p\n"
+                    "}\n"
+                    "$s = [pscustomobject]@{ job_id='0123456789abcdef0123456789abcdef'; model='gpt-6.2-sol'; base_url='https://codex.anhlaptrinh.vn/v1'; ai_api_key='sk-test-latest' }\n"
+                    f"& '{staged_ed}' -Settings $s -StatusFile '{status_file}' -AllowUpdateExisting\n"
+                    "Write-Output 'EXT_SKIP_LATEST_OK'\n",
+                    env=env_ed,
+                )
+                self.assertEqual(res2.returncode, 0, res2.stdout + res2.stderr)
+                self.assertIn("EXT_SKIP_LATEST_OK", res2.stdout)
+                self.assertEqual(counts["vsix"], 1, f"Extension already latest must NOT re-download VSIX: {counts}")
+                self.assertTrue((desktop / "EmTroLy - Antigravity.lnk").is_file())
+
+                # 3. Modular Update in run-native-install.ps1 skips all downloads when everything is already latest
+                staged_runner = root / "run-native-install.ps1"
+                runner_src = (ROOT / "windows-installer/run-native-install.ps1").read_text(encoding="utf-8-sig").replace(
+                    'Uri "$baseUrl/models"',
+                    f'Uri "http://127.0.0.1:{port}/v1/models"',
+                )
+                staged_runner.write_text(runner_src, encoding="utf-8-sig")
+                agy_dir = home / ".gemini/bin"
+                agy_dir.mkdir(parents=True, exist_ok=True)
+                (agy_dir / "agy.exe").write_text("agy-ready", encoding="utf-8")
+                (agy_dir / "agy.version.json").write_text('{"version":"1.5.19"}', encoding="utf-8")
+
+                mod_settings = root / "mod-update.json"
+                mod_settings.write_text(
+                    json.dumps(
+                        {
+                            "base_url": "https://codex.anhlaptrinh.vn/v1",
+                            "model": "gpt-6.2-sol",
+                            "ai_api_key": "sk-test-latest",
+                            "force_reinstall": True,
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                runner_res = subprocess.run(
+                    [
+                        SHELL, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                        "-File", str(staged_runner),
+                        "-SettingsFile", str(mod_settings),
+                        "-PayloadRoot", str(ROOT),
+                        "-LogFile", str(status_file),
+                        "-Components", "codex-cli,antigravity-ide,codex-extension",
+                    ],
+                    env={**env_ed, "TEST_MODE": "modular-unit"},
+                    capture_output=True,
+                    text=True,
+                    timeout=35,
+                )
+                status_text = status_file.read_text(encoding="utf-8") if status_file.exists() else ""
+                self.assertEqual(runner_res.returncode, 0, status_text + runner_res.stdout + runner_res.stderr)
+                self.assertIn("đã ở phiên bản mới nhất", status_text)
+                self.assertEqual(counts["vsix"], 1, f"Runner update should download 0 times when latest: {counts}")
+                self.assertTrue((home / ".antigravity-ide/extensions/openai.chatgpt-26.51120.50957-win32-x64/package.json").is_file())
+                self.assertTrue((home / ".antigravity-ide/extensions/extensions.json").is_file())
+
+                # 4. Downgrading installed extension to older 26.51111.21308 triggers VSIX download & cleanup of old dir
+                shutil.rmtree(em_base / "Antigravity/Extensions/openai.chatgpt-26.51120.50957")
+                ext_old = em_base / "Antigravity/Extensions/openai.chatgpt-26.51111.21308/bin/windows-x86_64"
+                ext_old.mkdir(parents=True, exist_ok=True)
+                (ext_old.parent.parent / "package.json").write_text('{"publisher":"openai","name":"chatgpt","version":"26.51111.21308"}', encoding="utf-8")
+                (ext_old / "codex.exe").write_text("old-codex", encoding="utf-8")
+
+                res4 = run_ps(
+                    "$ErrorActionPreference = 'Stop'\n"
+                    "function global:Start-Process {\n"
+                    "  param($FilePath, $ArgumentList, $WindowStyle, [switch]$PassThru)\n"
+                    "  if ($FilePath -match 'antigravity-ide-setup\\.exe$') { throw 'should-not-download-ide' }\n"
+                    "  if ($FilePath -match 'cmd\\.exe$' -and $ArgumentList -match '--install-extension') {\n"
+                    f"    $newExt = Join-Path $env:LOCALAPPDATA 'EmTroLy\\Antigravity\\Extensions\\openai.chatgpt-26.51120.50957'\n"
+                    "    [void](New-Item -ItemType Directory -Force -Path (Join-Path $newExt 'bin\\windows-x86_64'))\n"
+                    "    [IO.File]::WriteAllText((Join-Path $newExt 'package.json'), '{\"publisher\":\"openai\",\"name\":\"chatgpt\",\"version\":\"26.51120.50957\"}')\n"
+                    "    [IO.File]::WriteAllText((Join-Path $newExt 'bin\\windows-x86_64\\codex.exe'), 'upgraded-codex')\n"
+                    "  }\n"
+                    "  if ($FilePath -match 'Antigravity IDE\\.exe$') { [IO.File]::WriteAllText($env:EMTROLY_CODEX_ACTIVATION_MARKER, 'ok') }\n"
+                    "  $p = [pscustomobject]@{ ExitCode = 0 }; $p | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value { param($m) return $true }; return $p\n"
+                    "}\n"
+                    "$s = [pscustomobject]@{ job_id='0123456789abcdef0123456789abcdef'; model='gpt-6.2-sol'; base_url='https://codex.anhlaptrinh.vn/v1'; ai_api_key='sk-test-latest' }\n"
+                    f"& '{staged_ed}' -Settings $s -StatusFile '{status_file}' -AllowUpdateExisting\n"
+                    "Write-Output 'EXT_UPGRADE_OK'\n",
+                    env=env_ed,
+                )
+                self.assertEqual(res4.returncode, 0, res4.stdout + res4.stderr)
+                self.assertIn("EXT_UPGRADE_OK", res4.stdout)
+                self.assertEqual(counts["vsix"], 2)
+                self.assertFalse((em_base / "Antigravity/Extensions/openai.chatgpt-26.51111.21308").exists())
+                self.assertTrue((em_base / "Antigravity/Extensions/openai.chatgpt-26.51120.50957/package.json").is_file())
+        finally:
+            server.shutdown()
+            server.server_close()
+
 
 if __name__ == "__main__":
     unittest.main()

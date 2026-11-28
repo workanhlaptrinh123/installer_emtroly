@@ -67,6 +67,177 @@ function Get-CodexDefaultWorkspace {
   return (Get-Location).Path
 }
 
+function Compare-EmTroLySemVer {
+  param(
+    [string]$Current = '',
+    [string]$Target = ''
+  )
+  $splitVer = {
+    param([string]$Raw)
+    $clean = ([string]$Raw).Trim().TrimStart('v', 'V')
+    $noBuild = ($clean -split '\+')[0]
+    $dashIdx = $noBuild.IndexOf('-')
+    $mainStr = if ($dashIdx -ge 0) { $noBuild.Substring(0, $dashIdx) } else { $noBuild }
+    $preStr = if ($dashIdx -ge 0) { $noBuild.Substring($dashIdx + 1) } else { '' }
+    $nums = @()
+    foreach ($seg in @($mainStr -split '\.')) {
+      $v = 0
+      if ([int]::TryParse($seg, [ref]$v)) { $nums += $v } else { $nums += 0 }
+    }
+    while ($nums.Count -lt 3) { $nums += 0 }
+    return [pscustomobject]@{ Nums = $nums; Pre = $preStr }
+  }
+  $a = & $splitVer $Current
+  $b = & $splitVer $Target
+  $maxLen = [Math]::Max($a.Nums.Count, $b.Nums.Count)
+  for ($i = 0; $i -lt $maxLen; $i++) {
+    $av = if ($i -lt $a.Nums.Count) { [int]$a.Nums[$i] } else { 0 }
+    $bv = if ($i -lt $b.Nums.Count) { [int]$b.Nums[$i] } else { 0 }
+    if ($av -lt $bv) { return -1 }
+    if ($av -gt $bv) { return 1 }
+  }
+  if ([string]::IsNullOrWhiteSpace($a.Pre) -and -not [string]::IsNullOrWhiteSpace($b.Pre)) { return 1 }
+  if (-not [string]::IsNullOrWhiteSpace($a.Pre) -and [string]::IsNullOrWhiteSpace($b.Pre)) { return -1 }
+  if ($a.Pre -ceq $b.Pre) { return 0 }
+  $aPre = @($a.Pre -split '\.')
+  $bPre = @($b.Pre -split '\.')
+  $preMax = [Math]::Max($aPre.Count, $bPre.Count)
+  for ($i = 0; $i -lt $preMax; $i++) {
+    if ($i -ge $aPre.Count) { return -1 }
+    if ($i -ge $bPre.Count) { return 1 }
+    $ai = 0; $bi = 0
+    $aIsNum = [int]::TryParse($aPre[$i], [ref]$ai)
+    $bIsNum = [int]::TryParse($bPre[$i], [ref]$bi)
+    if ($aIsNum -and $bIsNum) {
+      if ($ai -lt $bi) { return -1 }
+      if ($ai -gt $bi) { return 1 }
+    } else {
+      $cmpS = [string]::CompareOrdinal($aPre[$i], $bPre[$i])
+      if ($cmpS -lt 0) { return -1 }
+      if ($cmpS -gt 0) { return 1 }
+    }
+  }
+  return 0
+}
+
+function Test-EmTroLyTrustedOpenVsxUrl {
+  param(
+    [string]$Url = '',
+    [bool]$AllowLoopback = $false
+  )
+  if ([string]::IsNullOrWhiteSpace($Url)) { return $false }
+  $parsed = $null
+  if (-not [uri]::TryCreate($Url.Trim(), [System.UriKind]::Absolute, [ref]$parsed)) { return $false }
+  if ($AllowLoopback -and $parsed.Scheme -ieq 'http' -and $parsed.Host -ieq '127.0.0.1') { return $true }
+  if ($parsed.Scheme -ine 'https') { return $false }
+  $h = ([string]$parsed.Host).ToLowerInvariant()
+  return ($h -eq 'open-vsx.org' -or $h.EndsWith('.open-vsx.org'))
+}
+
+function Resolve-EmTroLyCodexVsixTarget {
+  param([switch]$SkipRemote)
+  $pinnedVersion = '26.51111.21308'
+  $pinnedUrl = 'https://open-vsx.org/api/openai/chatgpt/win32-x64/26.51111.21308/file/openai.chatgpt-26.51111.21308@win32-x64.vsix'
+  $pinnedHash = '5abdd18242a77e85e60b8b727231924c4cdf048fdf5c39079e5d811390c3fca8'
+
+  $iwrCmd = Get-Command Invoke-WebRequest -ErrorAction SilentlyContinue
+  $irmCmd = Get-Command Invoke-RestMethod -ErrorAction SilentlyContinue
+  $isMocked = ($iwrCmd -and $iwrCmd.CommandType -eq 'Function') -or ($irmCmd -and $irmCmd.CommandType -eq 'Function')
+  if ($SkipRemote -or $env:EMTROLY_SKIP_REMOTE_VERSION_CHECK -eq '1' -or ($isMocked -and [string]::IsNullOrWhiteSpace($env:EMTROLY_CODEX_OPENVSX_URL))) {
+    return [pscustomobject]@{
+      Version        = $pinnedVersion
+      Url            = $pinnedUrl
+      Hash           = $pinnedHash
+      RemoteResolved = $false
+      PinnedVersion  = $pinnedVersion
+    }
+  }
+
+  $customMetaUrl = if ($env:EMTROLY_CODEX_OPENVSX_URL) { $env:EMTROLY_CODEX_OPENVSX_URL.Trim() } else { '' }
+  $metaUrl = if ($customMetaUrl) { $customMetaUrl } else { 'https://open-vsx.org/api/openai/chatgpt/win32-x64/latest' }
+  $allowLoopback = ($customMetaUrl -match '^http://127\.0\.0\.1:\d+')
+  if (-not (Test-EmTroLyTrustedOpenVsxUrl -Url $metaUrl -AllowLoopback $allowLoopback)) {
+    return [pscustomobject]@{ Version = $pinnedVersion; Url = $pinnedUrl; Hash = $pinnedHash; RemoteResolved = $false; PinnedVersion = $pinnedVersion }
+  }
+
+  try {
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]3072 -bor [Net.SecurityProtocolType]12288 } catch { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 }
+    $meta = Invoke-RestMethod -UseBasicParsing -Method Get -Uri $metaUrl -TimeoutSec 8 -MaximumRedirection 3
+    $remoteVer = if ($meta -and $meta.version) { ([string]$meta.version).Trim() } else { '' }
+    $dlUrl = if ($meta -and $meta.files -and $meta.files.download) { ([string]$meta.files.download).Trim() } else { '' }
+    $shaUrl = if ($meta -and $meta.files -and $meta.files.sha256) { ([string]$meta.files.sha256).Trim() } else { '' }
+    if ($remoteVer -match '^\d+\.\d+\.\d+$' -and
+        (Compare-EmTroLySemVer -Current $remoteVer -Target $pinnedVersion) -ge 0 -and
+        (Test-EmTroLyTrustedOpenVsxUrl -Url $dlUrl -AllowLoopback $allowLoopback) -and
+        (Test-EmTroLyTrustedOpenVsxUrl -Url $shaUrl -AllowLoopback $allowLoopback)) {
+      $shaResp = Invoke-WebRequest -UseBasicParsing -Method Get -Uri $shaUrl -TimeoutSec 8 -MaximumRedirection 3
+      $shaTxt = if ($shaResp.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($shaResp.Content) } else { [string]$shaResp.Content }
+      $mSha = [regex]::Match($shaTxt, '(?i)\b([a-f0-9]{64})\b')
+      if ($mSha.Success) {
+        return [pscustomobject]@{
+          Version        = $remoteVer
+          Url            = $dlUrl
+          Hash           = $mSha.Groups[1].Value.ToLowerInvariant()
+          RemoteResolved = $true
+          PinnedVersion  = $pinnedVersion
+        }
+      }
+    }
+  } catch { }
+
+  return [pscustomobject]@{
+    Version        = $pinnedVersion
+    Url            = $pinnedUrl
+    Hash           = $pinnedHash
+    RemoteResolved = $false
+    PinnedVersion  = $pinnedVersion
+  }
+}
+
+function Get-EmTroLyCodexExecutableVersionInfo {
+  param([string]$ExecutablePath = '')
+  if ([string]::IsNullOrWhiteSpace($ExecutablePath)) {
+    return [pscustomobject]@{ PackageVersion = ''; CliVersion = ''; Kind = 'unknown' }
+  }
+  try {
+    $norm = [IO.Path]::GetFullPath($ExecutablePath)
+    if ($norm -match '[\\/]Antigravity[\\/]Extensions[\\/]openai\.chatgpt-[^\\/]+[\\/]bin[\\/]windows-x86_64[\\/]codex\.exe$') {
+      $extDir = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $norm))
+      $pkgFile = Join-Path $extDir 'package.json'
+      if (Test-Path -LiteralPath $pkgFile -PathType Leaf) {
+        $pkg = [IO.File]::ReadAllText($pkgFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        if ($pkg -and $pkg.publisher -eq 'openai' -and $pkg.name -eq 'chatgpt' -and $pkg.version) {
+          return [pscustomobject]@{ PackageVersion = ([string]$pkg.version).Trim(); CliVersion = ''; Kind = 'vsix' }
+        }
+      }
+    }
+    if ($norm -match '[\\/]Codex[\\/]bin[\\/]codex\.exe$') {
+      $sidecar = Join-Path (Split-Path -Parent $norm) 'codex-cli.version.json'
+      if (Test-Path -LiteralPath $sidecar -PathType Leaf) {
+        $sc = [IO.File]::ReadAllText($sidecar, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        if ($sc) {
+          $vVer = if ($sc.PSObject.Properties['vsix_version'] -and $sc.vsix_version) { ([string]$sc.vsix_version).Trim() } else { '' }
+          $cVer = if ($sc.PSObject.Properties['cli_version'] -and $sc.cli_version) { ([string]$sc.cli_version).Trim() } else { '' }
+          if ($vVer) {
+            return [pscustomobject]@{ PackageVersion = $vVer; CliVersion = $cVer; Kind = 'vsix' }
+          }
+        }
+      }
+    }
+    if ($norm -match '[\\/]AutoHealCli[\\/]node_modules[\\/]\.bin[\\/]codex\.cmd$') {
+      $ahRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $norm))
+      $ahPkg = Join-Path $ahRoot 'node_modules\@openai\codex\package.json'
+      if (Test-Path -LiteralPath $ahPkg -PathType Leaf) {
+        $pObj = [IO.File]::ReadAllText($ahPkg, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        if ($pObj -and $pObj.version) {
+          return [pscustomobject]@{ PackageVersion = ([string]$pObj.version).Trim(); CliVersion = ([string]$pObj.version).Trim(); Kind = 'npm' }
+        }
+      }
+    }
+  } catch { }
+  return [pscustomobject]@{ PackageVersion = ''; CliVersion = ''; Kind = 'unknown' }
+}
+
 function Find-EmTroLyCodexCli {
   $emTroLyBase = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'EmTroLy' } else { '' }
   $emTroLyCodexHome = if ($emTroLyBase) { Join-Path $emTroLyBase 'Codex' } else { '' }
@@ -75,6 +246,8 @@ function Find-EmTroLyCodexCli {
     (Test-Path -LiteralPath (Join-Path $emTroLyCodexHome 'auth.json') -PathType Leaf)
 
   if ($emTroLyBase) {
+    $bestExtExe = ''
+    $bestExtVer = ''
     $extRoot = Join-Path $emTroLyBase 'Antigravity\Extensions'
     if (Test-Path -LiteralPath $extRoot -PathType Container) {
       $candidates = @(Get-ChildItem -LiteralPath $extRoot -Directory -Filter 'openai.chatgpt-*' -ErrorAction SilentlyContinue |
@@ -82,24 +255,49 @@ function Find-EmTroLyCodexCli {
       foreach ($dir in $candidates) {
         $exe = Join-Path $dir.FullName 'bin\windows-x86_64\codex.exe'
         if (Test-Path -LiteralPath $exe -PathType Leaf) {
-          return [pscustomobject]@{
-            Available = $true
-            Executable = $exe
-            CodexHome = if ($hasPrivateCodexHome) { $emTroLyCodexHome } else { '' }
-            Source = 'emtroly'
-            Label = 'Sẵn sàng · Codex riêng của Em Trợ Lý'
+          $extInfo = Get-EmTroLyCodexExecutableVersionInfo -ExecutablePath $exe
+          $candVer = [string]$extInfo.PackageVersion
+          if (-not $bestExtExe -or ($candVer -and (-not $bestExtVer -or (Compare-EmTroLySemVer -Current $candVer -Target $bestExtVer) -gt 0))) {
+            $bestExtExe = $exe
+            $bestExtVer = $candVer
           }
         }
       }
     }
 
     $standaloneExe = Join-Path $emTroLyBase 'Codex\bin\codex.exe'
-    if (Test-Path -LiteralPath $standaloneExe -PathType Leaf) {
+    $hasStandalone = (Test-Path -LiteralPath $standaloneExe -PathType Leaf)
+    $standaloneVer = if ($hasStandalone) { [string](Get-EmTroLyCodexExecutableVersionInfo -ExecutablePath $standaloneExe).PackageVersion } else { '' }
+
+    if ($hasStandalone -and $standaloneVer -and (-not $bestExtExe -or -not $bestExtVer -or (Compare-EmTroLySemVer -Current $standaloneVer -Target $bestExtVer) -gt 0)) {
       return [pscustomobject]@{
         Available = $true
         Executable = $standaloneExe
         CodexHome = if ($hasPrivateCodexHome) { $emTroLyCodexHome } else { '' }
         Source = 'emtroly'
+        Version = $standaloneVer
+        Label = 'Sẵn sàng · Codex CLI riêng của Em Trợ Lý'
+      }
+    }
+
+    if ($bestExtExe) {
+      return [pscustomobject]@{
+        Available = $true
+        Executable = $bestExtExe
+        CodexHome = if ($hasPrivateCodexHome) { $emTroLyCodexHome } else { '' }
+        Source = 'emtroly'
+        Version = $bestExtVer
+        Label = 'Sẵn sàng · Codex riêng của Em Trợ Lý'
+      }
+    }
+
+    if ($hasStandalone) {
+      return [pscustomobject]@{
+        Available = $true
+        Executable = $standaloneExe
+        CodexHome = if ($hasPrivateCodexHome) { $emTroLyCodexHome } else { '' }
+        Source = 'emtroly'
+        Version = $standaloneVer
         Label = 'Sẵn sàng · Codex CLI riêng của Em Trợ Lý'
       }
     }
@@ -177,16 +375,188 @@ function Find-EmTroLyCodexCli {
   }
 }
 
+function Sync-EmTroLyUserCodexHome {
+  param(
+    [Parameter(Mandatory=$true)][string]$ApiKey,
+    [string]$Model = 'gpt-6.2-sol',
+    [string]$BaseUrl = 'https://codex.anhlaptrinh.vn/v1',
+    [string]$UserHome = ''
+  )
+  if ($env:EMTROLY_SKIP_DEFAULT_CODEX_SYNC -eq '1') { return $false }
+  $homeRoot = if (-not [string]::IsNullOrWhiteSpace($UserHome)) { $UserHome } elseif ($env:USERPROFILE) { $env:USERPROFILE } else { '' }
+  if ([string]::IsNullOrWhiteSpace($homeRoot)) { return $false }
+  $cleanKey = ([string]$ApiKey).Trim()
+  $cleanUrl = ([string]$BaseUrl).Trim().TrimEnd('/')
+  if ([string]::IsNullOrWhiteSpace($cleanKey) -or $cleanUrl -cne 'https://codex.anhlaptrinh.vn/v1') { return $false }
+  $cleanModel = if ($Model -match '^[A-Za-z0-9._-]+$') { $Model.Trim() } else { 'gpt-6.2-sol' }
+  try {
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $dotCodex = Join-Path $homeRoot '.codex'
+    if (-not (Test-Path -LiteralPath $dotCodex -PathType Container)) {
+      New-CodexPrivateDirectory $dotCodex
+    }
+    $cfgPath = Join-Path $dotCodex 'config.toml'
+    $existingRaw = if (Test-Path -LiteralPath $cfgPath -PathType Leaf) { [IO.File]::ReadAllText($cfgPath, [System.Text.Encoding]::UTF8) } else { '' }
+    $lines = @($existingRaw -split "\r?\n")
+    $topLines = New-Object System.Collections.Generic.List[string]
+    $sectionLines = New-Object System.Collections.Generic.List[string]
+    $inSection = $false
+    $skipRouterSection = $false
+    foreach ($line in $lines) {
+      if ($line -match '^\s*\[([^\]]+)\]\s*(?:#.*)?$') {
+        $inSection = $true
+        $secName = $Matches[1].Trim()
+        if ($secName -ieq 'model_providers.router') {
+          $skipRouterSection = $true
+          continue
+        }
+        $skipRouterSection = $false
+        [void]$sectionLines.Add($line)
+        continue
+      }
+      if (-not $inSection) {
+        if ($line -match '^\s*(model_provider|model|model_context_window|model_auto_compact_token_limit|cli_auth_credentials_store)\s*=') { continue }
+        [void]$topLines.Add($line)
+      } elseif (-not $skipRouterSection) {
+        [void]$sectionLines.Add($line)
+      }
+    }
+    $headerBlock = @(
+      'model_provider = "router"'
+      "model = `"$cleanModel`""
+      'model_context_window = 272000'
+      'model_auto_compact_token_limit = 200000'
+      'cli_auth_credentials_store = "file"'
+    )
+    $outLines = New-Object System.Collections.Generic.List[string]
+    foreach ($hLine in $headerBlock) { [void]$outLines.Add($hLine) }
+    foreach ($tLine in $topLines) {
+      if (-not [string]::IsNullOrWhiteSpace($tLine)) { [void]$outLines.Add($tLine) }
+    }
+    while ($sectionLines.Count -gt 0 -and [string]::IsNullOrWhiteSpace($sectionLines[$sectionLines.Count - 1])) {
+      $sectionLines.RemoveAt($sectionLines.Count - 1)
+    }
+    if ($sectionLines.Count -gt 0) { [void]$outLines.Add('') }
+    foreach ($sLine in $sectionLines) { [void]$outLines.Add($sLine) }
+    [void]$outLines.Add('')
+    [void]$outLines.Add('[model_providers.router]')
+    [void]$outLines.Add('name = "router"')
+    [void]$outLines.Add("base_url = `"$cleanUrl`"")
+    [void]$outLines.Add('wire_api = "responses"')
+    [void]$outLines.Add('requires_openai_auth = true')
+    $finalToml = ($outLines -join "`r`n") + "`r`n"
+    [IO.File]::WriteAllText($cfgPath, $finalToml, $utf8NoBom)
+
+    $authPath = Join-Path $dotCodex 'auth.json'
+    $authObj = [ordered]@{}
+    if (Test-Path -LiteralPath $authPath -PathType Leaf) {
+      try {
+        $prevAuth = [IO.File]::ReadAllText($authPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        if ($prevAuth) {
+          foreach ($prop in $prevAuth.PSObject.Properties) {
+            if ($prop.Name -notin @('OPENAI_API_KEY', 'auth_mode', 'tokens', 'last_refresh')) {
+              $authObj[$prop.Name] = $prop.Value
+            }
+          }
+        }
+      } catch { }
+    }
+    $authObj['OPENAI_API_KEY'] = $cleanKey
+    [IO.File]::WriteAllText($authPath, ($authObj | ConvertTo-Json -Compress), $utf8NoBom)
+
+    if ($env:APPDATA) {
+      foreach ($appDirName in @('Antigravity IDE', 'Antigravity')) {
+        $appCfgDir = Join-Path $env:APPDATA $appDirName
+        $userSettDir = Join-Path $appCfgDir 'User'
+        $userSettFile = Join-Path $userSettDir 'settings.json'
+        if ((Test-Path -LiteralPath $appCfgDir -PathType Container) -or (Test-Path -LiteralPath $userSettFile -PathType Leaf)) {
+          [void][IO.Directory]::CreateDirectory($userSettDir)
+          $sMap = [ordered]@{}
+          if (Test-Path -LiteralPath $userSettFile -PathType Leaf) {
+            try {
+              $oldSett = [IO.File]::ReadAllText($userSettFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+              if ($oldSett) {
+                foreach ($sp in $oldSett.PSObject.Properties) { $sMap[$sp.Name] = $sp.Value }
+              }
+            } catch { }
+          }
+          $sMap['chatgpt.runCodexInWindowsSubsystemForLinux'] = $false
+          [IO.File]::WriteAllText($userSettFile, ($sMap | ConvertTo-Json -Depth 10), $utf8NoBom)
+        }
+      }
+    }
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Sync-EmTroLyAntigravityDefaultExtension {
+  param([string]$UserHome = '')
+  if ($env:EMTROLY_SKIP_DEFAULT_CODEX_SYNC -eq '1') { return $false }
+  $homeRoot = if (-not [string]::IsNullOrWhiteSpace($UserHome)) { $UserHome } elseif ($env:USERPROFILE) { $env:USERPROFILE } else { '' }
+  if ([string]::IsNullOrWhiteSpace($homeRoot) -or -not $env:LOCALAPPDATA) { return $false }
+  $emExtRoot = Join-Path $env:LOCALAPPDATA 'EmTroLy\Antigravity\Extensions'
+  if (-not (Test-Path -LiteralPath $emExtRoot -PathType Container)) { return $false }
+  $srcExt = @(Get-ChildItem -LiteralPath $emExtRoot -Directory -Filter 'openai.chatgpt-*' -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1)
+  if ($srcExt.Count -eq 0) { return $false }
+  $srcPkgPath = Join-Path $srcExt[0].FullName 'package.json'
+  if (-not (Test-Path -LiteralPath $srcPkgPath -PathType Leaf)) { return $false }
+  try {
+    $srcPkg = [IO.File]::ReadAllText($srcPkgPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+    $srcVer = [string]$srcPkg.version
+    if (-not $srcVer) { return $false }
+    $defaultExtRoot = Join-Path $homeRoot '.antigravity-ide\extensions'
+    $existingDefault = @(Get-ChildItem -LiteralPath $defaultExtRoot -Directory -Filter 'openai.chatgpt-*' -ErrorAction SilentlyContinue)
+    if ($existingDefault.Count -gt 0) { return $true }
+    $targetFolderName = "openai.chatgpt-$srcVer-win32-x64"
+    $targetExtDir = Join-Path $defaultExtRoot $targetFolderName
+    [void][IO.Directory]::CreateDirectory($defaultExtRoot)
+    Copy-Item -LiteralPath $srcExt[0].FullName -Destination $targetExtDir -Recurse -Force
+    $extJsonPath = Join-Path $defaultExtRoot 'extensions.json'
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $entries = New-Object System.Collections.ArrayList
+    if (Test-Path -LiteralPath $extJsonPath -PathType Leaf) {
+      try {
+        $parsedArr = [IO.File]::ReadAllText($extJsonPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        foreach ($it in @($parsedArr)) {
+          if ($it -and $it.identifier -and $it.identifier.id -ne 'openai.chatgpt') {
+            [void]$entries.Add($it)
+          }
+        }
+      } catch { }
+    }
+    $unixPath = '/' + ($targetExtDir -replace '\\', '/').TrimStart('/')
+    $newEntry = [ordered]@{
+      identifier = [ordered]@{ id = 'openai.chatgpt' }
+      version = $srcVer
+      location = [ordered]@{ '$mid' = 1; path = $unixPath; scheme = 'file' }
+      relativeLocation = $targetFolderName
+      metadata = [ordered]@{
+        installedTimestamp = [long]([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
+        targetPlatform = 'win32-x64'
+      }
+    }
+    [void]$entries.Add($newEntry)
+    [IO.File]::WriteAllText($extJsonPath, (ConvertTo-Json -InputObject @($entries.ToArray()) -Depth 8 -Compress), $utf8NoBom)
+    return $true
+  } catch {
+    return $false
+  }
+}
+
 function Install-EmTroLyCodexCliFirst {
   param(
     [Parameter(Mandatory=$true)][psobject]$Settings,
     [string]$PayloadRoot = '',
     [string]$StatusFile = '',
     [string]$EditorJobId = '',
-    [switch]$ForceConfigUpdate
+    [switch]$ForceConfigUpdate,
+    [switch]$CheckLatestVersion,
+    [switch]$ForceUpdate
   )
   if (-not $env:LOCALAPPDATA) {
-    return [pscustomobject]@{ Installed = $false; Executable = ''; CodexHome = '' }
+    return [pscustomobject]@{ Installed = $false; Skipped = $false; UpToDate = $false; Version = ''; TargetVersion = ''; Executable = ''; CodexHome = '' }
   }
   $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
   $writeMsg = {
@@ -257,26 +627,70 @@ requires_openai_auth = true
 "@
     [IO.File]::WriteAllText((Join-Path $codexHome 'config.toml'), $cfgToml, $utf8NoBom)
     [IO.File]::WriteAllText((Join-Path $codexHome 'auth.json'), (@{ OPENAI_API_KEY = $apiKey } | ConvertTo-Json -Compress), $utf8NoBom)
+    [void](Sync-EmTroLyUserCodexHome -ApiKey $apiKey -Model $model -BaseUrl $baseUrl)
   }
 
   $existingInfo = Find-EmTroLyCodexCli
-  if ($existingInfo.Available -and ($existingInfo.Source -eq 'emtroly' -or $baseUrl -cne 'https://codex.anhlaptrinh.vn/v1') -and $existingInfo.Executable -and (Test-Path -LiteralPath $existingInfo.Executable -PathType Leaf)) {
-    try { [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot) } catch { }
-    $openclawBin = Join-Path $env:LOCALAPPDATA 'OpenClaw\bin'
-    if ((Test-Path -LiteralPath $openclawBin -PathType Container) -and ($env:Path -notlike "*$openclawBin*")) {
-      $env:Path = "$openclawBin;$env:Path"
+  $wantVersionCheck = [bool]($CheckLatestVersion -or $ForceUpdate)
+  if (-not $wantVersionCheck) {
+    if ($existingInfo.Available -and ($existingInfo.Source -eq 'emtroly' -or $baseUrl -cne 'https://codex.anhlaptrinh.vn/v1') -and $existingInfo.Executable -and (Test-Path -LiteralPath $existingInfo.Executable -PathType Leaf)) {
+      try { [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot) } catch { }
+      $openclawBin = Join-Path $env:LOCALAPPDATA 'OpenClaw\bin'
+      if ((Test-Path -LiteralPath $openclawBin -PathType Container) -and ($env:Path -notlike "*$openclawBin*")) {
+        $env:Path = "$openclawBin;$env:Path"
+      }
+      $fastVer = if ($existingInfo.PSObject.Properties['Version']) { [string]$existingInfo.Version } else { '' }
+      return [pscustomobject]@{
+        Installed     = $true
+        Skipped       = $false
+        UpToDate      = $false
+        Version       = $fastVer
+        TargetVersion = $fastVer
+        Executable    = $existingInfo.Executable
+        CodexHome     = if ($existingInfo.CodexHome) { $existingInfo.CodexHome } else { $codexHome }
+      }
     }
+  } elseif ($existingInfo.Available -and $baseUrl -cne 'https://codex.anhlaptrinh.vn/v1' -and $existingInfo.Executable -and (Test-Path -LiteralPath $existingInfo.Executable -PathType Leaf)) {
+    try { [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot) } catch { }
+    $extFastVer = if ($existingInfo.PSObject.Properties['Version']) { [string]$existingInfo.Version } else { '' }
     return [pscustomobject]@{
-      Installed  = $true
-      Executable = $existingInfo.Executable
-      CodexHome  = if ($existingInfo.CodexHome) { $existingInfo.CodexHome } else { $codexHome }
+      Installed     = $true
+      Skipped       = $true
+      UpToDate      = $true
+      Version       = $extFastVer
+      TargetVersion = $extFastVer
+      Executable    = $existingInfo.Executable
+      CodexHome     = if ($existingInfo.CodexHome) { $existingInfo.CodexHome } else { $codexHome }
     }
   }
 
-  # Fresh Windows PC: Download pinned Codex VSIX once, extract standalone codex.exe immediately, and cache VSIX for Antigravity step!
-  $extensionVersion = '26.51111.21308'
-  $extensionUrl = 'https://open-vsx.org/api/openai/chatgpt/win32-x64/26.51111.21308/file/openai.chatgpt-26.51111.21308@win32-x64.vsix'
-  $extensionHash = '5abdd18242a77e85e60b8b727231924c4cdf048fdf5c39079e5d811390c3fca8'
+  # Resolve latest Codex VSIX metadata from OpenVSX (fallback cleanly to pinned baseline offline)
+  & $writeMsg 'Đang kiểm tra phiên bản mới nhất của Codex CLI...'
+  $vsixTarget = Resolve-EmTroLyCodexVsixTarget
+  $extensionVersion = $vsixTarget.Version
+  $extensionUrl = $vsixTarget.Url
+  $extensionHash = $vsixTarget.Hash
+
+  if ($wantVersionCheck -and -not $ForceUpdate -and $existingInfo.Available -and $existingInfo.Source -eq 'emtroly' -and $existingInfo.Executable -and (Test-Path -LiteralPath $existingInfo.Executable -PathType Leaf)) {
+    $verDetail = Get-EmTroLyCodexExecutableVersionInfo -ExecutablePath $existingInfo.Executable
+    if ($verDetail.Kind -eq 'vsix' -and $verDetail.PackageVersion -and (Compare-EmTroLySemVer -Current $verDetail.PackageVersion -Target $extensionVersion) -ge 0) {
+      try { [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot) } catch { }
+      $openclawBin = Join-Path $env:LOCALAPPDATA 'OpenClaw\bin'
+      if ((Test-Path -LiteralPath $openclawBin -PathType Container) -and ($env:Path -notlike "*$openclawBin*")) {
+        $env:Path = "$openclawBin;$env:Path"
+      }
+      & $writeMsg "✓ Codex CLI đã ở phiên bản mới nhất (v$($verDetail.PackageVersion)) — không cần tải lại."
+      return [pscustomobject]@{
+        Installed     = $true
+        Skipped       = $true
+        UpToDate      = $true
+        Version       = $verDetail.PackageVersion
+        TargetVersion = $extensionVersion
+        Executable    = $existingInfo.Executable
+        CodexHome     = if ($existingInfo.CodexHome) { $existingInfo.CodexHome } else { $codexHome }
+      }
+    }
+  }
 
   if ($env:OS -eq 'Windows_NT' -and $baseUrl -ceq 'https://codex.anhlaptrinh.vn/v1') {
     $cachedVsix = Join-Path $emBase ('codex-' + $extensionVersion + '.vsix')
@@ -405,7 +819,7 @@ requires_openai_auth = true
     }
 
     if ($vsixReady -and $canWriteCodexConfig) {
-      & $writeMsg 'Đang giải nén và kích hoạt Codex CLI...'
+      & $writeMsg "Đang giải nén và kích hoạt Codex CLI v$extensionVersion..."
       try {
         Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
         [void][IO.Directory]::CreateDirectory($codexBinDir)
@@ -417,6 +831,35 @@ requires_openai_auth = true
           }
         } finally {
           $zip.Dispose()
+        }
+        if (Test-Path -LiteralPath $standaloneExe -PathType Leaf) {
+          $cliVerStr = ''
+          try {
+            $vPsi = New-Object System.Diagnostics.ProcessStartInfo
+            $vPsi.FileName = $standaloneExe
+            $vPsi.Arguments = '--version'
+            $vPsi.UseShellExecute = $false
+            $vPsi.CreateNoWindow = $true
+            $vPsi.RedirectStandardOutput = $true
+            $vPsi.RedirectStandardError = $true
+            $vProc = [System.Diagnostics.Process]::Start($vPsi)
+            if ($vProc.WaitForExit(5000) -and $vProc.ExitCode -eq 0) {
+              $vTxt = ($vProc.StandardOutput.ReadToEnd() + ' ' + $vProc.StandardError.ReadToEnd()).Trim()
+              $mCli = [regex]::Match($vTxt, '([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.]+)?)')
+              if ($mCli.Success) { $cliVerStr = $mCli.Groups[1].Value }
+            } else {
+              try { if (-not $vProc.HasExited) { $vProc.Kill() } } catch { }
+            }
+            try { $vProc.Dispose() } catch { }
+          } catch { }
+          $exeSha256 = try { (Get-FileHash -LiteralPath $standaloneExe -Algorithm SHA256).Hash.ToLowerInvariant() } catch { '' }
+          $scPayload = [ordered]@{
+            vsix_version = $extensionVersion
+            cli_version  = $cliVerStr
+            sha256       = $exeSha256
+            updated_at   = [DateTimeOffset]::UtcNow.ToString('o')
+          } | ConvertTo-Json -Compress
+          [IO.File]::WriteAllText((Join-Path $codexBinDir 'codex-cli.version.json'), $scPayload, $utf8NoBom)
         }
       } catch { }
       if ($skipEditor -and (Test-Path -LiteralPath $standaloneExe -PathType Leaf)) {
@@ -441,10 +884,15 @@ requires_openai_auth = true
     }
   }
 
+  $finalVer = if ($finalInfo.PSObject.Properties['Version'] -and $finalInfo.Version) { [string]$finalInfo.Version } else { $extensionVersion }
   return [pscustomobject]@{
-    Installed  = [bool]$finalInfo.Available
-    Executable = [string]$finalInfo.Executable
-    CodexHome  = if ($finalInfo.CodexHome) { [string]$finalInfo.CodexHome } else { $codexHome }
+    Installed     = [bool]$finalInfo.Available
+    Skipped       = $false
+    UpToDate      = [bool]$finalInfo.Available
+    Version       = $finalVer
+    TargetVersion = $extensionVersion
+    Executable    = [string]$finalInfo.Executable
+    CodexHome     = if ($finalInfo.CodexHome) { [string]$finalInfo.CodexHome } else { $codexHome }
   }
 }
 

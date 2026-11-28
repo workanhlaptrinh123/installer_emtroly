@@ -429,12 +429,14 @@ def install_components(components, values, source, progress=lambda message: None
             results["codex"] = {"installed": True, "skipped": True, "reason": "already-installed"}
             results["skipped"].append("codex-cli")
         else:
-            progress("Phần 1 · Đang chuẩn bị Node.js và cài đặt Codex CLI riêng...")
+            progress("Phần 1 · Đang chuẩn bị Node.js và kiểm tra/cài đặt Codex CLI riêng...")
             node_pair = dependencies.install_node(dependency_root)
             prev_force = os.environ.get("EMTROLY_FORCE_CODEX_INSTALL")
             try:
                 os.environ["EMTROLY_FORCE_CODEX_INSTALL"] = "1"
-                c_info = codex_setup.install_codex_cli_first(values_checked, home, node_pair[0], node_pair[1], progress=progress)
+                c_info = codex_setup.install_codex_cli_first(
+                    values_checked, home, node_pair[0], node_pair[1], progress=progress, check_latest=bool(force_reinstall)
+                )
             finally:
                 if prev_force is None:
                     os.environ.pop("EMTROLY_FORCE_CODEX_INSTALL", None)
@@ -443,6 +445,8 @@ def install_components(components, values, source, progress=lambda message: None
             if not c_info.get("installed"):
                 raise RuntimeError("codex-cli-install-failed: Chưa cài đặt được gói @openai/codex. Kiểm tra kết nối Internet và thử lại.")
             results["codex"] = c_info
+            if c_info.get("skipped"):
+                results["skipped"].append("codex-cli")
 
     if "antigravity-ide" in ordered:
         if not force_reinstall and mod_status.get("antigravity_ide", {}).get("installed"):
@@ -451,7 +455,10 @@ def install_components(components, values, source, progress=lambda message: None
             results["skipped"].append("antigravity-ide")
         else:
             progress("Phần 2 · Đang kiểm tra và cấu hình Antigravity IDE riêng...")
-            results["antigravity_ide"] = codex_setup.install_antigravity_ide_only(values_checked, home, progress=progress)
+            ide_res = codex_setup.install_antigravity_ide_only(values_checked, home, progress=progress)
+            results["antigravity_ide"] = ide_res
+            if ide_res.get("skipped"):
+                results["skipped"].append("antigravity-ide")
 
     if "codex-extension" in ordered:
         if not force_reinstall and mod_status.get("codex_extension", {}).get("installed"):
@@ -459,8 +466,11 @@ def install_components(components, values, source, progress=lambda message: None
             results["codex_extension"] = {"configured": True, "installed": True, "skipped": True, "reason": "already-installed"}
             results["skipped"].append("codex-extension")
         else:
-            progress("Phần 3 · Đang cài đặt Codex Extension trong Antigravity IDE...")
-            results["codex_extension"] = codex_setup.install_codex_extension_only(values_checked, home, progress=progress)
+            progress("Phần 3 · Đang kiểm tra/cài đặt Codex Extension trong Antigravity IDE...")
+            ext_res = codex_setup.install_codex_extension_only(values_checked, home, progress=progress)
+            results["codex_extension"] = ext_res
+            if ext_res.get("skipped"):
+                results["skipped"].append("codex-extension")
 
     if "openclaw" in ordered:
         if oc_already_installed:

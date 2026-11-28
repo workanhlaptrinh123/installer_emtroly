@@ -6,11 +6,38 @@ $base = Join-Path $env:LOCALAPPDATA 'EmTroLy'
 $programsRoot = Join-Path $env:LOCALAPPDATA 'Programs'
 $extensionVersion = '26.51111.21308'
 $pending = Join-Path $env:USERPROFILE 'openclaw\installer-codex-pending.json'
-$shortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'EmTroLy - Antigravity.lnk'
-$legacyShortcutPath = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Em Trợ Lý - Antigravity.lnk'
+$desktopFolder = if ($env:EMTROLY_TEST_DESKTOP_DIR) { $env:EMTROLY_TEST_DESKTOP_DIR } else { ([Environment]::GetFolderPath('Desktop')) }
+$shortcutPath = Join-Path $desktopFolder 'EmTroLy - Antigravity.lnk'
+$legacyShortcutPath = Join-Path $desktopFolder 'Em Trợ Lý - Antigravity.lnk'
 $programsFolder = if ($env:EMTROLY_TEST_PROGRAMS_DIR) { $env:EMTROLY_TEST_PROGRAMS_DIR } else { [Environment]::GetFolderPath('Programs') }
 $startMenuShortcutPath = if ($programsFolder) { Join-Path $programsFolder 'EmTroLy - Antigravity.lnk' } else { '' }
 $receipt = Join-Path $base 'installer-job.txt'
+
+function Compare-EmTroLyVersion {
+  param([string]$Current = '', [string]$Target = '')
+  $splitVer = {
+    param([string]$Raw)
+    $clean = ([string]$Raw).Trim().TrimStart('v', 'V')
+    $main = ($clean -split '[-+]')[0]
+    $nums = @()
+    foreach ($seg in @($main -split '\.')) {
+      $v = 0
+      if ([int]::TryParse($seg, [ref]$v)) { $nums += $v } else { $nums += 0 }
+    }
+    while ($nums.Count -lt 3) { $nums += 0 }
+    return ,$nums
+  }
+  $a = & $splitVer $Current
+  $b = & $splitVer $Target
+  $maxLen = [Math]::Max($a.Count, $b.Count)
+  for ($i = 0; $i -lt $maxLen; $i++) {
+    $av = if ($i -lt $a.Count) { [int]$a[$i] } else { 0 }
+    $bv = if ($i -lt $b.Count) { [int]$b[$i] } else { 0 }
+    if ($av -lt $bv) { return -1 }
+    if ($av -gt $bv) { return 1 }
+  }
+  return 0
+}
 
 function Resolve-EditorBundle([string]$Root, [bool]$RequirePinnedVersion = $false) {
   if ([string]::IsNullOrWhiteSpace($Root) -or -not (Test-Path -LiteralPath $Root -PathType Container)) { return $null }
@@ -27,7 +54,7 @@ function Resolve-EditorBundle([string]$Root, [bool]$RequirePinnedVersion = $fals
         $product = Get-Content -LiteralPath $productPath -Raw | ConvertFrom-Json
         if ($product.applicationName -notin @('antigravity-ide', 'antigravity')) { return $null }
         if ([string]::IsNullOrWhiteSpace([string]$product.version)) { return $null }
-        if ($RequirePinnedVersion -and $product.version -ne '1.107.0') { return $null }
+        if ($RequirePinnedVersion -and (Compare-EmTroLyVersion -Current ([string]$product.version) -Target '1.107.0') -lt 0) { return $null }
         return [pscustomobject]@{ AppDir = $Root; Editor = $editor }
       } catch {
         return $null
@@ -66,13 +93,13 @@ function Test-EmTroLyDataComplete([string]$Root) {
     try {
       $package = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
       return $package.publisher -eq 'openai' -and $package.name -eq 'chatgpt' -and
-        $package.version -eq $extensionVersion -and
+        (Compare-EmTroLyVersion -Current ([string]$package.version) -Target $extensionVersion) -ge 0 -and
         (Test-Path -LiteralPath (Join-Path $_.FullName 'bin\windows-x86_64\codex.exe') -PathType Leaf)
     } catch {
       return $false
     }
   })
-  return $installed.Count -eq 1
+  return $installed.Count -ge 1
 }
 
 if (-not (Test-Path -LiteralPath (Split-Path -Parent $shortcutPath) -PathType Container)) {
