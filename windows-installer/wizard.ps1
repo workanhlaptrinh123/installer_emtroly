@@ -3749,9 +3749,13 @@ function Show-ModularFailureDiagnostics([string]$SummaryMessage, [object]$DiagPa
   $safeSummary = & $scrubMod $SummaryMessage
   $codeRaw = if ($DiagPayload -and $DiagPayload.code) { [string]$DiagPayload.code } else { '' }
   $timeRaw = if ($DiagPayload -and $DiagPayload.timestamp) { [string]$DiagPayload.timestamp } else { (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') }
+  $primaryErrRaw = if ($DiagPayload -and $DiagPayload.PSObject.Properties['primaryInstallerError'] -and $DiagPayload.primaryInstallerError) { [string]$DiagPayload.primaryInstallerError } else { '' }
   $healSum = if ($DiagPayload -and $DiagPayload.autoHealSummary) { [string]$DiagPayload.autoHealSummary } else { '' }
+  $healErrRaw = if ($DiagPayload -and $DiagPayload.PSObject.Properties['autoHealError'] -and $DiagPayload.autoHealError) { [string]$DiagPayload.autoHealError } else { '' }
   $techRaw = if ($DiagPayload -and $DiagPayload.technicalDetail) { [string]$DiagPayload.technicalDetail } else { '' }
+  $safePrimaryErr = & $scrubMod $primaryErrRaw
   $safeHealSum = & $scrubMod $healSum
+  $safeHealErr = & $scrubMod $healErrRaw
   $safeTechRaw = & $scrubMod $techRaw
 
   $lines = New-Object System.Collections.Generic.List[string]
@@ -3759,10 +3763,18 @@ function Show-ModularFailureDiagnostics([string]$SummaryMessage, [object]$DiagPa
   [void]$lines.Add("Thành phần đang cài: $stepText")
   if ($codeRaw) { [void]$lines.Add("Mã chẩn đoán       : $codeRaw") }
   [void]$lines.Add("Tóm tắt thông báo  : $safeSummary")
+  if ($safePrimaryErr) {
+    [void]$lines.Add("Primary installer error   : $safePrimaryErr")
+  }
   if ($safeHealSum) {
     [void]$lines.Add('')
     [void]$lines.Add('--- Ghi chú từ Codex tự sửa lỗi ---')
     [void]$lines.Add($safeHealSum)
+  }
+  if ($safeHealErr) {
+    [void]$lines.Add('')
+    [void]$lines.Add('--- Auto-Heal diagnostic error ---')
+    [void]$lines.Add($safeHealErr)
   }
   if ($safeTechRaw) {
     [void]$lines.Add('')
@@ -4148,7 +4160,9 @@ function Show-RichFailureDiagnostics([string]$SummaryMessage, [object]$DiagPaylo
   $stageFriendly = if ($stageMap.ContainsKey($stageRaw)) { $stageMap[$stageRaw] } else { $stageRaw }
   $codeRaw = if ($DiagPayload -and $DiagPayload.code) { [string]$DiagPayload.code } else { '' }
   $timeRaw = if ($DiagPayload -and $DiagPayload.timestamp) { [string]$DiagPayload.timestamp } else { (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') }
+  $primaryErrRaw = if ($DiagPayload -and $DiagPayload.PSObject.Properties['primaryInstallerError'] -and $DiagPayload.primaryInstallerError) { [string]$DiagPayload.primaryInstallerError } else { '' }
   $healSum = if ($DiagPayload -and $DiagPayload.autoHealSummary) { [string]$DiagPayload.autoHealSummary } else { '' }
+  $healErrRaw = if ($DiagPayload -and $DiagPayload.PSObject.Properties['autoHealError'] -and $DiagPayload.autoHealError) { [string]$DiagPayload.autoHealError } else { '' }
   $techRaw = if ($DiagPayload -and $DiagPayload.technicalDetail) { [string]$DiagPayload.technicalDetail } else { '' }
 
   $errorStepText.Text = $stageFriendly
@@ -4169,7 +4183,9 @@ function Show-RichFailureDiagnostics([string]$SummaryMessage, [object]$DiagPaylo
   }
 
   $safeSummary = & $scrubText $SummaryMessage
+  $safePrimaryErr = & $scrubText $primaryErrRaw
   $safeHealSum = & $scrubText $healSum
+  $safeHealErr = & $scrubText $healErrRaw
   $safeTechRaw = & $scrubText $techRaw
   $errorSummaryHeading.Text = $safeSummary
 
@@ -4178,10 +4194,18 @@ function Show-RichFailureDiagnostics([string]$SummaryMessage, [object]$DiagPaylo
   [void]$lines.Add("Hạng mục thực hiện : $stageFriendly")
   if ($codeRaw) { [void]$lines.Add("Mã chẩn đoán       : $codeRaw") }
   [void]$lines.Add("Tóm tắt thông báo  : $safeSummary")
+  if ($safePrimaryErr) {
+    [void]$lines.Add("Primary installer error   : $safePrimaryErr")
+  }
   if ($safeHealSum) {
     [void]$lines.Add('')
     [void]$lines.Add("--- Ghi chú từ Codex tự sửa lỗi ---")
     [void]$lines.Add($safeHealSum)
+  }
+  if ($safeHealErr) {
+    [void]$lines.Add('')
+    [void]$lines.Add("--- Auto-Heal diagnostic error ---")
+    [void]$lines.Add($safeHealErr)
   }
   if ($safeTechRaw) {
     [void]$lines.Add('')

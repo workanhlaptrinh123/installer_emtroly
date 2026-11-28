@@ -2,6 +2,10 @@
 param([Parameter(Mandatory=$true)][string]$ExistingRoot, [string]$OpenClawVersion = '2026.11.4', [switch]$DryRun)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'windows-instance.ps1')
+$openClawNpmScript = Join-Path $PSScriptRoot 'openclaw-npm.ps1'
+if (Test-Path -LiteralPath $openClawNpmScript -PathType Leaf) {
+  . $openClawNpmScript
+}
 $root = (Resolve-Path -LiteralPath $ExistingRoot -ErrorAction Stop).Path
 $configPath = Join-Path $root 'openclaw.json'
 if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) { throw 'Upgrade target has no openclaw.json.' }
@@ -78,8 +82,24 @@ $runtime = Join-Path $root ('runtime\upgrade-' + [guid]::NewGuid().ToString('N')
 $runtimePackage = @{ name='member-openclaw-runtime-upgrade'; version='1.0.0'; private=$true; allowScripts=@{ '@google/genai'=$true; esbuild=$true; koffi=$true; openclaw=$true; protobufjs=$true; 'tree-sitter-bash'=$true } }
 New-Item -ItemType Directory -Force -Path $runtime | Out-Null
 [IO.File]::WriteAllText((Join-Path $runtime 'package.json'), ($runtimePackage | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
-& npm.cmd install --prefix $runtime "openclaw@$OpenClawVersion"
-if ($LASTEXITCODE -ne 0) { throw "Private runtime installation failed. Existing service is unchanged. Backup: $backup" }
+$nodeExe = 'node'
+if (Get-Command -Name 'Invoke-OpenClawNpmInstall' -ErrorAction SilentlyContinue) {
+  $tcUpgrade = Resolve-EmTroLyNodeToolchains -OpenClawRoot $root
+  if ($tcUpgrade -and $tcUpgrade.Primary -and $tcUpgrade.Primary.NodeExe) {
+    $nodeExe = [string]$tcUpgrade.Primary.NodeExe
+  }
+  try {
+    $upgNpmRes = Invoke-OpenClawNpmInstall -RuntimeDir $runtime -OpenClawRoot $root -OpenClawVersion $OpenClawVersion -LogsDir (Join-Path $root 'logs') -NpmCacheRoot (Join-Path $root 'npm-cache')
+    if ($upgNpmRes -and $upgNpmRes.UsedNodeExe) {
+      $nodeExe = [string]$upgNpmRes.UsedNodeExe
+    }
+  } catch {
+    throw "Private runtime installation failed ($($_.Exception.Message)). Existing service is unchanged. Backup: $backup"
+  }
+} else {
+  & npm.cmd install --prefix $runtime "openclaw@$OpenClawVersion"
+  if ($LASTEXITCODE -ne 0) { throw "Private runtime installation failed. Existing service is unchanged. Backup: $backup" }
+}
 $cliEntry = Join-Path $runtime 'node_modules\openclaw\openclaw.mjs'
 Set-OpenClawInstanceEnvironment -Root $root -InstanceProfile $instanceProfile -CliEntry $cliEntry
 $candidatePath = Join-Path $root ('openclaw.upgrade-candidate-' + [guid]::NewGuid().ToString('N') + '.json')
@@ -88,7 +108,7 @@ Repair-OpenClawLegacyConfig -Path $candidatePath
 try {
   $env:OPENCLAW_CONFIG_PATH = $candidatePath
   $ErrorActionPreference = 'Continue'
-  & node $cliEntry config validate --json
+  & $nodeExe $cliEntry config validate --json
   $validationExit = $LASTEXITCODE
 } finally {
   $env:OPENCLAW_CONFIG_PATH = $configPath
@@ -105,23 +125,23 @@ try {
   Copy-Item -LiteralPath $candidatePath -Destination $configPath -Force
   if ($task) {
     $serviceChanged = $true
-    & node $cliEntry gateway stop
+    & $nodeExe $cliEntry gateway stop
     if ($LASTEXITCODE -ne 0) { throw 'Could not stop the selected gateway.' }
   }
-  & node $cliEntry doctor --fix --non-interactive --yes
+  & $nodeExe $cliEntry doctor --fix --non-interactive --yes
   if ($LASTEXITCODE -ne 0) { throw 'OpenClaw state database migration failed. The gateway was not upgraded.' }
   if ($task) {
-    & node $cliEntry gateway stop
+    & $nodeExe $cliEntry gateway stop
     if ($LASTEXITCODE -ne 0) { throw 'Could not stop the gateway after state database migration.' }
   }
   $serviceChanged = $true
-  & node $cliEntry gateway install --port $port --force
+  & $nodeExe $cliEntry gateway install --port $port --force
   if ($LASTEXITCODE -ne 0) { throw 'Gateway service upgrade failed.' }
-  & node $cliEntry gateway restart
+  & $nodeExe $cliEntry gateway restart
   if ($LASTEXITCODE -ne 0) { throw 'Upgraded gateway failed to restart.' }
-  & node $cliEntry gateway status --require-rpc
+  & $nodeExe $cliEntry gateway status --require-rpc
   if ($LASTEXITCODE -ne 0) { throw 'Upgraded gateway status failed.' }
-  Save-OpenClawInstanceLauncher -Root $root -InstanceProfile $instanceProfile -CliEntry $cliEntry -Port $port
+  Save-OpenClawInstanceLauncher -Root $root -InstanceProfile $instanceProfile -CliEntry $cliEntry -Port $port -Node $nodeExe
 } catch {
   $failure = $_
   if ($configChanged) { Copy-Item -LiteralPath (Join-Path (Join-Path $backup 'state') 'openclaw.json') -Destination $configPath -Force }

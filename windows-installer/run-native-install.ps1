@@ -231,6 +231,9 @@ $mutex = $null
 $stage = 'input'
 $settings = $null
 $lastAutoHealSummary = ''
+$lastAutoHealDiagnosticError = ''
+$primaryInstallerError = ''
+$primaryTechnicalDetail = ''
 $lastTechnicalDetail = ''
 $diagJsonFile = "$LogFile.diag.json"
 $zaloStageFile = "$LogFile.zalo-stage"
@@ -485,10 +488,21 @@ requires_openai_auth = true
           try { [IO.File]::ReadAllText($installCaptureFile, [Text.Encoding]::UTF8) } catch { '' }
         } else { $script:lastTechnicalDetail }
         $edHealRes = Invoke-CodexAutoHeal -Stage 'editor' -ErrorCode $edErr -ErrorDetail $edDetail -OpenClawRoot $root -PayloadRoot $PayloadRoot -Settings $EditorSettingsObj -StatusFile $LogFile -Attempt $edTry
-        if (-not $edHealRes.Invoked) { break }
+        if (-not $edHealRes.Invoked) {
+          if ($edHealRes.PSObject.Properties['DiagnosticError'] -and $edHealRes.DiagnosticError) {
+            $script:lastAutoHealDiagnosticError = [string]$edHealRes.DiagnosticError
+          }
+          break
+        }
+        if ($edHealRes.PSObject.Properties['DiagnosticError'] -and $edHealRes.DiagnosticError) {
+          $script:lastAutoHealDiagnosticError = [string]$edHealRes.DiagnosticError
+        }
         if ($edHealRes.Summary) { $script:lastAutoHealSummary = $edHealRes.Summary }
         if ($edHealRes.PSObject.Properties['Transcript'] -and $edHealRes.Transcript) {
           $script:lastTechnicalDetail = ($script:lastTechnicalDetail + "`r`n`r`n--- Nhật ký Codex tự sửa lỗi (lần $edTry) ---`r`n" + $edHealRes.Transcript).Trim()
+        }
+        if ($edHealRes.ExitCode -ne 0 -and -not [string]::IsNullOrWhiteSpace($script:lastAutoHealDiagnosticError)) {
+          break
         }
         Write-SafeStatus "Codex CLI đã xử lý sự cố bước Antigravity/Codex (lần $edTry/2). Đang kiểm tra lại..."
         try {
@@ -992,16 +1006,27 @@ requires_openai_auth = true
       Write-RedactedInstallLog -Entry 'OpenClaw native installation & verification succeeded.'
     } catch {
       $coreErr = [string]$_.Exception.Message
+      $primaryInstallerError = $coreErr
       $lastTechnicalDetail = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
       Write-RedactedInstallLog -Entry ("ERROR ($coreErr): " + $lastTechnicalDetail)
       if ($persistentInstallLog -and (Test-Path -LiteralPath $persistentInstallLog -PathType Leaf)) {
         try {
-          $recentLogTail = (@(Get-Content -LiteralPath $persistentInstallLog -Tail 30 -ErrorAction SilentlyContinue) -join "`r`n").Trim()
+          $recentLogTail = (@(Get-Content -LiteralPath $persistentInstallLog -Encoding UTF8 -Tail 30 -ErrorAction SilentlyContinue) -join "`r`n").Trim()
           if ($recentLogTail) {
             $lastTechnicalDetail = ($lastTechnicalDetail + "`r`n`r`n--- Nhật ký tiến trình cài đặt gần nhất ---`r`n" + (Format-RedactedLogLine -RawText $recentLogTail -SettingsObj $settings)).Trim()
           }
         } catch { }
       }
+      $npmInstallLogPath = Join-Path $root 'logs\npm-install.log'
+      if (Test-Path -LiteralPath $npmInstallLogPath -PathType Leaf) {
+        try {
+          $npmLogTail = (@(Get-Content -LiteralPath $npmInstallLogPath -Encoding UTF8 -Tail 30 -ErrorAction SilentlyContinue) -join "`r`n").Trim()
+          if ($npmLogTail) {
+            $lastTechnicalDetail = ($lastTechnicalDetail + "`r`n`r`n--- Nhật ký npm gần nhất ---`r`n" + (Format-RedactedLogLine -RawText $npmLogTail -SettingsObj $settings)).Trim()
+          }
+        } catch { }
+      }
+      $primaryTechnicalDetail = $lastTechnicalDetail
       [void](Write-SharedUtf8FileWithRetry -Path $installCaptureFile -Content $lastTechnicalDetail)
       $canHeal = (Get-Command -Name 'Invoke-CodexAutoHeal' -ErrorAction Ignore) -and
         (Get-Command -Name 'Test-IsAutoHealableError' -ErrorAction Ignore) -and
@@ -1027,13 +1052,28 @@ requires_openai_auth = true
           $healResult = Invoke-CodexAutoHeal -Stage $stage -ErrorCode $coreErr -ErrorDetail $captureDetail -OpenClawRoot $root -PayloadRoot $PayloadRoot -Settings $settings -StatusFile $LogFile -Attempt $healTry
         } catch {
           $healErrMsg = [string]$_.Exception.Message
+          $lastAutoHealDiagnosticError = Format-RedactedLogLine -RawText $healErrMsg -SettingsObj $settings
           Write-RedactedInstallLog -Entry ("AUTO_HEAL_SKIPPED ($healErrMsg) while handling core error: $coreErr")
           break
         }
-        if (-not $healResult -or -not $healResult.Invoked) { break }
+        if (-not $healResult -or -not $healResult.Invoked) {
+          if ($healResult -and $healResult.PSObject.Properties['DiagnosticError'] -and $healResult.DiagnosticError) {
+            $lastAutoHealDiagnosticError = [string]$healResult.DiagnosticError
+          } elseif ($healResult -and $healResult.PSObject.Properties['Summary'] -and $healResult.Summary) {
+            $lastAutoHealDiagnosticError = [string]$healResult.Summary
+          }
+          break
+        }
+        if ($healResult.PSObject.Properties['DiagnosticError'] -and $healResult.DiagnosticError) {
+          $lastAutoHealDiagnosticError = [string]$healResult.DiagnosticError
+        }
         if ($healResult.Summary) { $lastAutoHealSummary = $healResult.Summary }
         if ($healResult.PSObject.Properties['Transcript'] -and $healResult.Transcript) {
           $lastTechnicalDetail = ($lastTechnicalDetail + "`r`n`r`n--- Nhật ký Codex tự sửa lỗi (lần $healTry) ---`r`n" + $healResult.Transcript).Trim()
+        }
+        if ($healResult.ExitCode -ne 0 -and -not [string]::IsNullOrWhiteSpace($lastAutoHealDiagnosticError)) {
+          Write-RedactedInstallLog -Entry ("AUTO_HEAL_ERROR (exit=$($healResult.ExitCode)): $lastAutoHealDiagnosticError (primary error preserved: $primaryInstallerError)")
+          break
         }
         Write-SafeStatus "Codex CLI đã xử lý sự cố (lần $healTry/2). Đang kiểm tra nghiệm thu lại..."
         try {
@@ -1054,13 +1094,25 @@ requires_openai_auth = true
           $healedCore = $true
           break
         } catch {
-          $coreErr = [string]$_.Exception.Message
+          $retryErr = [string]$_.Exception.Message
+          if (-not (Test-Path -LiteralPath (Join-Path $root 'openclaw.json') -PathType Leaf) -and
+              $retryErr -eq 'incomplete-installation' -and
+              $primaryInstallerError -in @('Private OpenClaw installation failed.', 'openclaw-npm-verification-failed')) {
+            $coreErr = $primaryInstallerError
+          } else {
+            $coreErr = $retryErr
+          }
           $retryTrace = Get-SafeRecentErrorTrace -CaughtRecord $_ -SettingsObj $settings
           if ($retryTrace) { $lastTechnicalDetail = ($lastTechnicalDetail + "`r`n" + $retryTrace).Trim() }
           if (-not (Test-IsAutoHealableError -ErrorCode $coreErr -Stage $stage)) { throw }
         }
       }
-      if (-not $healedCore) { throw $coreErr }
+      if (-not $healedCore) {
+        if ($primaryInstallerError -in @('Private OpenClaw installation failed.', 'openclaw-npm-verification-failed')) {
+          $coreErr = $primaryInstallerError
+        }
+        throw $coreErr
+      }
     }
 
     # Re-register Codex CLI shim in %LOCALAPPDATA%\OpenClaw\bin alongside openclaw.cmd & create Desktop shortcut
@@ -1199,6 +1251,8 @@ requires_openai_auth = true
     'Portable Node checksum verification failed.' = 'Mã kiểm tra của gói Node.js không khớp. Bộ cài đã dừng.'
     'Python installer signature verification failed.' = 'Không xác minh được chữ ký số của bộ cài Python.'
     'Private OpenClaw installation failed.' = 'Không cài được OpenClaw qua npm. Hãy kiểm tra kết nối Internet và quyền ghi tệp.'
+    'openclaw-npm-verification-failed' = 'Quá trình npm install đã kết thúc nhưng thiếu tệp gói OpenClaw bắt buộc (package.json hoặc openclaw.cmd). Không thể hoàn tất cài đặt; vui lòng thử cài lại.'
+    'OpenClaw installation verification failed: missing required package.json or openclaw.cmd.' = 'Quá trình npm install đã kết thúc nhưng thiếu tệp gói OpenClaw bắt buộc (package.json hoặc openclaw.cmd). Không thể hoàn tất cài đặt; vui lòng thử cài lại.'
     'missing-payload' = 'Bộ cài thiếu thành phần OpenClaw.'
     'installer-failed' = 'Bước cài OpenClaw trả về lỗi.'
     'incomplete-installation' = 'Bộ cài chưa tạo đủ các tệp cần thiết.'
@@ -1213,11 +1267,11 @@ requires_openai_auth = true
   }
   $message = if ($safeMessages.ContainsKey($code)) { $safeMessages[$code] } else { "Chưa hoàn tất bước $stage. Dữ liệu đã tạo được giữ nguyên." }
   if ($code -eq 'Private OpenClaw installation failed.' -and $lastTechnicalDetail -match 'ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC|ERR_SSL_CIPHER_OPERATION_FAILED|ossl_gcm_stream_update|ciphercommon_gcm|decryption failed or bad record mac|decryption operation failed') {
-    $sslErrTag = if ($lastTechnicalDetail -match 'ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC') { 'ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC' } else { 'ERR_SSL_CIPHER_OPERATION_FAILED' }
-    $message = "Không tải được gói OpenClaw do đường truyền/card mạng hoặc phần mềm diệt virus trên máy đang làm hỏng gói mã hóa HTTPS/TLS ($sslErrTag). Khuyến nghị: 1) Tắt tạm tính năng quét HTTPS/SSL trong Antivirus/VPN; 2) Thử phát Wi-Fi/4G từ điện thoại hoặc đổi mạng khác; 3) Nếu dùng mạng dây/Wi-Fi trên máy, tắt Checksum Offload / Large Send Offload trong cài đặt Card mạng rồi thử lại."
+    $sslErrTag = if ($lastTechnicalDetail -match 'ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC') { 'ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC' } elseif ($lastTechnicalDetail -match 'ossl_gcm_stream_update') { 'ERR_SSL_CIPHER_OPERATION_FAILED (ossl_gcm_stream_update)' } else { 'ERR_SSL_CIPHER_OPERATION_FAILED' }
+    $message = "Không cài được OpenClaw vì npm/OpenSSL không giải mã được dữ liệu HTTPS khi tải gói ($sslErrTag). Bộ cài đã tự động thử Node LTS (nếu có), TLS 1.2, ChaCha20, giảm kết nối đồng thời và bộ nhớ đệm riêng nhưng quá trình tải vẫn lỗi giải mã. Hãy kiểm tra đường truyền mạng (hoặc thử đổi mạng / tắt VPN hoặc proxy nếu đang bật) rồi thử cài lại."
   }
   if ($safeMessages.ContainsKey($code) -and $code -cmatch '^[a-z0-9-]+$') { $message += " Mã chẩn đoán: $code." }
-  if (-not [string]::IsNullOrWhiteSpace($lastAutoHealSummary) -and $lastAutoHealSummary.Trim() -cne 'The system cannot find the path specified.') {
+  if (-not [string]::IsNullOrWhiteSpace($lastAutoHealSummary)) {
     $message += " Ghi chú từ Codex tự sửa lỗi: $lastAutoHealSummary"
   }
   if ($stage -eq 'install' -and (Test-Path -LiteralPath $zaloStageFile)) {
@@ -1242,16 +1296,31 @@ requires_openai_auth = true
       $stage = 'dependencies'
     }
   }
-  Write-RedactedInstallLog -Entry ("FINAL_ERROR [$code]: " + $message + " | " + $lastTechnicalDetail)
+  $primaryErrSummary = if (-not [string]::IsNullOrWhiteSpace($primaryInstallerError)) { $primaryInstallerError } else { $code }
+  if ($primaryErrSummary -eq 'Private OpenClaw installation failed.' -and $lastTechnicalDetail -match '(ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC|ERR_SSL_CIPHER_OPERATION_FAILED|ossl_gcm_stream_update|ciphercommon_gcm)') {
+    $primaryErrSummary = "$primaryErrSummary ($($Matches[1]) - npm/OpenSSL failed to decrypt HTTPS data)"
+  }
+  $structuredDetailParts = New-Object System.Collections.Generic.List[string]
+  [void]$structuredDetailParts.Add("=== Primary installer error ===`r`n$primaryErrSummary")
+  if (-not [string]::IsNullOrWhiteSpace($lastAutoHealDiagnosticError)) {
+    [void]$structuredDetailParts.Add("=== Auto-Heal diagnostic error ===`r`n$lastAutoHealDiagnosticError")
+  }
+  if (-not [string]::IsNullOrWhiteSpace($lastTechnicalDetail)) {
+    [void]$structuredDetailParts.Add($lastTechnicalDetail)
+  }
+  $structuredTechnicalDetail = ($structuredDetailParts -join "`r`n`r`n").Trim()
+  Write-RedactedInstallLog -Entry ("FINAL_ERROR [$code]: " + $message + " | " + $structuredTechnicalDetail)
   try {
     $diagObj = [ordered]@{
-      timestamp        = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-      stage            = $stage
-      code             = $code
-      friendlyMessage  = $message
-      autoHealSummary  = $lastAutoHealSummary
-      technicalDetail  = $lastTechnicalDetail
-      installLogPath   = $persistentInstallLog
+      timestamp             = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+      stage                 = $stage
+      code                  = $code
+      friendlyMessage       = $message
+      primaryInstallerError = $primaryErrSummary
+      autoHealSummary       = $lastAutoHealSummary
+      autoHealError         = $lastAutoHealDiagnosticError
+      technicalDetail       = $structuredTechnicalDetail
+      installLogPath        = $persistentInstallLog
     }
     [void](Write-SharedUtf8FileWithRetry -Path $diagJsonFile -Content ($diagObj | ConvertTo-Json -Depth 5))
   } catch { }

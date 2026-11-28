@@ -303,6 +303,10 @@ function Invoke-ManageWorkerMain {
   if (Test-Path -LiteralPath $codexFile -PathType Leaf) {
     . ([ScriptBlock]::Create([IO.File]::ReadAllText($codexFile, [System.Text.Encoding]::UTF8)))
   }
+  $openClawNpmFile = Join-Path $PayloadDir 'native\openclaw-npm.ps1'
+  if (Test-Path -LiteralPath $openClawNpmFile -PathType Leaf) {
+    . ([ScriptBlock]::Create([IO.File]::ReadAllText($openClawNpmFile, [System.Text.Encoding]::UTF8)))
+  }
   $autoHealFile = Join-Path $PayloadDir 'windows-installer\auto-heal-codex.ps1'
   if (Test-Path -LiteralPath $autoHealFile -PathType Leaf) {
     . ([ScriptBlock]::Create([IO.File]::ReadAllText($autoHealFile, [System.Text.Encoding]::UTF8)))
@@ -310,6 +314,35 @@ function Invoke-ManageWorkerMain {
   $wizardHelperFile = Join-Path $PayloadDir 'windows-installer\wizard-helpers.ps1'
   if (Test-Path -LiteralPath $wizardHelperFile -PathType Leaf) {
     . ([ScriptBlock]::Create([IO.File]::ReadAllText($wizardHelperFile, [System.Text.Encoding]::UTF8)))
+  }
+
+  function Resolve-EmTroLyNodeBinary([string]$OpenClawRoot) {
+    if (Get-Command -Name 'Resolve-EmTroLyNodeToolchains' -ErrorAction SilentlyContinue) {
+      try {
+        $tc = Resolve-EmTroLyNodeToolchains -PayloadRoot $PayloadDir -OpenClawRoot $OpenClawRoot
+        if ($tc -and $tc.Primary -and $tc.Primary.NodeExe) {
+          return [string]$tc.Primary.NodeExe
+        }
+      } catch { }
+    }
+    if ($OpenClawRoot) {
+      $instFile = Join-Path $OpenClawRoot 'installer-instance.json'
+      if (Test-Path -LiteralPath $instFile -PathType Leaf) {
+        try {
+          $inst = [IO.File]::ReadAllText($instFile, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+          if ($inst.node -and (Test-Path -LiteralPath ([string]$inst.node) -PathType Leaf)) {
+            return [string]$inst.node
+          }
+        } catch { }
+      }
+    }
+    if ($env:LOCALAPPDATA) {
+      $depNodes = @(Get-ChildItem (Join-Path $env:LOCALAPPDATA 'MemberInstaller\dependencies\node-v*\node.exe') -ErrorAction SilentlyContinue | Sort-Object FullName -Descending)
+      if ($depNodes.Count -gt 0) { return $depNodes[0].FullName }
+    }
+    $cmd = @(Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Where-Object { $_.Source -and $_.Source -notlike '*\WindowsApps\*' } | Select-Object -First 1)
+    if ($cmd.Count -gt 0 -and $cmd[0].Source) { return $cmd[0].Source }
+    return ''
   }
 
   $req = $null
@@ -324,6 +357,8 @@ function Invoke-ManageWorkerMain {
   $configPath = Join-Path $root 'openclaw.json'
   $instancePath = Join-Path $root 'installer-instance.json'
   $lastManageTechDetail = ''
+  $lastManagePrimaryError = ''
+  $lastAutoHealDiagnosticError = ''
 
   try {
     function Remove-EmTroLyDirectoryTree([string]$TargetDir) {
@@ -1215,6 +1250,9 @@ try {
       }
       $hintDetail = if ($req.PSObject.Properties['error_detail'] -and $req.error_detail) { [string]$req.error_detail } else { 'Người dùng yêu cầu tự động kiểm tra toàn diện log, cấu hình, PATH, Gateway và sửa mọi lỗi tồn đọng.' }
       $healRes = Invoke-CodexAutoHeal -Stage 'manual-diagnose-repair' -ErrorCode 'user-requested-auto-heal' -ErrorDetail $hintDetail -OpenClawRoot $root -PayloadRoot $PayloadDir -Settings $healSettings -StatusFile $StatusPath -Attempt 1
+      if ($healRes.PSObject.Properties['DiagnosticError'] -and $healRes.DiagnosticError) {
+        $lastAutoHealDiagnosticError = [string]$healRes.DiagnosticError
+      }
       if ($healRes.PSObject.Properties['Transcript'] -and $healRes.Transcript) {
         $lastManageTechDetail = [string]$healRes.Transcript
       } elseif ($healRes.Summary) {
@@ -1288,33 +1326,88 @@ try {
       [IO.File]::WriteAllText((Join-Path $rtTarget 'package.json'), ($rtPkg | ConvertTo-Json -Depth 4), $utf8NoBom)
 
       Write-ManageStatus $StatusPath "Đang tải và nâng cấp OpenClaw lên phiên bản v$targetVer (giữ nguyên toàn bộ dữ liệu cũ)..."
-      $upgExit = 1
-      $hadUpgNodeOpts = Test-Path Env:NODE_OPTIONS
-      $oldUpgNodeOpts = if ($hadUpgNodeOpts) { $env:NODE_OPTIONS } else { $null }
-      $hadUpgIa32 = Test-Path Env:OPENSSL_ia32cap
-      $oldUpgIa32 = if ($hadUpgIa32) { $env:OPENSSL_ia32cap } else { $null }
-      try {
-        for ($uTry = 1; $uTry -le 3; $uTry++) {
-          if ($uTry -ge 2) {
-            $env:OPENSSL_ia32cap = '~0x200000200000000'
-            $env:NODE_OPTIONS = '--tls-max-v1.2 --tls-cipher-list=ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-CHACHA20-POLY1305:DEFAULT'
+      if (Get-Command -Name 'Invoke-OpenClawNpmInstall' -ErrorAction SilentlyContinue) {
+        $upgNpmRes = $null
+        try {
+          $upgNpmRes = Invoke-OpenClawNpmInstall `
+            -RuntimeDir $rtTarget `
+            -OpenClawRoot $root `
+            -OpenClawVersion $targetVer `
+            -LogsDir (Join-Path $root 'logs') `
+            -NpmCacheRoot (Join-Path $root 'npm-cache') `
+            -PayloadRoot $PayloadDir `
+            -StatusCallback { param($msg) Write-ManageStatus $StatusPath $msg } `
+            -LogCallback { param($msg) Write-ManageStatus $StatusPath $msg }
+        } catch {
+          $upgErr = [string]$_.Exception.Message
+          $lastRes = Get-Variable -Name 'LastOpenClawNpmResult' -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+          if ($lastRes -and $lastRes.LastOutput) {
+            $lastManageTechDetail = [string]$lastRes.LastOutput
           }
-          if ($uTry -ge 3) {
-            & $npmCmd install --prefix $rtTarget "openclaw@$targetVer" --no-audit --no-fund --maxsockets=1 --registry=https://registry.npmmirror.com/ *> $null
-          } elseif ($uTry -eq 2) {
-            & $npmCmd install --prefix $rtTarget "openclaw@$targetVer" --no-audit --no-fund --maxsockets=2 *> $null
+          if ($upgErr -eq 'openclaw-npm-verification-failed' -or ($lastRes -and $lastRes.VerificationFailed)) {
+            $lastManagePrimaryError = if ($lastRes -and $lastRes.ErrorMessage) { [string]$lastRes.ErrorMessage } else { 'OpenClaw npm verification failed: missing package.json or openclaw.cmd.' }
+            if (-not $lastManageTechDetail) { $lastManageTechDetail = $lastManagePrimaryError }
+            throw 'openclaw-npm-verification-failed'
+          }
+          if ($lastRes -and $lastRes.IsTlsError) {
+            $lastManagePrimaryError = 'npm/OpenSSL không giải mã được dữ liệu HTTPS khi nâng cấp OpenClaw.'
+          } elseif ($lastManageTechDetail) {
+            $lastManagePrimaryError = ($lastManageTechDetail -split "`r?`n" | Where-Object { $_ } | Select-Object -Last 8) -join ' | '
           } else {
-            & $npmCmd install --prefix $rtTarget "openclaw@$targetVer" --no-audit --no-fund *> $null
+            $lastManagePrimaryError = $upgErr
           }
-          $upgExit = $LASTEXITCODE
-          if ($upgExit -eq 0) { break }
-          if ($uTry -lt 3) { Start-Sleep -Seconds (2 * $uTry) }
+          throw 'openclaw-upgrade-install-failed'
         }
-      } finally {
-        if ($hadUpgNodeOpts) { $env:NODE_OPTIONS = $oldUpgNodeOpts } elseif (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
-        if ($hadUpgIa32) { $env:OPENSSL_ia32cap = $oldUpgIa32 } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
+        if ($upgNpmRes -and $upgNpmRes.UsedNodeExe) {
+          $nodeExe = [string]$upgNpmRes.UsedNodeExe
+          $nodeDir = Split-Path -Parent $nodeExe
+          $env:Path = "$nodeDir;$env:Path"
+        }
+      } else {
+        $upgExit = 1
+        $upgCacheRoot = Join-Path $root 'npm-cache'
+        $hadUpgCache = Test-Path Env:NPM_CONFIG_CACHE
+        $oldUpgCache = if ($hadUpgCache) { $env:NPM_CONFIG_CACHE } else { $null }
+        $hadUpgNodeOpts = Test-Path Env:NODE_OPTIONS
+        $oldUpgNodeOpts = if ($hadUpgNodeOpts) { $env:NODE_OPTIONS } else { $null }
+        $hadUpgIa32 = Test-Path Env:OPENSSL_ia32cap
+        $oldUpgIa32 = if ($hadUpgIa32) { $env:OPENSSL_ia32cap } else { $null }
+        try {
+          for ($uTry = 1; $uTry -le 4; $uTry++) {
+            $attemptCache = Join-Path $upgCacheRoot ("upgrade-attempt-$uTry")
+            New-Item -ItemType Directory -Path $attemptCache -Force | Out-Null
+            $env:NPM_CONFIG_CACHE = $attemptCache
+            if ($uTry -ge 2) {
+              $env:OPENSSL_ia32cap = '~0x200000200000000'
+            }
+            if ($uTry -eq 3) {
+              $env:NODE_OPTIONS = '--tls-max-v1.2'
+            } elseif ($uTry -ge 4) {
+              $env:NODE_OPTIONS = '--tls-max-v1.2 --tls-cipher-list=ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:!AESGCM:!GCM'
+            }
+            if ($uTry -ge 4) {
+              & $npmCmd install --prefix $rtTarget "openclaw@$targetVer" --no-audit --no-fund --maxsockets=1 --registry=https://registry.npmmirror.com/ *> $null
+            } elseif ($uTry -ge 2) {
+              & $npmCmd install --prefix $rtTarget "openclaw@$targetVer" --no-audit --no-fund --maxsockets=1 --registry=https://registry.npmjs.org/ *> $null
+            } else {
+              & $npmCmd install --prefix $rtTarget "openclaw@$targetVer" --no-audit --no-fund --maxsockets=2 --registry=https://registry.npmjs.org/ *> $null
+            }
+            $upgExit = $LASTEXITCODE
+            if ($upgExit -eq 0) { break }
+            if ($uTry -lt 4) { Start-Sleep -Seconds (2 * $uTry) }
+          }
+        } finally {
+          if ($hadUpgCache) { $env:NPM_CONFIG_CACHE = $oldUpgCache } elseif (Test-Path Env:NPM_CONFIG_CACHE) { Remove-Item Env:NPM_CONFIG_CACHE -ErrorAction SilentlyContinue }
+          if ($hadUpgNodeOpts) { $env:NODE_OPTIONS = $oldUpgNodeOpts } elseif (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
+          if ($hadUpgIa32) { $env:OPENSSL_ia32cap = $oldUpgIa32 } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
+        }
+        if ($upgExit -ne 0) { throw 'openclaw-upgrade-install-failed' }
+        $pkgCheck = Join-Path $rtTarget 'node_modules\openclaw\package.json'
+        $cmdCheck = Join-Path $rtTarget 'node_modules\.bin\openclaw.cmd'
+        if (-not (Test-Path -LiteralPath $pkgCheck -PathType Leaf) -or -not (Test-Path -LiteralPath $cmdCheck -PathType Leaf)) {
+          throw 'openclaw-npm-verification-failed'
+        }
       }
-      if ($upgExit -ne 0) { throw 'openclaw-upgrade-install-failed' }
 
       $newCliEntry = Join-Path $rtTarget 'node_modules\openclaw\openclaw.mjs'
       if (-not (Test-Path -LiteralPath $newCliEntry -PathType Leaf)) { throw 'openclaw-upgrade-entry-missing' }
@@ -1376,6 +1469,8 @@ try {
       'missing-api-key' = 'Chưa tìm thấy khóa API. Hãy kiểm tra Provider API Key ở mục Cấu hình nhanh rồi thử lại.'
       'codex-autoheal-unavailable' = 'Chưa tìm thấy hoặc chưa tải được Codex CLI để tự sửa lỗi. Hãy kiểm tra kết nối Internet.'
       'codex-autoheal-failed' = 'Codex CLI chưa thể tự khắc phục hết lỗi này — xem chi tiết nguyên nhân ngay bên dưới.'
+      'openclaw-upgrade-install-failed' = 'Không thể tải hoặc cài đặt OpenClaw bằng npm (nguyên nhân chính: lỗi kết nối/giải mã HTTPS npm/OpenSSL hoặc gián đoạn mạng).'
+      'openclaw-npm-verification-failed' = 'npm kết thúc bình thường nhưng thiếu package.json hoặc openclaw.cmd trong thư mục runtime OpenClaw.'
       'invalid-qr-owner' = 'QR Owner ID phải nằm trong danh sách Owner IDs.'
       'config-validation-failed' = 'Cấu hình mới không hợp lệ; hệ thống đã tự khôi phục bản cấu hình cũ an toàn.'
       'gateway-command-failed' = 'Đã lưu cấu hình nhưng chưa khởi động lại được Gateway. Hãy thử bấm Kiểm tra & Khởi động lại.'
@@ -1420,12 +1515,14 @@ try {
         Remove-SensitiveStrings -Text $rawTech -Secrets $secretsToScrub
       } else { $rawTech }
       $diagManage = [ordered]@{
-        timestamp       = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-        stage           = $action
-        code            = $errCode
-        friendlyMessage = $safeFriendly
-        autoHealSummary = ''
-        technicalDetail = $safeTech
+        timestamp             = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+        stage                 = $action
+        code                  = $errCode
+        friendlyMessage       = $safeFriendly
+        primaryInstallerError = if (Get-Command Remove-SensitiveStrings -ErrorAction SilentlyContinue) { Remove-SensitiveStrings -Text $lastManagePrimaryError -Secrets $secretsToScrub } else { $lastManagePrimaryError }
+        autoHealSummary       = ''
+        autoHealError         = if (Get-Command Remove-SensitiveStrings -ErrorAction SilentlyContinue) { Remove-SensitiveStrings -Text $lastAutoHealDiagnosticError -Secrets $secretsToScrub } else { $lastAutoHealDiagnosticError }
+        technicalDetail       = $safeTech
       }
       [IO.File]::WriteAllText("$StatusPath.diag.json", ($diagManage | ConvertTo-Json -Depth 5), $utf8NoBom)
       $friendly = $safeFriendly

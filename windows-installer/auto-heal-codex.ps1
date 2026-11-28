@@ -90,6 +90,17 @@ function Test-EmTroLyCodexBinaryRunnable {
       }
     }
   }
+  if ($norm -match '\.(cmd|bat)$') {
+    try {
+      $cmdBody = [IO.File]::ReadAllText($Executable, [System.Text.Encoding]::UTF8)
+      foreach ($m in [regex]::Matches($cmdBody, '"([A-Za-z]:\\[^"\r\n]+\.(?:exe|js))"')) {
+        $refPath = $m.Groups[1].Value
+        if ($refPath -and -not (Test-Path -LiteralPath $refPath -PathType Leaf)) {
+          return $false
+        }
+      }
+    } catch { }
+  }
   return $true
 }
 
@@ -149,8 +160,26 @@ function Ensure-AutoHealCodexBinary {
     } catch { }
   }
 
-  $npmCmd = @(Get-Command npm.cmd -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1)
-  if ($npmCmd.Count -eq 0 -and $PayloadRoot) {
+  if (-not (Get-Command -Name 'Invoke-EmTroLyNpmPackageWithTlsRetry' -ErrorAction Ignore) -and $PayloadRoot) {
+    $npmHelperFile = Join-Path $PayloadRoot 'native\openclaw-npm.ps1'
+    if (Test-Path -LiteralPath $npmHelperFile -PathType Leaf) {
+      try { . ([ScriptBlock]::Create([IO.File]::ReadAllText($npmHelperFile, [System.Text.Encoding]::UTF8))) } catch { }
+    }
+  }
+
+  $npmCmdPath = ''
+  $depBaseHeal = Join-Path $env:LOCALAPPDATA 'MemberInstaller\dependencies'
+  if (Test-Path -LiteralPath $depBaseHeal -PathType Container) {
+    foreach ($nd in @(Get-ChildItem -LiteralPath $depBaseHeal -Directory -Filter 'node-v*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending)) {
+      $candNpm = Join-Path $nd.FullName 'npm.cmd'
+      if (Test-Path -LiteralPath $candNpm -PathType Leaf) { $npmCmdPath = $candNpm; break }
+    }
+  }
+  if (-not $npmCmdPath) {
+    $npmCmd = @(Get-Command npm.cmd -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($npmCmd.Count -gt 0 -and $npmCmd[0].Source) { $npmCmdPath = $npmCmd[0].Source }
+  }
+  if (-not $npmCmdPath -and $PayloadRoot) {
     $depScript = Join-Path $PayloadRoot 'native\user-dependencies.ps1'
     if (Test-Path -LiteralPath $depScript -PathType Leaf) {
       try {
@@ -158,10 +187,11 @@ function Ensure-AutoHealCodexBinary {
         Initialize-UserDependencies
         $env:Path = $env:Path + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
         $npmCmd = @(Get-Command npm.cmd -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1)
+        if ($npmCmd.Count -gt 0 -and $npmCmd[0].Source) { $npmCmdPath = $npmCmd[0].Source }
       } catch { }
     }
   }
-  if ($npmCmd.Count -eq 0) { return '' }
+  if (-not $npmCmdPath) { return '' }
 
   try {
     [void][IO.Directory]::CreateDirectory($autoHealRoot)
@@ -169,24 +199,50 @@ function Ensure-AutoHealCodexBinary {
     if (-not (Test-Path -LiteralPath $pkgFile -PathType Leaf)) {
       [IO.File]::WriteAllText($pkgFile, '{"name":"emtroly-autoheal-codex","private":true}', (New-Object System.Text.UTF8Encoding($false)))
     }
+    if (Get-Command -Name 'Invoke-EmTroLyNpmPackageWithTlsRetry' -ErrorAction Ignore) {
+      $healInstall = Invoke-EmTroLyNpmPackageWithTlsRetry `
+        -PrefixDir $autoHealRoot `
+        -Packages @('@openai/codex', '@openai/codex-win32-x64') `
+        -CacheRootDir (Join-Path $autoHealRoot 'npm-cache') `
+        -LogsDir (Join-Path $autoHealRoot 'logs') `
+        -PayloadRoot $PayloadRoot `
+        -ExtraNpmFlags @('--include=optional') `
+        -LogFilePrefix 'autoheal-codex-npm' `
+        -CleanNodeModulesOnFailure
+      if ($healInstall.Success -and (Test-EmTroLyCodexBinaryRunnable -Executable $cachedCmd)) {
+        return $cachedCmd
+      }
+      return ''
+    }
+
     $prevEA = $ErrorActionPreference
+    $hadHealCache = Test-Path Env:NPM_CONFIG_CACHE
+    $oldHealCache = if ($hadHealCache) { $env:NPM_CONFIG_CACHE } else { $null }
     $hadHealNodeOpts = Test-Path Env:NODE_OPTIONS
     $oldHealNodeOpts = if ($hadHealNodeOpts) { $env:NODE_OPTIONS } else { $null }
     $hadHealIa32 = Test-Path Env:OPENSSL_ia32cap
     $oldHealIa32 = if ($hadHealIa32) { $env:OPENSSL_ia32cap } else { $null }
+    $healCacheBase = Join-Path $autoHealRoot 'npm-cache'
     try {
       $ErrorActionPreference = 'Continue'
-      & $npmCmd[0].Source install --prefix $autoHealRoot --include=optional '@openai/codex' '@openai/codex-win32-x64' --no-audit --no-fund --maxsockets=3 *> $null
+      $healCache1 = Join-Path $healCacheBase 'attempt-1'
+      [void][IO.Directory]::CreateDirectory($healCache1)
+      $env:NPM_CONFIG_CACHE = $healCache1
+      & $npmCmdPath install --prefix $autoHealRoot --include=optional '@openai/codex' '@openai/codex-win32-x64' --no-audit --no-fund --maxsockets=2 *> $null
       if ($LASTEXITCODE -ne 0 -or -not (Test-EmTroLyCodexBinaryRunnable -Executable $cachedCmd)) {
         if (Test-Path -LiteralPath (Join-Path $autoHealRoot 'node_modules') -PathType Container) {
           Remove-Item -LiteralPath (Join-Path $autoHealRoot 'node_modules') -Recurse -Force -ErrorAction SilentlyContinue
         }
+        $healCache2 = Join-Path $healCacheBase 'attempt-2'
+        [void][IO.Directory]::CreateDirectory($healCache2)
+        $env:NPM_CONFIG_CACHE = $healCache2
         $env:OPENSSL_ia32cap = '~0x200000200000000'
-        $env:NODE_OPTIONS = '--tls-max-v1.2 --tls-cipher-list=ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-CHACHA20-POLY1305:DEFAULT'
-        & $npmCmd[0].Source install --prefix $autoHealRoot --include=optional '@openai/codex' '@openai/codex-win32-x64' --no-audit --no-fund --maxsockets=1 --registry=https://registry.npmmirror.com/ *> $null
+        $env:NODE_OPTIONS = '--tls-max-v1.2 --tls-cipher-list=ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:!AESGCM:!GCM'
+        & $npmCmdPath install --prefix $autoHealRoot --include=optional '@openai/codex' '@openai/codex-win32-x64' --no-audit --no-fund --maxsockets=1 --registry=https://registry.npmmirror.com/ *> $null
       }
     } finally {
       $ErrorActionPreference = $prevEA
+      if ($hadHealCache) { $env:NPM_CONFIG_CACHE = $oldHealCache } elseif (Test-Path Env:NPM_CONFIG_CACHE) { Remove-Item Env:NPM_CONFIG_CACHE -ErrorAction SilentlyContinue }
       if ($hadHealNodeOpts) { $env:NODE_OPTIONS = $oldHealNodeOpts } elseif (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
       if ($hadHealIa32) { $env:OPENSSL_ia32cap = $oldHealIa32 } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
     }
@@ -331,13 +387,13 @@ function Invoke-CodexAutoHeal {
     }
   }
   if ([string]::IsNullOrWhiteSpace($apiKey)) {
-    return [pscustomobject]@{ Invoked = $false; Reason = 'missing-api-key'; ExitCode = 2; Summary = 'Thiếu khóa API để chạy Codex tự sửa lỗi.' }
+    return [pscustomobject]@{ Invoked = $false; Reason = 'missing-api-key'; ExitCode = 2; Summary = ''; DiagnosticError = 'Thiếu khóa API để chạy Codex tự sửa lỗi.' }
   }
 
   & $writeStatus "Phát hiện sự cố tại bước $Stage ($ErrorCode) — Đang chuẩn bị Codex CLI để tự động sửa lỗi (lần $Attempt/2)..."
   $codexBin = Ensure-AutoHealCodexBinary -PayloadRoot $PayloadRoot
   if ([string]::IsNullOrWhiteSpace($codexBin) -or -not (Test-Path -LiteralPath $codexBin -PathType Leaf)) {
-    return [pscustomobject]@{ Invoked = $false; Reason = 'codex-unavailable'; ExitCode = 2; Summary = 'Chưa khởi tạo được công cụ Codex CLI tự sửa lỗi.' }
+    return [pscustomobject]@{ Invoked = $false; Reason = 'codex-unavailable'; ExitCode = 2; Summary = ''; DiagnosticError = 'Chưa khởi tạo được công cụ Codex CLI tự sửa lỗi.' }
   }
 
   $tempDir = Join-Path $env:TEMP ('emtroly-autoheal-' + [guid]::NewGuid().ToString('N'))
@@ -453,7 +509,20 @@ requires_openai_auth = true
     [Console]::OutputEncoding = $utf8NoBom
     $proc = New-Object System.Diagnostics.Process
     $proc.StartInfo = $psi
-    [void]$proc.Start()
+    try {
+      [void]$proc.Start()
+    } catch {
+      $startErr = Remove-SensitiveStrings -Text ([string]$_.Exception.Message) -Secrets $secretsToMask
+      $proc.Dispose()
+      return [pscustomobject]@{
+        Invoked         = $false
+        Reason          = 'launch-failed'
+        ExitCode        = 1
+        Summary         = ''
+        DiagnosticError = $startErr
+        Transcript      = $startErr
+      }
+    }
     $outTask = $proc.StandardOutput.ReadToEndAsync()
     $errTask = $proc.StandardError.ReadToEndAsync()
     $stdinPipeFailed = $false
@@ -481,9 +550,16 @@ requires_openai_auth = true
       } catch { }
       try { $proc.Kill() } catch { }
       $proc.Dispose()
-      return [pscustomobject]@{ Invoked = $true; ExitCode = 124; Summary = 'Hết thời gian chờ Codex CLI tự sửa lỗi.'; Transcript = 'Quá thời gian 300 giây khi chạy Codex CLI tự sửa lỗi.' }
+      return [pscustomobject]@{
+        Invoked         = $true
+        ExitCode        = 124
+        Summary         = ''
+        DiagnosticError = 'Hết thời gian chờ Codex CLI tự sửa lỗi (300 giây).'
+        Transcript      = 'Quá thời gian 300 giây khi chạy Codex CLI tự sửa lỗi.'
+      }
     }
 
+    $proc.WaitForExit()
     $exitCode = $proc.ExitCode
     $rawOut = $outTask.GetAwaiter().GetResult()
     $rawErr = $errTask.GetAwaiter().GetResult()
@@ -497,18 +573,36 @@ requires_openai_auth = true
     })
     $safeTranscript = Remove-SensitiveStrings -Text (($filteredLines | Select-Object -Last 35) -join "`r`n") -Secrets $secretsToMask
 
-    $summary = ''
+    $summaryFromFile = ''
     if (Test-Path -LiteralPath $summaryFile -PathType Leaf) {
-      $summary = ([IO.File]::ReadAllText($summaryFile, [System.Text.Encoding]::UTF8)).Trim()
+      $summaryFromFile = ([IO.File]::ReadAllText($summaryFile, [System.Text.Encoding]::UTF8)).Trim()
     }
-    if ([string]::IsNullOrWhiteSpace($summary)) {
-      if ($filteredLines.Count -gt 0) {
-        $summary = ($filteredLines | Select-Object -Last 3) -join ' '
+    $safeSummary = ''
+    $safeDiagError = ''
+    if ($exitCode -eq 0) {
+      $rawSummary = if (-not [string]::IsNullOrWhiteSpace($summaryFromFile)) {
+        $summaryFromFile
+      } elseif ($filteredLines.Count -gt 0) {
+        ($filteredLines | Select-Object -Last 3) -join ' '
+      } else { '' }
+      $safeSummary = Remove-SensitiveStrings -Text $rawSummary -Secrets $secretsToMask
+      if ($safeSummary.Length -gt 320) {
+        $safeSummary = $safeSummary.Substring(0, 317) + '...'
       }
-    }
-    $safeSummary = Remove-SensitiveStrings -Text $summary -Secrets $secretsToMask
-    if ($safeSummary.Length -gt 320) {
-      $safeSummary = $safeSummary.Substring(0, 317) + '...'
+    } else {
+      if (-not [string]::IsNullOrWhiteSpace($summaryFromFile)) {
+        $safeSummary = Remove-SensitiveStrings -Text $summaryFromFile -Secrets $secretsToMask
+        if ($safeSummary.Length -gt 320) { $safeSummary = $safeSummary.Substring(0, 317) + '...' }
+      }
+      $rawDiag = if ($filteredLines.Count -gt 0) {
+        ($filteredLines | Select-Object -Last 3) -join ' '
+      } else {
+        "Codex Auto-Heal process exited with code $exitCode."
+      }
+      $safeDiagError = Remove-SensitiveStrings -Text $rawDiag -Secrets $secretsToMask
+      if ($safeDiagError.Length -gt 320) {
+        $safeDiagError = $safeDiagError.Substring(0, 317) + '...'
+      }
     }
 
     $auditTargets = @()
@@ -522,16 +616,18 @@ requires_openai_auth = true
       try {
         [void][IO.Directory]::CreateDirectory($auditDir)
         $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-        $auditLine = "[$stamp] stage=$Stage error=$ErrorCode attempt=$Attempt exit=$exitCode summary=$safeSummary`r`n"
+        $auditText = if ($safeSummary) { $safeSummary } else { $safeDiagError }
+        $auditLine = "[$stamp] stage=$Stage error=$ErrorCode attempt=$Attempt exit=$exitCode summary=$auditText`r`n"
         [IO.File]::AppendAllText((Join-Path $auditDir 'codex-autoheal.log'), $auditLine, $utf8NoBom)
       } catch { }
     }
 
     return [pscustomobject]@{
-      Invoked    = $true
-      ExitCode   = $exitCode
-      Summary    = $safeSummary
-      Transcript = $safeTranscript
+      Invoked         = $true
+      ExitCode        = $exitCode
+      Summary         = $safeSummary
+      DiagnosticError = $safeDiagError
+      Transcript      = $safeTranscript
     }
   } finally {
     if (Test-Path -LiteralPath $tempDir) {
