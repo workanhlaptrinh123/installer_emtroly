@@ -1494,6 +1494,31 @@ $xamlText = @'
               </Grid>
             </Border>
 
+            <!-- Component 2B: Antigravity Runtime CLI Update / Supplement (agy.exe) -->
+            <Border Style="{StaticResource CardBorder}" Padding="16,11" Margin="0,0,0,8">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="28"/>
+                  <ColumnDefinition Width="44"/>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="Auto"/>
+                  <ColumnDefinition Width="172"/>
+                </Grid.ColumnDefinitions>
+                <CheckBox x:Name="ModCheckAgyCli" Grid.Column="0" IsChecked="False" VerticalAlignment="Center"/>
+                <Border Grid.Column="1" Width="32" Height="32" CornerRadius="8" Background="#EFF6FF" BorderBrush="#DBEAFE" BorderThickness="1" HorizontalAlignment="Left" VerticalAlignment="Center">
+                  <TextBlock Text="CLI" FontSize="11" FontWeight="Bold" Foreground="#2563EB" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,12,0">
+                  <TextBlock Text="Cập nhật Antigravity Runtime CLI (agy.exe)" FontSize="14" FontWeight="Bold" Foreground="#0F172A"/>
+                  <TextBlock x:Name="ModDetailAgyCli" Text="Tải / cập nhật riêng agy.exe (~234 MB) để mở Antigravity không lỗi 'Download stalled 30000ms' mà không cần cài lại IDE." FontSize="12" Foreground="#64748B" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                </StackPanel>
+                <Border x:Name="ModBadgeAgyCli" Grid.Column="3" MinWidth="102" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12" Padding="10,4" Margin="0,0,12,0" HorizontalAlignment="Right" VerticalAlignment="Center">
+                  <TextBlock x:Name="ModBadgeTextAgyCli" Text="○ Chưa có" FontSize="11.5" FontWeight="Bold" Foreground="#475569" HorizontalAlignment="Center"/>
+                </Border>
+                <Button x:Name="ModInstallAgyCliBtn" Grid.Column="4" Style="{StaticResource SoftAccentBtn}" Content="Cập nhật bổ sung" MinWidth="164" Height="36" Padding="10,0" HorizontalAlignment="Stretch" VerticalAlignment="Center"/>
+              </Grid>
+            </Border>
+
             <!-- Component 3: Codex Extension in Antigravity -->
             <Border Style="{StaticResource CardBorder}" Padding="16,11" Margin="0,0,0,8">
               <Grid>
@@ -1537,6 +1562,7 @@ $xamlText = @'
                   <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,12,0">
                     <TextBlock Text="4. Trợ lý OpenClaw riêng (Telegram &amp; Zalo)" FontSize="14" FontWeight="Bold" Foreground="#0F172A"/>
                     <TextBlock x:Name="ModDetail4" Text="Cài đặt Node.js, Python, FFmpeg, OpenClaw 2026.11.4 &amp; Gateway Watchdog độc lập." FontSize="12" Foreground="#64748B" Margin="0,3,0,0" TextWrapping="Wrap"/>
+                    <Button x:Name="ModConfig4Btn" Style="{StaticResource SecondaryBtn}" Content="Sửa cấu hình Telegram / Model →" Height="26" Padding="10,0" FontSize="11.5" HorizontalAlignment="Left" Margin="0,5,0,0" Visibility="Collapsed"/>
                   </StackPanel>
                   <Border x:Name="ModBadge4" Grid.Column="3" MinWidth="102" Background="#F1F5F9" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12" Padding="10,4" Margin="0,0,12,0" HorizontalAlignment="Right" VerticalAlignment="Center">
                     <TextBlock x:Name="ModBadgeText4" Text="○ Chưa cài" FontSize="11.5" FontWeight="Bold" Foreground="#475569" HorizontalAlignment="Center"/>
@@ -2101,6 +2127,11 @@ $modBadge2          = Get-Ui 'ModBadge2'
 $modBadgeText2      = Get-Ui 'ModBadgeText2'
 $modDetail2         = Get-Ui 'ModDetail2'
 $modInstall2Btn     = Get-Ui 'ModInstall2Btn'
+$modCheckAgyCli     = Get-Ui 'ModCheckAgyCli'
+$modBadgeAgyCli     = Get-Ui 'ModBadgeAgyCli'
+$modBadgeTextAgyCli = Get-Ui 'ModBadgeTextAgyCli'
+$modDetailAgyCli    = Get-Ui 'ModDetailAgyCli'
+$modInstallAgyCliBtn = Get-Ui 'ModInstallAgyCliBtn'
 $modCheck3          = Get-Ui 'ModCheck3'
 $modBadge3          = Get-Ui 'ModBadge3'
 $modBadgeText3      = Get-Ui 'ModBadgeText3'
@@ -2111,6 +2142,7 @@ $modBadge4          = Get-Ui 'ModBadge4'
 $modBadgeText4      = Get-Ui 'ModBadgeText4'
 $modDetail4         = Get-Ui 'ModDetail4'
 $modInstall4Btn     = Get-Ui 'ModInstall4Btn'
+$modConfig4Btn      = Get-Ui 'ModConfig4Btn'
 $modOpenClawInputsBox = Get-Ui 'ModOpenClawInputsBox'
 $modZaloCheck       = Get-Ui 'ModZaloCheck'
 $modTokenPwdBox     = Get-Ui 'ModTokenPwdBox'
@@ -2857,7 +2889,7 @@ function Set-Buttons {
     if (-not $nb) { continue }
     $nb.IsEnabled = (-not $script:installRunning -and -not $script:retryEditor)
   }
-  foreach ($modCtrl in @($modModelBox, $modSelectAllBtn, $modRefreshBtn, $modInstall1Btn, $modInstall2Btn, $modInstall3Btn, $modInstall4Btn, $modCheck1, $modCheck2, $modCheck3, $modZaloCheck, $modTokenPwdBox, $modAutoFetchBtn, $modOwnersBox, $modGroupBox)) {
+  foreach ($modCtrl in @($modModelBox, $modSelectAllBtn, $modRefreshBtn, $modInstall1Btn, $modInstall2Btn, $modInstallAgyCliBtn, $modInstall3Btn, $modInstall4Btn, $modConfig4Btn, $modCheck1, $modCheck2, $modCheckAgyCli, $modCheck3, $modZaloCheck, $modTokenPwdBox, $modAutoFetchBtn, $modOwnersBox, $modGroupBox)) {
     if ($modCtrl) { $modCtrl.IsEnabled = (-not $script:installRunning -and -not $script:retryEditor) }
   }
   if ($modCheck4 -and ($script:installRunning -or $script:retryEditor)) {
@@ -2937,9 +2969,13 @@ function Set-Buttons {
     }
     $primaryActionBtn.Visibility = [System.Windows.Visibility]::Collapsed
   } elseif ($script:currentView -eq 'modular') {
-    $footerHintText.Text = 'Tích chọn các phần muốn cài rồi bấm "Cài các phần đã chọn", hoặc bấm lẻ trên từng dòng.'
+    $footerHintText.Text = 'Tích chọn các phần cần cài/cập nhật, hoặc bấm trực tiếp "Cài đặt" / "Cập nhật" trên từng dòng.'
     $primaryActionBtn.Visibility = [System.Windows.Visibility]::Visible
-    $primaryActionBtn.Content = 'Cài các phần đã chọn'
+    if (Get-Command Get-ModularPrimaryButtonText -ErrorAction SilentlyContinue) {
+      $primaryActionBtn.Content = Get-ModularPrimaryButtonText
+    } else {
+      $primaryActionBtn.Content = 'Cài / Cập nhật phần đã chọn'
+    }
     $primaryActionBtn.IsEnabled = $true
   } elseif ($script:isManageMode) {
     $footerHintText.Text = 'Sửa ô nào lưu ô đó (~3 giây) · Giữ nguyên lịch sử & dữ liệu cũ.'
@@ -3455,6 +3491,7 @@ function Get-ModularFriendlyNames([string[]]$Components) {
   $labelMap = @{
     'codex-cli'       = '1. Codex CLI'
     'antigravity-ide' = '2. Antigravity IDE'
+    'antigravity-cli' = 'Cập nhật Antigravity CLI (agy.exe)'
     'codex-extension' = '3. Codex Extension'
     'openclaw'        = '4. OpenClaw'
   }
@@ -3469,10 +3506,41 @@ function Get-ModularCardRefs([string]$ComponentId) {
   switch ($ComponentId) {
     'codex-cli'       { return @{ Badge = $modBadge1; Text = $modBadgeText1; Btn = $modInstall1Btn; Label = '1. Codex CLI riêng' } }
     'antigravity-ide' { return @{ Badge = $modBadge2; Text = $modBadgeText2; Btn = $modInstall2Btn; Label = '2. Antigravity IDE riêng' } }
+    'antigravity-cli' { return @{ Badge = $modBadgeAgyCli; Text = $modBadgeTextAgyCli; Btn = $modInstallAgyCliBtn; Label = 'Cập nhật Antigravity CLI (agy.exe)' } }
     'codex-extension' { return @{ Badge = $modBadge3; Text = $modBadgeText3; Btn = $modInstall3Btn; Label = '3. Codex Extension' } }
     'openclaw'        { return @{ Badge = $modBadge4; Text = $modBadgeText4; Btn = $modInstall4Btn; Label = '4. Trợ lý OpenClaw' } }
     default           { return $null }
   }
+}
+
+function Get-ModularCheckedState {
+  $ms = $script:lastModularStatus
+  $picked = @()
+  $allInstalled = $true
+  $items = @(
+    @{ Id = 'codex-cli'; Check = $modCheck1; Installed = ([bool]($ms -and $ms.CodexCliInstalled)) },
+    @{ Id = 'antigravity-ide'; Check = $modCheck2; Installed = ([bool]($ms -and $ms.AntigravityInstalled)) },
+    @{ Id = 'antigravity-cli'; Check = $modCheckAgyCli; Installed = ([bool]($ms -and $ms.PSObject.Properties['AntigravityCliReady'] -and $ms.AntigravityCliReady)) },
+    @{ Id = 'codex-extension'; Check = $modCheck3; Installed = ([bool]($ms -and $ms.CodexExtensionInstalled)) },
+    @{ Id = 'openclaw'; Check = $modCheck4; Installed = ([bool]($ms -and $ms.OpenClawInstalled)) }
+  )
+  foreach ($it in $items) {
+    if ($it.Check -and [bool]$it.Check.IsChecked) {
+      $picked += $it.Id
+      if (-not $it.Installed) { $allInstalled = $false }
+    }
+  }
+  return [pscustomobject]@{
+    Picked              = $picked
+    AllAlreadyInstalled = ($picked.Count -gt 0 -and $allInstalled)
+  }
+}
+
+function Get-ModularPrimaryButtonText {
+  $st = Get-ModularCheckedState
+  if ($st.Picked.Count -eq 0) { return 'Cài / Cập nhật phần đã chọn' }
+  if ($st.AllAlreadyInstalled) { return 'Cập nhật các phần đã chọn' }
+  return 'Cài đặt các phần đã chọn'
 }
 
 function Reset-ModularProgressVisualState([string[]]$Components) {
@@ -3508,7 +3576,7 @@ function Reset-ModularProgressVisualState([string[]]$Components) {
   if ($modProgressSubText) {
     $modProgressSubText.Text = 'Đang chạy trực tiếp ngay trên tab Cài từng phần · Chỉ hiển thị tiến trình của thành phần đang chạy.'
   }
-  foreach ($c in @('codex-cli', 'antigravity-ide', 'codex-extension', 'openclaw')) {
+  foreach ($c in @('codex-cli', 'antigravity-ide', 'antigravity-cli', 'codex-extension', 'openclaw')) {
     $refs = Get-ModularCardRefs $c
     if (-not $refs) { continue }
     if ($c -in @($Components)) {
@@ -3549,6 +3617,8 @@ function Update-ModularProgressFromStatus([string]$Message) {
       $activeComp = 'openclaw'
     } elseif ($Message -match 'Codex Extension' -and ('codex-extension' -in $activeComps)) {
       $activeComp = 'codex-extension'
+    } elseif ($Message -match 'Antigravity Runtime CLI|agy\.exe|cli_windows_x64' -and ('antigravity-cli' -in $activeComps)) {
+      $activeComp = 'antigravity-cli'
     } elseif ($Message -match 'Antigravity IDE|lối tắt' -and ('antigravity-ide' -in $activeComps)) {
       $activeComp = 'antigravity-ide'
     } elseif ($Message -match 'Codex CLI|gói Codex CLI' -and ('codex-cli' -in $activeComps)) {
@@ -3710,7 +3780,11 @@ function Show-ModularFailureDiagnostics([string]$SummaryMessage, [object]$DiagPa
 
   $failedTarget = switch ($stageRaw) {
     'codex-cli'    { 'codex-cli' }
-    'editor'       { if ('codex-extension' -in $script:lastModularSelected -and 'antigravity-ide' -notin $script:lastModularSelected) { 'codex-extension' } else { 'antigravity-ide' } }
+    'editor'       {
+      if ('antigravity-cli' -in $script:lastModularSelected -and 'antigravity-ide' -notin $script:lastModularSelected -and 'codex-extension' -notin $script:lastModularSelected) { 'antigravity-cli' }
+      elseif ('codex-extension' -in $script:lastModularSelected -and 'antigravity-ide' -notin $script:lastModularSelected) { 'codex-extension' }
+      else { 'antigravity-ide' }
+    }
     'dependencies' { 'openclaw' }
     'install'      { 'openclaw' }
     'openclaw'     { 'openclaw' }
@@ -3729,41 +3803,66 @@ function Update-ModularCards {
   if (-not (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue)) { return $null }
   $ms = Get-EmTroLyModularStatus
   if (-not $ms) { return $null }
+  $script:lastModularStatus = $ms
 
   Set-ModularBadgeVisual $modBadge1 $modBadgeText1 ([bool]$ms.CodexCliInstalled)
   $modDetail1.Text = $ms.CodexCliDetail
-  $modInstall1Btn.Content = if ($ms.CodexCliInstalled) { 'Cài lại' } else { 'Cài đặt' }
+  $modInstall1Btn.Content = if ($ms.CodexCliInstalled) { 'Cập nhật' } else { 'Cài đặt' }
 
-  Set-ModularBadgeVisual $modBadge2 $modBadgeText2 ([bool]$ms.AntigravityInstalled)
+  $agyCliReady = ($ms.PSObject.Properties['AntigravityCliReady'] -and [bool]$ms.AntigravityCliReady)
+  if ($ms.AntigravityInstalled -and -not $agyCliReady -and $env:EMTROLY_SKIP_AGY_CLI_PREFETCH -ne '1') {
+    Set-ModularBadgeVisual $modBadge2 $modBadgeText2 $false 'heal' '! Thiếu CLI'
+    $modInstall2Btn.Content = 'Cập nhật / Bổ sung'
+  } else {
+    Set-ModularBadgeVisual $modBadge2 $modBadgeText2 ([bool]$ms.AntigravityInstalled)
+    $modInstall2Btn.Content = if ($ms.AntigravityInstalled) { 'Cập nhật' } else { 'Cài đặt' }
+  }
   $modDetail2.Text = $ms.AntigravityDetail
-  $modInstall2Btn.Content = if ($ms.AntigravityInstalled) { 'Kiểm tra' } else { 'Cài đặt' }
+
+  if ($modBadgeAgyCli -and $modBadgeTextAgyCli -and $modInstallAgyCliBtn) {
+    if ($agyCliReady) {
+      Set-ModularBadgeVisual $modBadgeAgyCli $modBadgeTextAgyCli $true
+      $modInstallAgyCliBtn.Content = 'Cập nhật'
+    } elseif ($ms.AntigravityInstalled) {
+      Set-ModularBadgeVisual $modBadgeAgyCli $modBadgeTextAgyCli $false 'heal' '! Cần bổ sung'
+      $modInstallAgyCliBtn.Content = 'Cập nhật ngay'
+    } else {
+      Set-ModularBadgeVisual $modBadgeAgyCli $modBadgeTextAgyCli $false '' '○ Chưa có'
+      $modInstallAgyCliBtn.Content = 'Cập nhật bổ sung'
+    }
+    if ($modDetailAgyCli -and $ms.PSObject.Properties['AntigravityCliDetail']) {
+      $modDetailAgyCli.Text = $ms.AntigravityCliDetail
+    }
+  }
 
   Set-ModularBadgeVisual $modBadge3 $modBadgeText3 ([bool]$ms.CodexExtensionInstalled)
   $modDetail3.Text = $ms.CodexExtensionDetail
-  $modInstall3Btn.Content = if ($ms.CodexExtensionInstalled) { 'Đồng bộ' } else { 'Cài đặt' }
+  $modInstall3Btn.Content = if ($ms.CodexExtensionInstalled) { 'Cập nhật' } else { 'Cài đặt' }
 
   if (-not $script:installRunning) {
     $modCheck1.IsChecked = (-not [bool]$ms.CodexCliInstalled)
     $modCheck2.IsChecked = (-not [bool]$ms.AntigravityInstalled)
+    if ($modCheckAgyCli) { $modCheckAgyCli.IsChecked = ([bool]$ms.AntigravityInstalled -and -not $agyCliReady) }
     $modCheck3.IsChecked = (-not [bool]$ms.CodexExtensionInstalled)
   }
 
   Set-ModularBadgeVisual $modBadge4 $modBadgeText4 ([bool]$ms.OpenClawInstalled)
   $modDetail4.Text = $ms.OpenClawDetail
   if ($ms.OpenClawInstalled) {
+    if ($modConfig4Btn) { $modConfig4Btn.Visibility = [System.Windows.Visibility]::Visible }
     if ($ms.PSObject.Properties['OpenClawNeedsUpgrade'] -and $ms.OpenClawNeedsUpgrade) {
-      $modInstall4Btn.Content = "Nâng cấp v$($ms.OpenClawTargetVersion)"
-      $modCheck4.IsChecked = $true
-      $modCheck4.IsEnabled = $true
+      $modInstall4Btn.Content = "Cập nhật v$($ms.OpenClawTargetVersion)"
+      if (-not $script:installRunning) { $modCheck4.IsChecked = $true }
     } else {
-      $modInstall4Btn.Content = 'Cấu hình'
-      $modCheck4.IsChecked = $false
-      $modCheck4.IsEnabled = $false
+      $modInstall4Btn.Content = 'Cập nhật'
+      if (-not $script:installRunning) { $modCheck4.IsChecked = $false }
     }
+    if (-not $script:installRunning) { $modCheck4.IsEnabled = $true }
     $modOpenClawInputsBox.Visibility = [System.Windows.Visibility]::Collapsed
   } else {
+    if ($modConfig4Btn) { $modConfig4Btn.Visibility = [System.Windows.Visibility]::Collapsed }
     $modInstall4Btn.Content = 'Cài đặt'
-    $modCheck4.IsEnabled = $true
+    if (-not $script:installRunning) { $modCheck4.IsEnabled = $true }
     $modOpenClawInputsBox.Visibility = if ([bool]$modCheck4.IsChecked) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
     if ([string]::IsNullOrWhiteSpace($modOwnersBox.Text) -and -not [string]::IsNullOrWhiteSpace($ownersBox.Text)) {
       $modOwnersBox.Text = $ownersBox.Text
@@ -3774,6 +3873,9 @@ function Update-ModularCards {
     if ([string]::IsNullOrWhiteSpace($modTokenPwdBox.Password) -and -not [string]::IsNullOrWhiteSpace($tokenBox.Text)) {
       $modTokenPwdBox.Password = $tokenBox.Text
     }
+  }
+  if ($script:currentView -eq 'modular' -and -not $script:installRunning -and $primaryActionBtn) {
+    $primaryActionBtn.Content = Get-ModularPrimaryButtonText
   }
   return $ms
 }
@@ -3786,17 +3888,13 @@ function Start-ModularInstall([string[]]$SelectedList, [switch]$ForceReinstall) 
   if ($script:installRunning) { return }
   $cleanSelected = @($SelectedList | Where-Object { $_ })
   if ($cleanSelected.Count -eq 0) {
-    Show-Error 'Hãy tích chọn ít nhất 1 thành phần (hoặc bấm "Cài đặt" trên dòng tương ứng).'
+    Show-Error 'Hãy tích chọn ít nhất 1 thành phần (hoặc bấm "Cài đặt" / "Cập nhật" trên dòng tương ứng).'
     return
   }
 
   $msNow = Update-ModularCards
   if ($cleanSelected.Count -eq 1 -and $cleanSelected[0] -eq 'openclaw' -and $msNow -and $msNow.OpenClawInstalled) {
-    if ($msNow.PSObject.Properties['OpenClawNeedsUpgrade'] -and $msNow.OpenClawNeedsUpgrade) {
-      Start-ManageAction 'upgrade-openclaw' -Origin 'modular'
-      return
-    }
-    Set-NavActive 'config'
+    Start-ManageAction 'upgrade-openclaw' -Origin 'modular'
     return
   }
 
@@ -4496,12 +4594,12 @@ function Update-StoreView([switch]$SkipReload) {
       [void]$actPanel.Children.Add($openBtn)
 
       $reBtn = New-Object System.Windows.Controls.Button
-      $reBtn.Style = $window.FindResource('SecondaryBtn')
-      $reBtn.Content = '↻'
+      $reBtn.Style = $window.FindResource('SoftAccentBtn')
+      $reBtn.Content = 'Cập nhật'
       $reBtn.Height = 32
-      $reBtn.Padding = New-Object System.Windows.Thickness(9, 0, 9, 0)
-      $reBtn.FontSize = 12.5
-      $reBtn.ToolTip = 'Cài đặt lại / Đồng bộ'
+      $reBtn.Padding = New-Object System.Windows.Thickness(10, 0, 10, 0)
+      $reBtn.FontSize = 12
+      $reBtn.ToolTip = 'Cập nhật / Đồng bộ riêng ứng dụng này'
       $reBtn.Tag = $app
       $reBtn.Add_Click({ param($s, $e) Invoke-StoreAppAction $s.Tag -ForceReinstall })
       [void]$actPanel.Children.Add($reBtn)
@@ -4545,12 +4643,12 @@ function Start-Install {
     return
   }
   if ($script:currentView -eq 'modular' -and -not $script:retryEditor) {
-    $picked = @()
-    if ($modCheck1.IsChecked) { $picked += 'codex-cli' }
-    if ($modCheck2.IsChecked) { $picked += 'antigravity-ide' }
-    if ($modCheck3.IsChecked) { $picked += 'codex-extension' }
-    if ($modCheck4.IsChecked -and $modCheck4.IsEnabled) { $picked += 'openclaw' }
-    Start-ModularInstall $picked
+    $modPick = Get-ModularCheckedState
+    if ($modPick.Picked.Count -eq 1 -and $modPick.Picked[0] -eq 'openclaw' -and $script:lastModularStatus -and $script:lastModularStatus.OpenClawInstalled) {
+      Start-ManageAction 'upgrade-openclaw' -Origin 'modular'
+      return
+    }
+    Start-ModularInstall $modPick.Picked -ForceReinstall:$modPick.AllAlreadyInstalled
     return
   }
   if ($script:isManageMode -and -not $script:retryEditor) {
@@ -5945,10 +6043,22 @@ if ($diagResetAllBtn) { $diagResetAllBtn.Add_Click({ Invoke-FactoryResetPrompt }
 if ($licenseResetAllBtn) { $licenseResetAllBtn.Add_Click({ Invoke-FactoryResetPrompt }) }
 
 $modRefreshBtn.Add_Click({ [void](Update-ModularCards) })
+$syncModPrimaryBtnText = {
+  if ($script:currentView -eq 'modular' -and -not $script:installRunning -and $primaryActionBtn) {
+    $primaryActionBtn.Content = Get-ModularPrimaryButtonText
+  }
+}
+foreach ($chkItem in @($modCheck1, $modCheck2, $modCheckAgyCli, $modCheck3)) {
+  if ($chkItem) { $chkItem.Add_Click($syncModPrimaryBtnText) }
+}
 $modSelectAllBtn.Add_Click({
   $modCheck1.IsChecked = $true
   $modCheck2.IsChecked = $true
   $modCheck3.IsChecked = $true
+  if ($modCheckAgyCli -and $script:lastModularStatus -and -not ($script:lastModularStatus.PSObject.Properties['AntigravityCliReady'] -and $script:lastModularStatus.AntigravityCliReady)) {
+    $modCheckAgyCli.IsChecked = $true
+  }
+  & $syncModPrimaryBtnText
 })
 $modInstall1Btn.Add_Click({
   $msClick = Get-EmTroLyModularStatus
@@ -5958,10 +6068,18 @@ $modInstall2Btn.Add_Click({
   $msClick = Get-EmTroLyModularStatus
   Start-ModularInstall @('antigravity-ide') -ForceReinstall:([bool]($msClick -and $msClick.AntigravityInstalled))
 })
+if ($modInstallAgyCliBtn) {
+  $modInstallAgyCliBtn.Add_Click({
+    Start-ModularInstall @('antigravity-cli') -ForceReinstall:$true
+  })
+}
 $modInstall3Btn.Add_Click({
   $msClick = Get-EmTroLyModularStatus
   Start-ModularInstall @('codex-extension') -ForceReinstall:([bool]($msClick -and $msClick.CodexExtensionInstalled))
 })
+if ($modConfig4Btn) {
+  $modConfig4Btn.Add_Click({ Set-NavActive 'config' })
+}
 $modCheck4.Add_Click({
   $msToggle = if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) { Get-EmTroLyModularStatus } else { $null }
   if ($msToggle -and $msToggle.OpenClawInstalled) {
@@ -5969,6 +6087,7 @@ $modCheck4.Add_Click({
   } else {
     $modOpenClawInputsBox.Visibility = if ([bool]$modCheck4.IsChecked) { [System.Windows.Visibility]::Visible } else { [System.Windows.Visibility]::Collapsed }
   }
+  & $syncModPrimaryBtnText
 })
 $modInstall4Btn.Add_Click({
   $msClick4 = if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) { Get-EmTroLyModularStatus } else { $null }

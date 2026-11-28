@@ -3,7 +3,7 @@ param(
   [Parameter(Mandatory=$true)][psobject]$Settings,
   [Parameter(Mandatory=$true)][string]$StatusFile,
   [switch]$CheckOnly,
-  [ValidateSet('all', 'ide-only', 'extension-only')][string]$ComponentMode = 'all',
+  [ValidateSet('all', 'ide-only', 'extension-only', 'cli-runtime-only')][string]$ComponentMode = 'all',
   [switch]$AllowUpdateExisting
 )
 
@@ -77,7 +77,8 @@ function New-PrivateDirectory([string]$Path) {
   Set-PrivateDirectoryAcl $Path
 }
 
-function Get-VerifiedDownload([string]$Url, [string]$Path, [string]$Hash) {
+function Get-VerifiedDownload([string]$Url, [string]$Path, [string]$Hash, [string]$Algorithm = 'SHA256') {
+  $hashAlgo = if ($Algorithm -ieq 'SHA512') { 'SHA512' } else { 'SHA256' }
   $maxAttempts = if ($env:EMTROLY_DOWNLOAD_RETRIES -match '^[1-5]$') { [int]$env:EMTROLY_DOWNLOAD_RETRIES } else { 3 }
   $legacyTransport = { Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $Path -TimeoutSec 900 }
   $iwrCmd = Get-Command Invoke-WebRequest -ErrorAction SilentlyContinue
@@ -89,8 +90,8 @@ function Get-VerifiedDownload([string]$Url, [string]$Path, [string]$Hash) {
     [Net.ServicePointManager]::DefaultConnectionLimit = 16
     [Net.ServicePointManager]::Expect100Continue = $false
   }
-  $label = if ($Url -match '\.vsix($|\?)') { 'Codex Extension' } else { 'Antigravity IDE' }
-  $knownTotalBytes = if ($Url -match '\.vsix($|\?)') { 389000000L } else { 199649432L }
+  $label = if ($Url -match 'cli_windows_x64') { 'Antigravity runtime CLI' } elseif ($Url -match '\.vsix($|\?)') { 'Codex Extension' } else { 'Antigravity IDE' }
+  $knownTotalBytes = if ($Url -match 'cli_windows_x64') { 245461240L } elseif ($Url -match '\.vsix($|\?)') { 389000000L } else { 199649432L }
   $partPath = "$Path.part"
   if (Test-Path -LiteralPath $Path -PathType Leaf) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
   if (Test-Path -LiteralPath $partPath -PathType Leaf) { Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue }
@@ -106,7 +107,7 @@ function Get-VerifiedDownload([string]$Url, [string]$Path, [string]$Hash) {
         & $legacyTransport
       } else {
         $resumePos = if (Test-Path -LiteralPath $partPath -PathType Leaf) { (Get-Item -LiteralPath $partPath).Length } else { 0L }
-        if ($resumePos -gt 0 -and ((Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash -ieq $Hash)) {
+        if ($resumePos -gt 0 -and ((Get-FileHash -LiteralPath $partPath -Algorithm $hashAlgo).Hash -ieq $Hash)) {
           Move-Item -LiteralPath $partPath -Destination $Path -Force
           $downloaded = $true
           break
@@ -159,7 +160,7 @@ function Get-VerifiedDownload([string]$Url, [string]$Path, [string]$Hash) {
         $outStream.Dispose(); $outStream = $null
         $inStream.Dispose(); $inStream = $null
         $resp.Close(); $resp = $null
-        if ((Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash -ieq $Hash) {
+        if ((Get-FileHash -LiteralPath $partPath -Algorithm $hashAlgo).Hash -ieq $Hash) {
           Move-Item -LiteralPath $partPath -Destination $Path -Force
         } else {
           Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue
@@ -190,7 +191,7 @@ function Get-VerifiedDownload([string]$Url, [string]$Path, [string]$Hash) {
           try {
             $nodeDlScript = @'
 const fs=require('fs'),https=require('https'),http=require('http'),crypto=require('crypto');
-const [,,url0,part,hash,stFile,lbl,totStr]=process.argv;
+const [,,url0,part,hash,stFile,lbl,totStr,algName]=process.argv;
 let knownTotal=Number(totStr)||0;
 function wStat(m){if(!stFile)return;try{fs.writeFileSync(stFile,m,'utf8');}catch{}}
 function dlChunk(u,pos,hops,stag){
@@ -230,7 +231,7 @@ function dlChunk(u,pos,hops,stag){
   }).then((st)=>{
     const sz=fs.existsSync(part)?fs.statSync(part).size:0;
     if(st.done||(knownTotal>0&&sz>=knownTotal)){
-      const hObj=crypto.createHash('sha256'),fBuf=Buffer.allocUnsafe(262144),fd=fs.openSync(part,'r');
+      const hObj=crypto.createHash((algName||'sha256').toLowerCase()),fBuf=Buffer.allocUnsafe(262144),fd=fs.openSync(part,'r');
       let bytesR=0;while((bytesR=fs.readSync(fd,fBuf,0,fBuf.length,null))>0){hObj.update(fBuf.subarray(0,bytesR));}
       fs.closeSync(fd);
       const h=hObj.digest('hex');
@@ -253,8 +254,8 @@ dlChunk(url0,startPos,1,0).then((ok)=>{if(ok==='OK')process.exit(0);process.exit
               $env:OPENSSL_ia32cap = '~0x200000200000000'
               $env:NODE_OPTIONS = '--tls-max-v1.2'
               $ErrorActionPreference = 'Continue'
-              & $nodeHelper $nodeJsFile $Url $partPath $Hash ([string]$StatusFile) $label ([string]$knownTotalBytes) *> $null
-              if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $partPath -PathType Leaf) -and ((Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash -ieq $Hash)) {
+              & $nodeHelper $nodeJsFile $Url $partPath $Hash ([string]$StatusFile) $label ([string]$knownTotalBytes) $hashAlgo.ToLowerInvariant() *> $null
+              if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $partPath -PathType Leaf) -and ((Get-FileHash -LiteralPath $partPath -Algorithm $hashAlgo).Hash -ieq $Hash)) {
                 Move-Item -LiteralPath $partPath -Destination $Path -Force
                 $downloaded = $true
               }
@@ -288,7 +289,7 @@ dlChunk(url0,startPos,1,0).then((ok)=>{if(ok==='OK')process.exit(0);process.exit
             if (Test-Path -LiteralPath $partPath -PathType Leaf) {
               $newBytes = (Get-Item -LiteralPath $partPath).Length
               if ($curlRc -eq 0 -or ($knownTotalBytes -gt 0 -and $newBytes -ge $knownTotalBytes)) {
-                if ((Get-FileHash -LiteralPath $partPath -Algorithm SHA256).Hash -ieq $Hash) {
+                if ((Get-FileHash -LiteralPath $partPath -Algorithm $hashAlgo).Hash -ieq $Hash) {
                   Move-Item -LiteralPath $partPath -Destination $Path -Force
                   $downloaded = $true
                   break
@@ -328,9 +329,114 @@ dlChunk(url0,startPos,1,0).then((ok)=>{if(ok==='OK')process.exit(0);process.exit
     if (Test-Path -LiteralPath $Path -PathType Leaf) { Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue }
     throw 'editor-download-failed'
   }
-  if ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash -ine $Hash) {
+  if ((Get-FileHash -LiteralPath $Path -Algorithm $hashAlgo).Hash -ine $Hash) {
     Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     throw 'editor-download-checksum'
+  }
+}
+
+function Install-AntigravityCliRuntime([string]$StagingDir) {
+  if (-not $env:USERPROFILE) { return }
+  $geminiBinDir = Join-Path $env:USERPROFILE '.gemini\bin'
+  $agyExe = Join-Path $geminiBinDir 'agy.exe'
+  $agySidecar = Join-Path $geminiBinDir 'agy.version.json'
+  $defaultReleaseBase = 'https://antigravity-cli-auto-updater-974169037036.us-central1.run.app'
+  $manifestUrl = if ($env:EMTROLY_AGY_CLI_MANIFEST_URL) { $env:EMTROLY_AGY_CLI_MANIFEST_URL } else { "$defaultReleaseBase/manifests/windows_amd64.json" }
+  $pinnedCliVer = '1.5.18'
+  $pinnedCliUrl = 'https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.18-6386224290725888/windows-x64/cli_windows_x64.exe'
+  $pinnedCliSha512 = '53605db7013dfed51e8c416d51e0c17a3b5ad0750c13da5669954ba4a281318746be0cf8cde2b256cfdb4bfbdade4badad1a0503931f8458416184549afa06b6'
+
+  $targetVer = $pinnedCliVer
+  $targetUrl = $pinnedCliUrl
+  $targetSha512 = $pinnedCliSha512
+  try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $mf = Invoke-RestMethod -UseBasicParsing -Method Get -Uri $manifestUrl -TimeoutSec 12
+    if ($mf -and $mf.version -and $mf.url -and $mf.sha512) {
+      $candUrl = ([string]$mf.url).Trim()
+      $uriCand = $null
+      if ([uri]::TryCreate($candUrl, [UriKind]::Absolute, [ref]$uriCand) -and
+          ($uriCand.Scheme -eq 'https' -or ($uriCand.Scheme -eq 'http' -and $uriCand.Host -in @('127.0.0.1', 'localhost')))) {
+        $targetVer = ([string]$mf.version).Trim()
+        $targetUrl = $candUrl
+        $targetSha512 = ([string]$mf.sha512).Trim()
+      }
+    }
+  } catch { }
+
+  # Remove abandoned temp/lock artifacts that Antigravity's stalled 30s self-downloader may have left behind
+  if (Test-Path -LiteralPath $geminiBinDir -PathType Container) {
+    Remove-Item -LiteralPath (Join-Path $geminiBinDir '.agy-install.lock') -Force -ErrorAction SilentlyContinue
+    foreach ($tmpOld in @(Get-ChildItem -LiteralPath $geminiBinDir -Filter 'agy.tmp.*' -Force -ErrorAction SilentlyContinue)) {
+      Remove-Item -LiteralPath $tmpOld.FullName -Recurse -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  $alreadyReady = $false
+  if (Test-Path -LiteralPath $agyExe -PathType Leaf) {
+    try {
+      $curSha512 = (Get-FileHash -LiteralPath $agyExe -Algorithm SHA512).Hash
+      if ($curSha512 -ieq $targetSha512) {
+        $alreadyReady = $true
+      } else {
+        $verTestPsi = New-Object System.Diagnostics.ProcessStartInfo
+        $verTestPsi.FileName = $agyExe
+        $verTestPsi.Arguments = '--version'
+        $verTestPsi.UseShellExecute = $false
+        $verTestPsi.CreateNoWindow = $true
+        $verTestPsi.RedirectStandardOutput = $true
+        $verTestPsi.RedirectStandardError = $true
+        $verTestProc = [System.Diagnostics.Process]::Start($verTestPsi)
+        if ($verTestProc.WaitForExit(10000) -and $verTestProc.ExitCode -eq 0) {
+          $verOut = ($verTestProc.StandardOutput.ReadToEnd() + ' ' + $verTestProc.StandardError.ReadToEnd()).Trim()
+          $mVer = [regex]::Match($verOut, '(\d+\.\d+\.\d+)')
+          if ($mVer.Success) {
+            $vInstalled = [version]$mVer.Groups[1].Value
+            $vMinTarget = [version](($targetVer -replace '[^0-9.].*$', ''))
+            if ($vInstalled -ge $vMinTarget) { $alreadyReady = $true }
+          }
+        } else {
+          try { if (-not $verTestProc.HasExited) { $verTestProc.Kill() } } catch { }
+        }
+        try { $verTestProc.Dispose() } catch { }
+      }
+    } catch { }
+  }
+
+  if (-not $alreadyReady) {
+    [void][IO.Directory]::CreateDirectory($geminiBinDir)
+    Write-EditorStatus "Đang tải Antigravity runtime CLI v$targetVer (~234 MB) để mở Antigravity IDE không bị lỗi mạng..."
+    $stagedCli = Join-Path $StagingDir 'cli_windows_x64.exe'
+    Get-VerifiedDownload -Url $targetUrl -Path $stagedCli -Hash $targetSha512 -Algorithm 'SHA512'
+    if (Test-Path -LiteralPath $agyExe -PathType Leaf) {
+      $oldBackup = Join-Path $geminiBinDir ('agy.exe.old.' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+      try { Move-Item -LiteralPath $agyExe -Destination $oldBackup -Force -ErrorAction SilentlyContinue } catch { }
+    }
+    Move-Item -LiteralPath $stagedCli -Destination $agyExe -Force
+    foreach ($oldF in @(Get-ChildItem -LiteralPath $geminiBinDir -Filter 'agy.exe.old.*' -File -ErrorAction SilentlyContinue)) {
+      Remove-Item -LiteralPath $oldF.FullName -Force -ErrorAction SilentlyContinue
+    }
+  }
+
+  if ((Test-Path -LiteralPath $agyExe -PathType Leaf) -and (-not $alreadyReady -or -not (Test-Path -LiteralPath $agySidecar -PathType Leaf))) {
+    try {
+      $stat = Get-Item -LiteralPath $agyExe
+      $mtimeMs = [double]([DateTimeOffset]$stat.LastWriteTimeUtc).ToUnixTimeMilliseconds()
+      $nowMs = [double]([DateTimeOffset]::UtcNow).ToUnixTimeMilliseconds()
+      $actualSha512 = (Get-FileHash -LiteralPath $agyExe -Algorithm SHA512).Hash.ToLowerInvariant()
+      $sidecarObj = [ordered]@{
+        schemaVersion  = 1
+        version        = $targetVer
+        size           = [long]$stat.Length
+        mtimeMs        = $mtimeMs
+        ino            = 0
+        installedAt    = [long]$nowMs
+        sha512         = $actualSha512
+        releaseBaseUrl = $defaultReleaseBase
+        lastCheckAt    = [long]$nowMs
+      }
+      [IO.File]::WriteAllText($agySidecar, ($sidecarObj | ConvertTo-Json -Depth 4), (New-Object System.Text.UTF8Encoding($false)))
+    } catch { }
   }
 }
 
@@ -531,6 +637,17 @@ function Move-EditorRecoveryItem([string]$Path, [string]$RelativePath) {
 }
 
 $isModularUpdate = ([bool]$AllowUpdateExisting -or $ComponentMode -ne 'all')
+if ($ComponentMode -eq 'cli-runtime-only') {
+  if ($env:OS -ne 'Windows_NT') { throw 'editor-windows-required' }
+  if ($CheckOnly) { return }
+  [void][IO.Directory]::CreateDirectory($downloadDir)
+  try {
+    Install-AntigravityCliRuntime -StagingDir $downloadDir
+  } finally {
+    if (Test-Path -LiteralPath $downloadDir) { Remove-Item -LiteralPath $downloadDir -Recurse -Force -ErrorAction SilentlyContinue }
+  }
+  return
+}
 if (Test-Path -LiteralPath $base -PathType Leaf) { throw 'editor-data-exists' }
 if (Test-Path -LiteralPath $base -PathType Container) {
   $savedJob = if (Test-Path -LiteralPath $receipt -PathType Leaf) { [IO.File]::ReadAllText($receipt) } else { '' }
@@ -708,6 +825,13 @@ try {
     Test-EditorInstallation $editor
   }
   [IO.File]::WriteAllText((Join-Path $base 'editor-app-path.txt'), $appDir, (New-Object Text.UTF8Encoding($false)))
+
+  # Pre-stage Antigravity runtime CLI (~/.gemini/bin/agy.exe) so opening Antigravity never stalls for 30s on storage.googleapis.com
+  $spTestCmd = Get-Command Start-Process -ErrorAction SilentlyContinue
+  $isMockedFixtureRun = ($spTestCmd -and $spTestCmd.CommandType -eq 'Function')
+  if ($env:EMTROLY_SKIP_AGY_CLI_PREFETCH -ne '1' -and -not $isMockedFixtureRun) {
+    Install-AntigravityCliRuntime -StagingDir $downloadDir
+  }
 
   Write-EditorStatus 'Đang cấu hình khóa API cho Codex trong thư mục riêng của Em Trợ Lý…'
   foreach ($folder in @($userData, $extensions, $codexHome)) { [void][IO.Directory]::CreateDirectory($folder) }

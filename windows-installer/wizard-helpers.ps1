@@ -1307,8 +1307,31 @@ function Get-EmTroLyModularStatus {
       } catch { }
     }
   }
+  $agyCliExe = if ($env:USERPROFILE) { Join-Path $env:USERPROFILE '.gemini\bin\agy.exe' } else { '' }
+  $hasAgyCli = ($agyCliExe -and (Test-Path -LiteralPath $agyCliExe -PathType Leaf) -and ((Get-Item -LiteralPath $agyCliExe).Length -gt 0))
+  $agyCliVer = ''
+  if ($hasAgyCli) {
+    $agySidecarPath = Join-Path $env:USERPROFILE '.gemini\bin\agy.version.json'
+    if (Test-Path -LiteralPath $agySidecarPath -PathType Leaf) {
+      try {
+        $scObj = [IO.File]::ReadAllText($agySidecarPath, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        if ($scObj -and $scObj.version) { $agyCliVer = [string]$scObj.version }
+      } catch { }
+    }
+  }
+  $agyCliDetail = if ($hasAgyCli) {
+    if ($agyCliVer) {
+      "Đã sẵn sàng (v$agyCliVer · .gemini\bin\agy.exe — mở IDE ổn định)"
+    } else {
+      "Đã sẵn sàng (.gemini\bin\agy.exe — bấm Cập nhật bổ sung nếu cần nâng bản mới)"
+    }
+  } else {
+    "Chưa có (.gemini\bin\agy.exe, ~234 MB) — bấm 'Cập nhật bổ sung' để sửa lỗi mở IDE trắng màn hình"
+  }
   $ideDetail = if ($ideInstalled) {
-    if ($idePath -match '\\EmTroLy-Antigravity-IDE-') {
+    if (-not $hasAgyCli -and $env:EMTROLY_SKIP_AGY_CLI_PREFETCH -ne '1') {
+      "Đã cài v$ideVer (thiếu runtime CLI agy.exe — cập nhật mục bổ sung ngay bên dưới)"
+    } elseif ($idePath -match '\\EmTroLy-Antigravity-IDE-') {
       "Đã cài đặt sẵn sàng (v$ideVer · Bản riêng Em Trợ Lý)"
     } elseif ($env:LOCALAPPDATA -and $idePath.StartsWith($env:LOCALAPPDATA, [StringComparison]::OrdinalIgnoreCase)) {
       $relIde = '%LOCALAPPDATA%' + $idePath.Substring($env:LOCALAPPDATA.Length)
@@ -1317,7 +1340,7 @@ function Get-EmTroLyModularStatus {
       "Đã cài đặt (v$ideVer · $idePath)"
     }
   } else {
-    'Chưa cài đặt — tự tải và cài đặt Antigravity IDE chuẩn Google (~190 MB)'
+    'Chưa cài đặt — tự tải và cài đặt Antigravity IDE chuẩn Google (~190 MB) & runtime CLI'
   }
 
   $extInstalled = $false
@@ -1381,6 +1404,9 @@ function Get-EmTroLyModularStatus {
     AntigravityInstalled     = $ideInstalled
     AntigravityPath          = $idePath
     AntigravityDetail        = $ideDetail
+    AntigravityCliReady      = [bool]$hasAgyCli
+    AntigravityCliVersion    = $agyCliVer
+    AntigravityCliDetail     = $agyCliDetail
     CodexExtensionInstalled  = ($extInstalled -and $hasShortcut)
     CodexExtensionDetail     = $extDetail
     OpenClawInstalled        = $ocInstalled

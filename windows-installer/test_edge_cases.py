@@ -2138,8 +2138,16 @@ class Step3CleanPcAndFailureUiTests(unittest.TestCase):
             "ModRetryBtn",
             "ModAutoHealBtn",
             "ModExportBtn",
+            "ModCheckAgyCli",
+            "ModBadgeAgyCli",
+            "ModBadgeTextAgyCli",
+            "ModDetailAgyCli",
+            "ModInstallAgyCliBtn",
+            "ModConfig4Btn",
         ):
             self.assertIn(f'x:Name="{control_name}"', wiz_text)
+        self.assertIn("antigravity-cli", (ROOT / "windows-installer/run-native-install.ps1").read_text(encoding="utf-8-sig"))
+        self.assertIn("cli-runtime-only", (ROOT / "windows-installer/install-antigravity-codex.ps1").read_text(encoding="utf-8-sig"))
         # Ensure ModErrorDetailBox complies with .NET 4.8 XamlReader rules (no TextBoxBase attributes in XAML)
         m = re.search(r'<TextBox\s+x:Name="ModErrorDetailBox"[^/>]*/?>', wiz_text)
         self.assertIsNotNone(m)
@@ -2156,6 +2164,118 @@ class Step3CleanPcAndFailureUiTests(unittest.TestCase):
         self.assertIn("$script:activeInstallOrigin = 'modular'", start_mod_body.group(0))
         self.assertIn("Set-NavActive 'modular'", start_mod_body.group(0))
         self.assertNotIn("Set-NavActive 'progress'", start_mod_body.group(0))
+
+    @unittest.skipUnless(SHELL and os.name == "nt", "Requires Windows PowerShell")
+    def test_install_antigravity_cli_runtime_prestages_agy_exe_and_sidecar_via_range_resume(self):
+        import http.server
+        import threading
+
+        editor_ps1 = ROOT / "windows-installer/install-antigravity-codex.ps1"
+        cli_bytes = (b"MZ_ANTIGRAVITY_CLI_TEST_HEADER_" * 4096) + b"_TAIL"
+        cli_sha512 = hashlib.sha512(cli_bytes).hexdigest()
+
+        class CliMockHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path.endswith("/windows_amd64.json"):
+                    body = json.dumps(
+                        {
+                            "version": "1.5.18",
+                            "url": f"http://127.0.0.1:{self.server.server_port}/antigravity-cli/1.5.18/windows-x64/cli_windows_x64.exe",
+                            "sha512": cli_sha512,
+                        }
+                    ).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                    return
+                rng = self.headers.get("Range")
+                if not rng:
+                    self.send_response(200)
+                    self.send_header("Accept-Ranges", "bytes")
+                    self.send_header("Content-Length", str(len(cli_bytes)))
+                    self.end_headers()
+                    self.wfile.write(cli_bytes[:40960])
+                    self.wfile.flush()
+                    self.connection.close()
+                    return
+                start = int(rng.replace("bytes=", "").split("-")[0])
+                rem = cli_bytes[start:]
+                self.send_response(206)
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Range", f"bytes {start}-{len(cli_bytes) - 1}/{len(cli_bytes)}")
+                self.send_header("Content-Length", str(len(rem)))
+                self.end_headers()
+                self.wfile.write(rem)
+
+            def log_message(self, format, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), CliMockHandler)
+        port = server.server_address[1]
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        try:
+            with tempfile.TemporaryDirectory(prefix="emtroly-agy-cli-") as td:
+                root = Path(td)
+                home = root / "home"
+                stage = root / "stage"
+                gemini_bin = home / ".gemini/bin"
+                for d in (home, stage, gemini_bin):
+                    d.mkdir(parents=True, exist_ok=True)
+                # Leave abandoned artifacts that Antigravity's stalled 30s downloader created
+                (gemini_bin / ".agy-install.lock").write_text("stale", encoding="utf-8")
+                (gemini_bin / "agy.tmp.12345678-1234-1234-1234-1234567890ab").write_bytes(b"half")
+                status_file = root / "status.txt"
+
+                res = subprocess.run(
+                    [
+                        "powershell.exe",
+                        "-NoLogo",
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-Command",
+                        "$ErrorActionPreference = 'Stop'\n"
+                        f"$tokens = $null; $errs = $null\n"
+                        f"$ast = [Management.Automation.Language.Parser]::ParseFile('{editor_ps1}', [ref]$tokens, [ref]$errs)\n"
+                        "foreach ($fnName in @('Get-VerifiedDownload', 'Install-AntigravityCliRuntime')) {\n"
+                        "  $fn = @($ast.FindAll({ param($x) $x -is [Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq $fnName }, $true))[0]\n"
+                        "  Invoke-Expression $fn.Extent.Text\n"
+                        "}\n"
+                        f"$StatusFile = '{status_file}'\n"
+                        "function Write-EditorStatus([string]$Text) { [IO.File]::WriteAllText($StatusFile, $Text, [Text.UTF8Encoding]::new($false)) }\n"
+                        f"Install-AntigravityCliRuntime -StagingDir '{stage}'\n"
+                        "Write-Output 'AGY_CLI_PRESTAGE_OK'\n",
+                    ],
+                    env={
+                        **os.environ,
+                        "USERPROFILE": str(home),
+                        "EMTROLY_AGY_CLI_MANIFEST_URL": f"http://127.0.0.1:{port}/manifests/windows_amd64.json",
+                    },
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=30,
+                )
+                self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+                self.assertIn("AGY_CLI_PRESTAGE_OK", res.stdout)
+                agy_exe = gemini_bin / "agy.exe"
+                agy_sidecar = gemini_bin / "agy.version.json"
+                self.assertTrue(agy_exe.is_file())
+                self.assertEqual(agy_exe.read_bytes(), cli_bytes)
+                self.assertFalse((gemini_bin / ".agy-install.lock").exists())
+                self.assertFalse((gemini_bin / "agy.tmp.12345678-1234-1234-1234-1234567890ab").exists())
+                sc = json.loads(agy_sidecar.read_text(encoding="utf-8"))
+                self.assertEqual(sc["schemaVersion"], 1)
+                self.assertEqual(sc["version"], "1.5.18")
+                self.assertEqual(sc["size"], len(cli_bytes))
+                self.assertEqual(sc["sha512"].lower(), cli_sha512.lower())
+        finally:
+            server.shutdown()
+            server.server_close()
 
 
 if __name__ == "__main__":
