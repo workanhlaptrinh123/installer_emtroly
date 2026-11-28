@@ -210,6 +210,7 @@ function Clear-IncompleteRootInPlace([string]$DirPath) {
 if (-not $UserInstall -and -not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'System-service mode requires Administrator; new web installations use UserInstall.' }
 if ($Name -notmatch '^[a-z][a-z0-9_-]{0,63}$') { throw 'Name must use lowercase letters, numbers, underscore or hyphen.' }
 . (Join-Path $PSScriptRoot 'native\windows-instance.ps1')
+. (Join-Path $PSScriptRoot 'native\openclaw-npm.ps1')
 if ($InstallMode -ne 'new') {
   $existing = Select-OpenClawInstance -HomeDirectory $env:USERPROFILE -Name $Name -ExistingRoot $ExistingRoot
   if ($existing) {
@@ -320,7 +321,15 @@ if (-not $UserInstall -and -not (Get-Command ffmpeg -ErrorAction SilentlyContinu
   else { Write-Warning 'FFmpeg is missing; media modules will need FFmpeg installed later.' }
 }
 Optimize-NativeProcessPath
-if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) { throw 'npm is unavailable after Node.js installation.' }
+$toolchains = Resolve-EmTroLyNodeToolchains -PayloadRoot $PSScriptRoot
+if (-not $toolchains -or -not $toolchains.Primary -or -not $toolchains.Primary.NodeExe -or -not $toolchains.Primary.NpmCmd) {
+  throw 'npm is unavailable after Node.js installation.'
+}
+$primaryNodeExe = [string]$toolchains.Primary.NodeExe
+$primaryNodeDir = [string]$toolchains.Primary.NodeDir
+if ($primaryNodeDir) {
+  $env:Path = $primaryNodeDir + ';' + $env:Path
+}
 if (-not $verifiedPythonExe) { $verifiedPythonExe = Resolve-VerifiedPythonExe }
 if (-not $verifiedPythonExe) { throw 'Python is unavailable. Reopen PowerShell as Administrator and retry.' }
 $env:Path = (Split-Path -Parent $verifiedPythonExe) + ';' + $env:Path
@@ -333,99 +342,45 @@ $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 if ($LASTEXITCODE -ne 0) { throw 'Unable to protect the private instance directory.' }
 $runtime = Join-Path $root ('runtime\' + $OpenClawVersion)
 $logsDir = Join-Path $root 'logs'
-New-Item -ItemType Directory -Force -Path $runtime,$logsDir | Out-Null
+$npmCacheDir = Join-Path $root 'npm-cache'
+New-Item -ItemType Directory -Force -Path $runtime,$logsDir,$npmCacheDir | Out-Null
 $status = 'Đang tải và cài OpenClaw ' + $OpenClawVersion + '. Bước này có thể mất vài phút…'
 Write-NativeInstallStatus $status
-$runtimePackage = @{ name='member-openclaw-runtime'; version='1.0.0'; private=$true; allowScripts=@{ '@google/genai'=$true; esbuild=$true; koffi=$true; openclaw=$true; protobufjs=$true; 'tree-sitter-bash'=$true } }
-[IO.File]::WriteAllText((Join-Path $runtime 'package.json'), ($runtimePackage | ConvertTo-Json -Depth 4), [Text.UTF8Encoding]::new($false))
-$isolatedNpmrc = Join-Path $runtime '.npmrc.emtroly'
-$npmCacheDir = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'MemberInstaller\npm-cache' } else { Join-Path $root 'npm-cache' }
-New-Item -ItemType Directory -Force -Path $npmCacheDir | Out-Null
-$npmLogFile = Join-Path $logsDir 'npm-install.log'
-$previousErrorAction = $ErrorActionPreference
-$hadNpmCache = Test-Path Env:NPM_CONFIG_CACHE
-$oldNpmCache = if ($hadNpmCache) { $env:NPM_CONFIG_CACHE } else { $null }
-$hadNpmUserCfg = Test-Path Env:NPM_CONFIG_USERCONFIG
-$oldNpmUserCfg = if ($hadNpmUserCfg) { $env:NPM_CONFIG_USERCONFIG } else { $null }
-$hadNpmPrefix = Test-Path Env:NPM_CONFIG_PREFIX
-$oldNpmPrefix = if ($hadNpmPrefix) { $env:NPM_CONFIG_PREFIX } else { $null }
 $hadNodeOptions = Test-Path Env:NODE_OPTIONS
 $oldNodeOptions = if ($hadNodeOptions) { $env:NODE_OPTIONS } else { $null }
 $hadIa32Cap = Test-Path Env:OPENSSL_ia32cap
 $oldIa32Cap = if ($hadIa32Cap) { $env:OPENSSL_ia32cap } else { $null }
-$npmExitCode = 1
+$npmInstallResult = $null
 try {
-  $env:NPM_CONFIG_CACHE = $npmCacheDir
-  $env:NPM_CONFIG_USERCONFIG = $isolatedNpmrc
-  if (Test-Path Env:NPM_CONFIG_PREFIX) { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
   if (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
-  for ($npmTry = 1; $npmTry -le 4; $npmTry++) {
-    $registryUrl = if ($npmTry -eq 3) { 'https://registry.npmmirror.com/' } else { 'https://registry.npmjs.org/' }
-    $maxSockets = if ($npmTry -eq 1) { 6 } elseif ($npmTry -eq 2) { 2 } else { 1 }
-    [IO.File]::WriteAllText($isolatedNpmrc, "registry=$registryUrl`nmaxsockets=$maxSockets`nfetch-retries=10`nfetch-retry-mintimeout=1000`nfetch-retry-maxtimeout=6000`nfetch-timeout=600000`naudit=false`nfund=false`n", [Text.UTF8Encoding]::new($false))
-    if ($npmTry -ge 2) {
-      # Work around OpenSSL 3 AES-GCM / VAES / TLS 1.3 cipher failures on affected Windows CPUs, VPNs, and AV SSL proxies
-      $env:OPENSSL_ia32cap = if ($npmTry -ge 4) { '0:0' } else { '~0x200000200000000' }
-      if ($npmTry -eq 4) {
-        $env:NODE_OPTIONS = '--tls-max-v1.2'
-      } else {
-        $env:NODE_OPTIONS = '--tls-max-v1.2 --tls-cipher-list=ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-CHACHA20-POLY1305:DEFAULT'
-      }
-    } else {
-      if (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
-      if ($hadIa32Cap) { $env:OPENSSL_ia32cap = $oldIa32Cap } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
-    }
-    $ErrorActionPreference = 'Continue'
-    & npm.cmd install --prefix $runtime "openclaw@$OpenClawVersion" --no-audit --no-fund --prefer-offline --loglevel=error *> $npmLogFile
-    $npmExitCode = $LASTEXITCODE
-    $ErrorActionPreference = $previousErrorAction
-    if ($npmExitCode -eq 0) { break }
-    $npmTail = if (Test-Path -LiteralPath $npmLogFile -PathType Leaf) { (@(Get-Content -LiteralPath $npmLogFile -Tail 20 -ErrorAction SilentlyContinue) -join ' | ') } else { '' }
-    Write-NativeInstallLog -Entry ("npm install attempt $npmTry/4 failed (exit=$npmExitCode): $npmTail") -Secrets @($tg, $key)
-    if ($npmTry -lt 4) {
-      if ($npmTail -match 'ERR_SSL_CIPHER_OPERATION_FAILED|ERR_SSL_DECRYPTION_FAILED_OR_BAD_RECORD_MAC|ossl_gcm_stream_update|ciphercommon_gcm|bad record mac|cipher operation failed') {
-        $retryStatus = switch ($npmTry) {
-          1 { 'Phát hiện lỗi giải mã TLS/SSL — đang thử lại chế độ TLS 1.2 / ChaCha20 (lần 2/4)...' }
-          2 { 'Đang chuyển sang máy chủ npm dự phòng với chế độ bảo toàn kết nối TLS (lần 3/4)...' }
-          default { 'Đang thử lại tải nối tiếp từ bộ nhớ đệm npm (lần 4/4)...' }
-        }
-        Write-NativeInstallStatus $retryStatus
-      } else {
-        Write-NativeInstallStatus "Windows đang quét tệp hoặc mạng chập chờn — đang tự động thử cài lại OpenClaw (lần $($npmTry + 1)/4)..."
-      }
-      $partialModules = Join-Path $runtime 'node_modules'
-      if (Test-Path -LiteralPath $partialModules) {
-        $cmdClean = Join-Path $env:SystemRoot 'System32\cmd.exe'
-        if (Test-Path -LiteralPath $cmdClean -PathType Leaf) {
-          try {
-            $psiNpm = New-Object System.Diagnostics.ProcessStartInfo
-            $psiNpm.FileName = $cmdClean
-            $psiNpm.Arguments = '/d /s /c "rmdir /s /q "' + $partialModules + '""'
-            $psiNpm.UseShellExecute = $false
-            $psiNpm.CreateNoWindow = $true
-            $pNpm = [System.Diagnostics.Process]::Start($psiNpm); [void]$pNpm.WaitForExit(15000); $pNpm.Dispose()
-          } catch { }
-        }
-        Remove-Item -LiteralPath $partialModules -Recurse -Force -ErrorAction SilentlyContinue
-      }
-      Start-Sleep -Seconds (2 * $npmTry)
-    }
-  }
+  if (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
+  # Invoke-OpenClawNpmInstall manages isolated per-instance cache, per-attempt logs,
+  # Node LTS fallback, OPENSSL_ia32cap, --tls-max-v1.2, ChaCha20, and registry.npmmirror.com fallback.
+  $npmInstallResult = Invoke-OpenClawNpmInstall `
+    -RuntimeDir $runtime `
+    -OpenClawRoot $root `
+    -OpenClawVersion $OpenClawVersion `
+    -LogsDir $logsDir `
+    -NpmCacheRoot $npmCacheDir `
+    -PayloadRoot $PSScriptRoot `
+    -PrimaryRegistry 'https://registry.npmjs.org/' `
+    -FallbackRegistry 'https://registry.npmmirror.com/' `
+    -MaxSocketsInitial 2 `
+    -SecretsToRedact @($tg, $key) `
+    -StatusCallback { param($msg) Write-NativeInstallStatus $msg } `
+    -LogCallback { param($entry) Write-NativeInstallLog -Entry $entry -Secrets @($tg, $key) }
 } finally {
-  $ErrorActionPreference = $previousErrorAction
-  if ($hadNpmCache) { $env:NPM_CONFIG_CACHE = $oldNpmCache } elseif (Test-Path Env:NPM_CONFIG_CACHE) { Remove-Item Env:NPM_CONFIG_CACHE -ErrorAction SilentlyContinue }
-  if ($hadNpmUserCfg) { $env:NPM_CONFIG_USERCONFIG = $oldNpmUserCfg } elseif (Test-Path Env:NPM_CONFIG_USERCONFIG) { Remove-Item Env:NPM_CONFIG_USERCONFIG -ErrorAction SilentlyContinue }
-  if ($hadNpmPrefix) { $env:NPM_CONFIG_PREFIX = $oldNpmPrefix } elseif (Test-Path Env:NPM_CONFIG_PREFIX) { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
   if ($hadNodeOptions) { $env:NODE_OPTIONS = $oldNodeOptions } elseif (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
   if ($hadIa32Cap) { $env:OPENSSL_ia32cap = $oldIa32Cap } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
-  Remove-Item -LiteralPath $isolatedNpmrc -Force -ErrorAction SilentlyContinue
 }
-if ($npmExitCode -ne 0) { throw 'Private OpenClaw installation failed.' }
+if ($npmInstallResult -and $npmInstallResult.PrimaryNodeExe -and (Test-Path -LiteralPath $npmInstallResult.PrimaryNodeExe -PathType Leaf)) {
+  $primaryNodeExe = [string]$npmInstallResult.PrimaryNodeExe
+}
 $bundledPostinstall = Join-Path $runtime 'node_modules\openclaw\scripts\postinstall-bundled-plugins.mjs'
 if (-not (Test-Path -LiteralPath $bundledPostinstall)) { throw 'Bundled plugin installer was not found.' }
 $postinstallOk = $false
 for ($piTry = 1; $piTry -le 2; $piTry++) {
-  & node $bundledPostinstall
+  & $primaryNodeExe $bundledPostinstall
   if ($LASTEXITCODE -eq 0) { $postinstallOk = $true; break }
   if ($piTry -lt 2) { Start-Sleep -Seconds 2 }
 }
@@ -434,7 +389,7 @@ $cliEntry = Join-Path $runtime 'node_modules\openclaw\openclaw.mjs'
 if (-not (Test-Path $cliEntry)) { throw "Private OpenClaw CLI was not found: $cliEntry" }
 $env:OPENCLAW_CLI_ENTRY = $cliEntry
 $env:Path = (Join-Path $runtime 'node_modules\.bin') + ';' + $env:Path
-function Invoke-OpenClaw { & node $cliEntry @args; $global:LASTEXITCODE = $LASTEXITCODE }
+function Invoke-OpenClaw { & $primaryNodeExe $cliEntry @args; $global:LASTEXITCODE = $LASTEXITCODE }
 if ($UserInstall) {
   . (Join-Path $PSScriptRoot 'native\user-gateway.ps1')
   function Invoke-OpenClaw { Invoke-InstanceCli -Root $root -CliEntry $cliEntry @args; $global:LASTEXITCODE = $LASTEXITCODE }
@@ -526,9 +481,9 @@ $approvals = @{
   defaults = @{ security='allowlist'; ask='on-miss'; askFallback='deny'; autoAllowSkills=$false }
   agents = @{ main=@{ security='full'; ask='off'; askFallback='full'; autoAllowSkills=$true; allowlist=@() } }
 } | ConvertTo-Json -Depth 8 -Compress
-$approvals | & node $cliEntry approvals set --stdin --json | Out-Null
+$approvals | & $primaryNodeExe $cliEntry approvals set --stdin --json | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Full Exec approval store configuration failed.' }
-$approvalState = (& node $cliEntry approvals get --json | Out-String) | ConvertFrom-Json
+$approvalState = (& $primaryNodeExe $cliEntry approvals get --json | Out-String) | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0 -or $approvalState.file.agents.main.security -ne 'full' -or $approvalState.file.agents.main.ask -ne 'off') { throw 'Full Exec approval store verification failed.' }
 $customerProfile = "# Ho so tro ly`n`nTen tro ly: $AssistantName`n`nDoi tuong phuc vu: $Audience`n`nCach xung ho: $Addressing`n`nPhong cach tra loi: $Style`n"
 [IO.File]::WriteAllText((Join-Path $workspace 'CUSTOMER_PROFILE.md'), $customerProfile, [Text.UTF8Encoding]::new($false))
@@ -539,10 +494,10 @@ Invoke-OpenClaw config validate --json
 if ($LASTEXITCODE -ne 0) { throw 'OpenClaw configuration is invalid.' }
 Invoke-OpenClaw skills check
 if ($LASTEXITCODE -ne 0) { throw 'OpenClaw skills check failed.' }
-Save-OpenClawInstanceLauncher -Root $root -InstanceProfile $env:OPENCLAW_PROFILE -CliEntry $cliEntry -Port $GatewayPort -Python $verifiedPythonExe
+Save-OpenClawInstanceLauncher -Root $root -InstanceProfile $env:OPENCLAW_PROFILE -CliEntry $cliEntry -Port $GatewayPort -Node $primaryNodeExe -Python $verifiedPythonExe
 if ($UserInstall) {
   Write-NativeInstallStatus 'Đang đăng ký lệnh openclaw vào PATH của tài khoản Windows…'
-  Install-UserOpenClawCli -Root $root -CliEntry $cliEntry -Port $GatewayPort -Profile $env:OPENCLAW_PROFILE -ExpectedVersion $OpenClawVersion -Python $verifiedPythonExe
+  Install-UserOpenClawCli -Root $root -CliEntry $cliEntry -Port $GatewayPort -Profile $env:OPENCLAW_PROFILE -ExpectedVersion $OpenClawVersion -Python $verifiedPythonExe -Node $primaryNodeExe
   Install-UserGateway -Root $root -CliEntry $cliEntry -Port $GatewayPort -Python $verifiedPythonExe
 }
 if ($zaloSelected) {

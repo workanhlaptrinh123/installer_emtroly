@@ -116,46 +116,81 @@ Set-ZaloInstallStage 'plugin-inspect'
 $pluginInfo = Get-ZaloPluginInfo -Node $node -CliEntry $env:OPENCLAW_CLI_ENTRY
 if (-not $pluginInfo) {
   Set-ZaloInstallStage 'plugin-install'
+  $openClawNpmHelper = Join-Path (Split-Path -Parent $PSScriptRoot) 'native\openclaw-npm.ps1'
+  if (-not (Test-Path -LiteralPath $openClawNpmHelper -PathType Leaf)) {
+    $openClawNpmHelper = Join-Path $Root 'native\openclaw-npm.ps1'
+  }
+  if (Test-Path -LiteralPath $openClawNpmHelper -PathType Leaf) {
+    try { . $openClawNpmHelper } catch { }
+  }
   $hadNpmCacheZ = Test-Path Env:NPM_CONFIG_CACHE
   $oldNpmCacheZ = if ($hadNpmCacheZ) { $env:NPM_CONFIG_CACHE } else { $null }
   $hadNpmPrefixZ = Test-Path Env:NPM_CONFIG_PREFIX
   $oldNpmPrefixZ = if ($hadNpmPrefixZ) { $env:NPM_CONFIG_PREFIX } else { $null }
+  $hadNpmMaxSocketsZ = Test-Path Env:NPM_CONFIG_MAXSOCKETS
+  $oldNpmMaxSocketsZ = if ($hadNpmMaxSocketsZ) { $env:NPM_CONFIG_MAXSOCKETS } else { $null }
   $hadNodeOptsZ = Test-Path Env:NODE_OPTIONS
   $oldNodeOptsZ = if ($hadNodeOptsZ) { $env:NODE_OPTIONS } else { $null }
   $hadIa32Z = Test-Path Env:OPENSSL_ia32cap
   $oldIa32Z = if ($hadIa32Z) { $env:OPENSSL_ia32cap } else { $null }
   $hadRegZ = Test-Path Env:NPM_CONFIG_REGISTRY
   $oldRegZ = if ($hadRegZ) { $env:NPM_CONFIG_REGISTRY } else { $null }
+  $zaloCacheRoot = Join-Path $Root 'npm-cache\zalo'
+  [void][IO.Directory]::CreateDirectory($zaloCacheRoot)
   try {
-    $env:NPM_CONFIG_CACHE = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'MemberInstaller\npm-cache' } else { Join-Path $Root 'npm-cache' }
-    [void][IO.Directory]::CreateDirectory($env:NPM_CONFIG_CACHE)
     if (Test-Path Env:NPM_CONFIG_PREFIX) { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
-    if (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
+    $zaloToolchains = if (Get-Command -Name 'Resolve-EmTroLyNodeToolchains' -ErrorAction SilentlyContinue) {
+      Resolve-EmTroLyNodeToolchains -OpenClawRoot $Root
+    } else { $null }
+    $ltsZNode = if ($zaloToolchains -and $zaloToolchains.Lts -and $zaloToolchains.Lts.NodeExe) { [string]$zaloToolchains.Lts.NodeExe } else { '' }
+    $chaChaStrictZ = '--tls-max-v1.2 --tls-cipher-list=ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA384:DHE-RSA-CHACHA20-POLY1305:!AESGCM:!GCM'
+
+    $zaloAttempts = New-Object System.Collections.Generic.List[object]
+    [void]$zaloAttempts.Add([pscustomobject]@{ NodeExe=$node; Registry='https://registry.npmjs.org/'; MaxSockets='2'; Ia32=''; NodeOpts='' })
+    if ($ltsZNode) {
+      [void]$zaloAttempts.Add([pscustomobject]@{ NodeExe=$ltsZNode; Registry='https://registry.npmjs.org/'; MaxSockets='1'; Ia32=''; NodeOpts='' })
+    }
+    [void]$zaloAttempts.Add([pscustomobject]@{ NodeExe=$node; Registry='https://registry.npmjs.org/'; MaxSockets='1'; Ia32='~0x200000200000000'; NodeOpts='' })
+    [void]$zaloAttempts.Add([pscustomobject]@{ NodeExe=$node; Registry='https://registry.npmjs.org/'; MaxSockets='1'; Ia32='~0x200000200000000'; NodeOpts='--tls-max-v1.2' })
+    [void]$zaloAttempts.Add([pscustomobject]@{ NodeExe=$node; Registry='https://registry.npmjs.org/'; MaxSockets='1'; Ia32='~0x200000200000000'; NodeOpts=$chaChaStrictZ })
+    [void]$zaloAttempts.Add([pscustomobject]@{ NodeExe=$(if ($ltsZNode) { $ltsZNode } else { $node }); Registry='https://registry.npmmirror.com/'; MaxSockets='1'; Ia32='0:0'; NodeOpts=$chaChaStrictZ })
+
     $installResult = $null
-    for ($zTry = 1; $zTry -le 3; $zTry++) {
-      if ($zTry -ge 2) {
-        $env:OPENSSL_ia32cap = '~0x200000200000000'
-        $env:NODE_OPTIONS = '--tls-max-v1.2 --tls-cipher-list=ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-CHACHA20-POLY1305:DEFAULT'
-      }
-      if ($zTry -ge 3) {
-        $env:NPM_CONFIG_REGISTRY = 'https://registry.npmmirror.com/'
-      }
-      $installResult = Invoke-ZaloPluginCli -Node $node -CliEntry $env:OPENCLAW_CLI_ENTRY -Arguments @('plugins', 'install', '--pin', "@openclaw/zalouser@$coreVersion")
+    for ($zIdx = 0; $zIdx -lt $zaloAttempts.Count; $zIdx++) {
+      $zStep = $zaloAttempts[$zIdx]
+      $zTry = $zIdx + 1
+      $zAttemptCache = Join-Path $zaloCacheRoot ("attempt-$zTry")
+      [void][IO.Directory]::CreateDirectory($zAttemptCache)
+      $env:NPM_CONFIG_CACHE = $zAttemptCache
+      $env:NPM_CONFIG_REGISTRY = $zStep.Registry
+      $env:NPM_CONFIG_MAXSOCKETS = $zStep.MaxSockets
+      if ($zStep.Ia32) { $env:OPENSSL_ia32cap = $zStep.Ia32 } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
+      if ($zStep.NodeOpts) { $env:NODE_OPTIONS = $zStep.NodeOpts } elseif (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
+
+      $installResult = Invoke-ZaloPluginCli -Node $zStep.NodeExe -CliEntry $env:OPENCLAW_CLI_ENTRY -Arguments @('plugins', 'install', '--pin', "@openclaw/zalouser@$coreVersion")
       if ($installResult.ExitCode -eq 0) { break }
       $pluginInfo = Get-ZaloPluginInfo -Node $node -CliEntry $env:OPENCLAW_CLI_ENTRY
       if ($pluginInfo) { break }
-      if ($zTry -lt 3) { Start-Sleep -Seconds (3 * $zTry) }
+      $zOutText = [string]($installResult.Output)
+      if ((Get-Command -Name 'Test-IsNpmTlsCipherError' -ErrorAction SilentlyContinue) -and ((Test-IsNpmTlsCipherError -LogText $zOutText) -or (Test-IsNpmCacheOrTarballCorruptError -LogText $zOutText))) {
+        Remove-Item -LiteralPath $zAttemptCache -Recurse -Force -ErrorAction SilentlyContinue
+      }
+      if ($zTry -lt $zaloAttempts.Count) {
+        $zDelayMs = if ($env:EMTROLY_NPM_RETRY_DELAY_MS -match '^[0-9]+$') { [int]$env:EMTROLY_NPM_RETRY_DELAY_MS } else { ([Math]::Min(4, $zTry) * 1000) }
+        if ($zDelayMs -gt 0) { Start-Sleep -Milliseconds $zDelayMs }
+      }
     }
   } finally {
     if ($hadNpmCacheZ) { $env:NPM_CONFIG_CACHE = $oldNpmCacheZ } elseif (Test-Path Env:NPM_CONFIG_CACHE) { Remove-Item Env:NPM_CONFIG_CACHE -ErrorAction SilentlyContinue }
     if ($hadNpmPrefixZ) { $env:NPM_CONFIG_PREFIX = $oldNpmPrefixZ } elseif (Test-Path Env:NPM_CONFIG_PREFIX) { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
+    if ($hadNpmMaxSocketsZ) { $env:NPM_CONFIG_MAXSOCKETS = $oldNpmMaxSocketsZ } elseif (Test-Path Env:NPM_CONFIG_MAXSOCKETS) { Remove-Item Env:NPM_CONFIG_MAXSOCKETS -ErrorAction SilentlyContinue }
     if ($hadNodeOptsZ) { $env:NODE_OPTIONS = $oldNodeOptsZ } elseif (Test-Path Env:NODE_OPTIONS) { Remove-Item Env:NODE_OPTIONS -ErrorAction SilentlyContinue }
     if ($hadIa32Z) { $env:OPENSSL_ia32cap = $oldIa32Z } elseif (Test-Path Env:OPENSSL_ia32cap) { Remove-Item Env:OPENSSL_ia32cap -ErrorAction SilentlyContinue }
     if ($hadRegZ) { $env:NPM_CONFIG_REGISTRY = $oldRegZ } elseif (Test-Path Env:NPM_CONFIG_REGISTRY) { Remove-Item Env:NPM_CONFIG_REGISTRY -ErrorAction SilentlyContinue }
   }
+  if (-not $pluginInfo -and $installResult -and $installResult.ExitCode -ne 0) { Set-ZaloCliFailureDetail $installResult; throw 'Zalo plugin installation failed.' }
   Set-ZaloInstallStage 'plugin-inspect'
   if (-not $pluginInfo) { $pluginInfo = Get-ZaloPluginInfo -Node $node -CliEntry $env:OPENCLAW_CLI_ENTRY }
-  if (-not $pluginInfo -and $installResult -and $installResult.ExitCode -ne 0) { Set-ZaloCliFailureDetail $installResult; throw 'Zalo plugin installation failed.' }
 }
 if (-not $pluginInfo) { Set-ZaloFailureDetail 'plugin-not-found'; throw 'Zalo plugin was not found after installation.' }
 if ($pluginInfo.plugin.packageName -ne '@openclaw/zalouser' -or $pluginInfo.plugin.version -ne $coreVersion) {
