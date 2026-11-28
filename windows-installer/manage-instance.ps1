@@ -989,6 +989,9 @@ requires_openai_auth = true
         if (-not [string]::IsNullOrWhiteSpace($newApiKey)) {
           $codexAuth = @{ OPENAI_API_KEY = $newApiKey } | ConvertTo-Json -Compress
           [IO.File]::WriteAllText((Join-Path $emCodexDir 'auth.json'), $codexAuth, $utf8NoBom)
+          if (Get-Command -Name 'Sync-EmTroLyUserCodexHome' -ErrorAction Ignore) {
+            [void](Sync-EmTroLyUserCodexHome -ApiKey $newApiKey -Model $resolvedModel -BaseUrl $baseUrl)
+          }
         }
       }
 
@@ -1112,6 +1115,9 @@ requires_openai_auth = true
 "@
         [IO.File]::WriteAllText((Join-Path $emCodex 'config.toml'), $cfgToml, $utf8NoBom)
         [IO.File]::WriteAllText((Join-Path $emCodex 'auth.json'), (@{ OPENAI_API_KEY = $apiKey } | ConvertTo-Json -Compress), $utf8NoBom)
+        if (Get-Command -Name 'Sync-EmTroLyUserCodexHome' -ErrorAction Ignore) {
+          [void](Sync-EmTroLyUserCodexHome -ApiKey $apiKey -Model $model -BaseUrl $baseUrl)
+        }
         $psExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
         $repRes = Invoke-SafeSubProcess -FilePath $psExe -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $repairScript) -TimeoutSeconds 120
         $modVerifyQuick = if (Get-Command Get-EmTroLyModularStatus -ErrorAction SilentlyContinue) { Get-EmTroLyModularStatus } else { $null }
@@ -1119,6 +1125,9 @@ requires_openai_auth = true
         $quickVerified = if ($modVerifyQuick) { ($modVerifyQuick.AntigravityInstalled -and $modVerifyQuick.CodexExtensionInstalled -and $hasAgyRuntimeCli) } else { ((Test-Path -LiteralPath $shortcutPath -PathType Leaf) -and $hasAgyRuntimeCli) }
         if ($repRes.ExitCode -eq 0 -and $quickVerified) {
           [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadDir)
+          if (Get-Command -Name 'Sync-EmTroLyAntigravityDefaultExtension' -ErrorAction Ignore) {
+            try { [void](Sync-EmTroLyAntigravityDefaultExtension) } catch { }
+          }
           if (Get-Command Install-EmTroLyAppShortcut -ErrorAction SilentlyContinue) {
             try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadDir) } catch { }
           }
@@ -1179,6 +1188,12 @@ try {
         throw 'editor-extension-verification-failed'
       }
       [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadDir)
+      if (Get-Command -Name 'Sync-EmTroLyUserCodexHome' -ErrorAction Ignore) {
+        try { [void](Sync-EmTroLyUserCodexHome -ApiKey $apiKey -Model $model -BaseUrl $baseUrl) } catch { }
+      }
+      if (Get-Command -Name 'Sync-EmTroLyAntigravityDefaultExtension' -ErrorAction Ignore) {
+        try { [void](Sync-EmTroLyAntigravityDefaultExtension) } catch { }
+      }
       if (Get-Command Install-EmTroLyAppShortcut -ErrorAction SilentlyContinue) {
         try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadDir) } catch { }
       }

@@ -12,6 +12,9 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import urllib.error
+from urllib.parse import urlsplit
+import urllib.request
 
 import net_utils
 
@@ -76,6 +79,86 @@ def _write_private_file(path: Path, content: str, mode: int = 0o600) -> None:
     os.replace(tmp, path)
 
 
+def sync_default_codex_home(home: Path, api_key: str, model: str, base_url: str) -> Path | None:
+    """Link default ~/.codex to codex.anhlaptrinh.vn while preserving existing projects/plugins/mcp sections."""
+    if os.environ.get("EMTROLY_SKIP_DEFAULT_CODEX_SYNC") == "1":
+        return None
+    clean_url = (base_url or "").strip().rstrip("/")
+    clean_key = (api_key or "").strip()
+    if clean_url != "https://codex.anhlaptrinh.vn/v1" or not clean_key:
+        return None
+    safe_model = model.strip() if re.fullmatch(r"[A-Za-z0-9._-]+", (model or "").strip()) else "gpt-6.2-sol"
+    dot_codex = Path(home) / ".codex"
+    dot_codex.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        os.chmod(dot_codex, 0o700)
+    except OSError:
+        pass
+
+    cfg_path = dot_codex / "config.toml"
+    existing_raw = cfg_path.read_text(encoding="utf-8", errors="ignore") if cfg_path.is_file() else ""
+    top_lines: list[str] = []
+    section_lines: list[str] = []
+    in_section = False
+    skip_router = False
+    top_key_re = re.compile(r"^\s*(model_provider|model|model_context_window|model_auto_compact_token_limit|cli_auth_credentials_store)\s*=")
+    sec_re = re.compile(r"^\s*\[([^\]]+)\]\s*(?:#.*)?$")
+    for line in existing_raw.splitlines():
+        m_sec = sec_re.match(line)
+        if m_sec:
+            in_section = True
+            sec_name = m_sec.group(1).strip().lower()
+            if sec_name == "model_providers.router":
+                skip_router = True
+                continue
+            skip_router = False
+            section_lines.append(line)
+            continue
+        if not in_section:
+            if not top_key_re.match(line):
+                top_lines.append(line)
+        elif not skip_router:
+            section_lines.append(line)
+
+    out_lines = [
+        'model_provider = "router"',
+        f'model = "{safe_model}"',
+        "model_context_window = 272000",
+        "model_auto_compact_token_limit = 200000",
+        'cli_auth_credentials_store = "file"',
+    ]
+    out_lines.extend(l for l in top_lines if l.strip())
+    while section_lines and not section_lines[-1].strip():
+        section_lines.pop()
+    if section_lines:
+        out_lines.append("")
+        out_lines.extend(section_lines)
+    out_lines.extend([
+        "",
+        "[model_providers.router]",
+        'name = "router"',
+        f'base_url = "{clean_url}"',
+        'wire_api = "responses"',
+        "requires_openai_auth = true",
+    ])
+    _write_private_file(cfg_path, "\n".join(out_lines) + "\n", 0o600)
+
+    auth_path = dot_codex / "auth.json"
+    auth_obj: dict = {}
+    if auth_path.is_file():
+        try:
+            loaded = json.loads(auth_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                for k, v in loaded.items():
+                    if k not in {"OPENAI_API_KEY", "auth_mode", "tokens", "last_refresh"}:
+                        auth_obj[k] = v
+        except Exception:
+            pass
+    auth_obj["OPENAI_API_KEY"] = clean_key
+    _write_private_file(auth_path, json.dumps(auth_obj) + "\n", 0o600)
+    return dot_codex
+
+
 def write_codex_home(home: Path, api_key: str, model: str, base_url: str) -> Path:
     c_home = codex_home_dir(home)
     c_home.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -100,6 +183,7 @@ def write_codex_home(home: Path, api_key: str, model: str, base_url: str) -> Pat
     _write_private_file(c_home / "config.toml", config_toml, 0o600)
     if api_key and api_key.strip():
         _write_private_file(c_home / "auth.json", json.dumps({"OPENAI_API_KEY": api_key.strip()}) + "\n", 0o600)
+    sync_default_codex_home(home, api_key, safe_model, safe_url)
     return c_home
 
 
@@ -178,7 +262,226 @@ def register_codex_shim(home: Path, codex_bin: Path, c_home: Path, extra_bin_dir
     return {"registered": True, "command": selected_name, "path": str(selected_path)}
 
 
-def install_codex_cli_first(values: dict, home: Path, node: Path, npm: Path, progress=lambda _m: None) -> dict:
+def _parse_version_parts(raw: str) -> tuple[tuple[int, ...], str]:
+    clean = str(raw or "").strip().lstrip("vV")
+    no_build = clean.split("+", 1)[0]
+    if "-" in no_build:
+        main_str, pre_str = no_build.split("-", 1)
+    else:
+        main_str, pre_str = no_build, ""
+    nums: list[int] = []
+    for seg in main_str.split("."):
+        try:
+            nums.append(int(seg))
+        except ValueError:
+            nums.append(0)
+    while len(nums) < 3:
+        nums.append(0)
+    return tuple(nums), pre_str
+
+
+def compare_versions(current: str, target: str) -> int:
+    a_nums, a_pre = _parse_version_parts(current)
+    b_nums, b_pre = _parse_version_parts(target)
+    max_len = max(len(a_nums), len(b_nums))
+    a_pad = a_nums + (0,) * (max_len - len(a_nums))
+    b_pad = b_nums + (0,) * (max_len - len(b_nums))
+    if a_pad < b_pad:
+        return -1
+    if a_pad > b_pad:
+        return 1
+    if not a_pre and b_pre:
+        return 1
+    if a_pre and not b_pre:
+        return -1
+    if a_pre == b_pre:
+        return 0
+    for ap, bp in zip(a_pre.split("."), b_pre.split(".")):
+        if ap.isdigit() and bp.isdigit():
+            ai, bi = int(ap), int(bp)
+            if ai != bi:
+                return -1 if ai < bi else 1
+        elif ap != bp:
+            return -1 if ap < bp else 1
+    return -1 if len(a_pre.split(".")) < len(b_pre.split(".")) else (1 if len(a_pre.split(".")) > len(b_pre.split(".")) else 0)
+
+
+def _is_trusted_metadata_url(url: str, trusted_hosts: tuple[str, ...], *, allow_loopback: bool = False) -> bool:
+    if not url:
+        return False
+    parsed = urlsplit(url.strip())
+    if allow_loopback and parsed.scheme == "http" and parsed.hostname == "127.0.0.1":
+        return True
+    if parsed.scheme != "https" or not parsed.hostname:
+        return False
+    host = parsed.hostname.lower()
+    return any(host == h or host.endswith("." + h) for h in trusted_hosts)
+
+
+def fetch_latest_npm_codex_version(timeout: float = 5.0) -> str:
+    if os.environ.get("EMTROLY_SKIP_REMOTE_VERSION_CHECK") == "1":
+        return ""
+    custom = os.environ.get("EMTROLY_CODEX_NPM_LATEST_URL", "").strip()
+    url = custom or "https://registry.npmjs.org/@openai/codex/latest"
+    allow_loopback = bool(custom and custom.startswith("http://127.0.0.1:"))
+    if not _is_trusted_metadata_url(url, ("registry.npmjs.org",), allow_loopback=allow_loopback):
+        return ""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "AnhLapTrinh-EmTroLy-Installer/1.0", "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read(262144).decode("utf-8", errors="ignore"))
+        ver = str((payload or {}).get("version") or "").strip()
+        if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.]+)?", ver):
+            return ver
+    except (OSError, ValueError, urllib.error.URLError, TimeoutError):
+        pass
+    return ""
+
+
+def fetch_latest_codex_extension_version(timeout: float = 5.0) -> str:
+    if os.environ.get("EMTROLY_SKIP_REMOTE_VERSION_CHECK") == "1":
+        return ""
+    custom = os.environ.get("EMTROLY_CODEX_OPENVSX_URL", "").strip()
+    url = custom or "https://open-vsx.org/api/openai/chatgpt/latest"
+    allow_loopback = bool(custom and custom.startswith("http://127.0.0.1:"))
+    if not _is_trusted_metadata_url(url, ("open-vsx.org",), allow_loopback=allow_loopback):
+        return ""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "AnhLapTrinh-EmTroLy-Installer/1.0", "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read(262144).decode("utf-8", errors="ignore"))
+        ver = str((payload or {}).get("version") or "").strip()
+        if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", ver):
+            return ver
+    except (OSError, ValueError, urllib.error.URLError, TimeoutError):
+        pass
+    return ""
+
+
+def _probe_binary_version(binary: Path, c_home: Path | None = None) -> str:
+    if not binary or not binary.is_file() or not os.access(binary, os.X_OK):
+        return ""
+    env = dict(os.environ, NO_COLOR="1")
+    if c_home:
+        env["CODEX_HOME"] = str(c_home)
+    try:
+        res = subprocess.run(
+            [str(binary), "--version"],
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if res.returncode == 0:
+            txt = (res.stdout or "") + " " + (res.stderr or "")
+            m = re.search(r"([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.]+)?)", txt)
+            if m:
+                return m.group(1)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return ""
+
+
+def get_installed_codex_cli_info(home: Path | None = None) -> dict:
+    resolved_home = Path(home) if home is not None else Path.home()
+    em_root = data_root(resolved_home)
+    npm_bin = em_root / "codex-cli/node_modules/.bin/codex"
+    npm_pkg = em_root / "codex-cli/node_modules/@openai/codex/package.json"
+    ver = ""
+    if npm_pkg.is_file():
+        try:
+            ver = str(json.loads(npm_pkg.read_text(encoding="utf-8")).get("version", "")).strip()
+        except Exception:
+            ver = ""
+    if npm_bin.is_file() and os.access(npm_bin, os.X_OK):
+        if not ver:
+            ver = _probe_binary_version(npm_bin, codex_home_dir(resolved_home))
+        return {"installed": True, "source": "npm", "version": ver, "path": str(npm_bin)}
+
+    ext_info = get_installed_codex_extension_info(resolved_home)
+    if ext_info["installed"] and ext_info["binary"]:
+        return {
+            "installed": True,
+            "source": "extension",
+            "version": _probe_binary_version(Path(ext_info["binary"]), codex_home_dir(resolved_home)),
+            "extension_version": ext_info["version"],
+            "path": ext_info["binary"],
+        }
+    return {"installed": False, "source": "none", "version": "", "path": ""}
+
+
+def get_installed_codex_extension_info(home: Path | None = None) -> dict:
+    resolved_home = Path(home) if home is not None else Path.home()
+    ext_root = data_root(resolved_home) / "antigravity/Extensions"
+    if not ext_root.is_dir():
+        return {"installed": False, "version": "", "path": "", "binary": "", "dirs": []}
+    candidates = []
+    for ext_dir in sorted(ext_root.glob("openai.chatgpt-*")):
+        if not ext_dir.is_dir():
+            continue
+        ver = ""
+        pkg_path = ext_dir / "package.json"
+        if pkg_path.is_file():
+            try:
+                pkg = json.loads(pkg_path.read_text(encoding="utf-8"))
+                if pkg.get("publisher") == "openai" and pkg.get("name") == "chatgpt":
+                    ver = str(pkg.get("version") or "").strip()
+            except Exception:
+                ver = ""
+        if not ver:
+            m = re.match(r"openai\.chatgpt-([0-9]+\.[0-9]+\.[0-9]+)", ext_dir.name)
+            if m:
+                ver = m.group(1)
+        bins = sorted(ext_dir.glob("bin/*/codex"))
+        bin_path = str(bins[0]) if bins and bins[0].is_file() else ""
+        candidates.append((ext_dir, ver, bin_path))
+
+    if not candidates:
+        return {"installed": False, "version": "", "path": "", "binary": "", "dirs": []}
+
+    best = candidates[0]
+    for item in candidates[1:]:
+        if item[1] and (not best[1] or compare_versions(item[1], best[1]) > 0):
+            best = item
+    return {
+        "installed": True,
+        "version": best[1],
+        "path": str(best[0]),
+        "binary": best[2],
+        "dirs": [str(c[0]) for c in candidates],
+    }
+
+
+def get_installed_antigravity_version(home: Path | None = None) -> str:
+    app_target, ide_cli = find_antigravity_cli(home)
+    search_roots = []
+    if app_target:
+        search_roots.extend([app_target / "Contents/Resources/app/product.json", app_target / "resources/app/product.json"])
+    if ide_cli:
+        search_roots.extend([
+            ide_cli.resolve().parent.parent / "resources/app/product.json",
+            ide_cli.resolve().parent.parent / "Resources/app/product.json",
+        ])
+    for prod in search_roots:
+        if prod.is_file():
+            try:
+                data = json.loads(prod.read_text(encoding="utf-8"))
+                return str(data.get("ideVersion") or data.get("version") or "").strip()
+            except Exception:
+                pass
+    return ""
+
+
+def install_codex_cli_first(
+    values: dict,
+    home: Path,
+    node: Path,
+    npm: Path,
+    progress=lambda _m: None,
+    check_latest: bool = False,
+) -> dict:
     """Always configure and install Codex CLI first so it can auto-heal subsequent steps."""
     progress("Bước 2 · Đang cài đặt và cấu hình ưu tiên Codex CLI trước tiên...")
     c_home = write_codex_home(
@@ -190,8 +493,26 @@ def install_codex_cli_first(values: dict, home: Path, node: Path, npm: Path, pro
 
     existing = find_codex_binary(home, isolated_only=True)
     if existing:
-        shim = register_codex_shim(home, existing, c_home, extra_bin_dir=node.parent)
-        return {"installed": True, "executable": str(existing), "codex_home": str(c_home), "shim": shim}
+        if not check_latest:
+            shim = register_codex_shim(home, existing, c_home, extra_bin_dir=node.parent)
+            return {"installed": True, "skipped": True, "up_to_date": True, "executable": str(existing), "codex_home": str(c_home), "shim": shim}
+        cli_info = get_installed_codex_cli_info(home)
+        installed_ver = cli_info.get("version", "")
+        progress("Đang kiểm tra phiên bản mới nhất của Codex CLI...")
+        latest_ver = fetch_latest_npm_codex_version()
+        if installed_ver and (not latest_ver or compare_versions(installed_ver, latest_ver) >= 0):
+            shim = register_codex_shim(home, existing, c_home, extra_bin_dir=node.parent)
+            progress(f"✓ Codex CLI đã ở phiên bản mới nhất (v{installed_ver}) — không cần tải lại.")
+            return {
+                "installed": True,
+                "skipped": True,
+                "up_to_date": True,
+                "version": installed_ver,
+                "target_version": latest_ver or installed_ver,
+                "executable": str(existing),
+                "codex_home": str(c_home),
+                "shim": shim,
+            }
 
     base_url = (values.get("base_url") or "").strip().rstrip("/")
     should_install_npm = (
@@ -223,8 +544,9 @@ def install_codex_cli_first(values: dict, home: Path, node: Path, npm: Path, pro
     if final_bin:
         net_utils.clear_macos_quarantine(final_bin)
         shim = register_codex_shim(home, final_bin, c_home, extra_bin_dir=node.parent)
-        return {"installed": True, "executable": str(final_bin), "codex_home": str(c_home), "shim": shim}
-    return {"installed": False, "executable": "", "codex_home": str(c_home), "shim": None}
+        final_ver = get_installed_codex_cli_info(home).get("version", "")
+        return {"installed": True, "skipped": False, "up_to_date": True, "version": final_ver, "executable": str(final_bin), "codex_home": str(c_home), "shim": shim}
+    return {"installed": False, "skipped": False, "up_to_date": False, "version": "", "executable": "", "codex_home": str(c_home), "shim": None}
 
 
 def find_antigravity_cli(home: Path | None = None) -> tuple[Path | None, Path | None]:
@@ -272,7 +594,7 @@ def find_antigravity_cli(home: Path | None = None) -> tuple[Path | None, Path | 
     return None, None
 
 
-def install_antigravity_and_extension(values: dict, home: Path, progress=lambda _m: None) -> dict:
+def install_antigravity_and_extension(values: dict, home: Path, progress=lambda _m: None, check_latest: bool = True) -> dict:
     """Configure isolated Antigravity profile & install Codex Extension (`openai.chatgpt`) before OpenClaw."""
     if values.get("skip_editor"):
         return {"configured": False, "skipped": True, "reason": "skip-editor"}
@@ -281,7 +603,7 @@ def install_antigravity_and_extension(values: dict, home: Path, progress=lambda 
     if not ide_cli:
         return {"configured": False, "skipped": True, "reason": "antigravity-not-installed"}
 
-    progress("Bước 2 · Đang cấu hình Antigravity IDE và cài đặt Codex Extension...")
+    progress("Bước 2 · Đang cấu hình Antigravity IDE và kiểm tra Codex Extension...")
     ag_root = data_root(home) / "antigravity"
     user_data = ag_root / "UserData"
     ext_dir = ag_root / "Extensions"
@@ -298,30 +620,58 @@ def install_antigravity_and_extension(values: dict, home: Path, progress=lambda 
     _write_private_file(settings_dir / "settings.json", json.dumps(editor_settings, indent=2) + "\n", 0o600)
 
     c_home = codex_home_dir(home)
-    env = dict(os.environ, CODEX_HOME=str(c_home), NO_COLOR="1")
-    for k in ("OPENAI_API_KEY", "VSCODE_IPC_HOOK_CLI", "ELECTRON_RUN_AS_NODE", "NODE_OPTIONS", "VSCODE_DEV"):
-        env.pop(k, None)
+    if (values.get("ai_api_key") or "").strip():
+        c_home = write_codex_home(
+            home,
+            values.get("ai_api_key", ""),
+            values.get("model", "gpt-6.2-sol"),
+            values.get("base_url", "https://codex.anhlaptrinh.vn/v1"),
+        )
+    ext_info = get_installed_codex_extension_info(home)
+    skipped_download = False
+    resolved_ver = ext_info.get("version", "")
+    latest_ver = ""
+    if check_latest and ext_info["installed"] and ext_info["version"]:
+        progress("Đang kiểm tra phiên bản mới nhất của Codex Extension...")
+        latest_ver = fetch_latest_codex_extension_version()
+        if not latest_ver or compare_versions(ext_info["version"], latest_ver) >= 0:
+            skipped_download = True
+            progress(f"✓ Codex Extension đã ở phiên bản mới nhất (v{ext_info['version']}) — không cần tải lại.")
 
-    res = subprocess.run(
-        [
-            str(ide_cli),
-            "--user-data-dir",
-            str(user_data),
-            "--extensions-dir",
-            str(ext_dir),
-            "--install-extension",
-            "openai.chatgpt",
-            "--force",
-        ],
-        env=env,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=600,
-        check=False,
-    )
-    if res.returncode != 0:
-        raise RuntimeError("editor-extension-install-failed: " + (res.stderr or res.stdout)[-400:].strip())
+    if not skipped_download:
+        env = dict(os.environ, CODEX_HOME=str(c_home), NO_COLOR="1")
+        for k in ("OPENAI_API_KEY", "VSCODE_IPC_HOOK_CLI", "ELECTRON_RUN_AS_NODE", "NODE_OPTIONS", "VSCODE_DEV"):
+            env.pop(k, None)
+
+        progress("Đang cài đặt Codex Extension vào thư mục riêng...")
+        res = subprocess.run(
+            [
+                str(ide_cli),
+                "--user-data-dir",
+                str(user_data),
+                "--extensions-dir",
+                str(ext_dir),
+                "--install-extension",
+                "openai.chatgpt",
+                "--force",
+            ],
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+        if res.returncode != 0:
+            raise RuntimeError("editor-extension-install-failed: " + (res.stderr or res.stdout)[-400:].strip())
+
+        after_info = get_installed_codex_extension_info(home)
+        resolved_ver = after_info.get("version", "") or resolved_ver
+        keep_path = after_info.get("path", "")
+        if keep_path and len(after_info.get("dirs", [])) > 1:
+            for old_dir in after_info["dirs"]:
+                if old_dir != keep_path:
+                    shutil.rmtree(old_dir, ignore_errors=True)
 
     # Create isolated desktop / Applications launcher
     if platform.system() == "Darwin":
@@ -361,7 +711,15 @@ def install_antigravity_and_extension(values: dict, home: Path, progress=lambda 
         )
         _write_private_file(apps_dir / "emtroly-antigravity.desktop", desktop_entry, 0o755)
 
-    return {"configured": True, "skipped": False, "cli": str(ide_cli)}
+    return {
+        "configured": True,
+        "installed": True,
+        "skipped": skipped_download,
+        "up_to_date": True,
+        "version": resolved_ver,
+        "target_version": latest_ver or resolved_ver,
+        "cli": str(ide_cli),
+    }
 
 
 def _create_isolated_antigravity_launcher(home: Path, ide_cli: Path, user_data: Path, ext_dir: Path, c_home: Path) -> str:
@@ -422,6 +780,7 @@ def install_antigravity_ide_only(values: dict, home: Path, progress=lambda _m: N
     user_data = ag_root / "UserData"
     ext_dir = ag_root / "Extensions"
     settings_dir = user_data / "User"
+    already_configured = (settings_dir / "settings.json").is_file()
     for folder in (ag_root, user_data, ext_dir, settings_dir):
         folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     editor_settings = {
@@ -438,7 +797,11 @@ def install_antigravity_ide_only(values: dict, home: Path, progress=lambda _m: N
         values.get("base_url", "https://codex.anhlaptrinh.vn/v1"),
     )
     launcher = _create_isolated_antigravity_launcher(home, ide_cli, user_data, ext_dir, c_home)
-    return {"installed": True, "cli": str(ide_cli), "launcher": launcher}
+    ide_ver = get_installed_antigravity_version(home)
+    if already_configured:
+        ver_note = f" (v{ide_ver})" if ide_ver else ""
+        progress(f"✓ Antigravity IDE đã sẵn sàng{ver_note} — không cần tải lại.")
+    return {"installed": True, "skipped": bool(already_configured), "up_to_date": True, "version": ide_ver, "cli": str(ide_cli), "launcher": launcher}
 
 
 def install_codex_extension_only(values: dict, home: Path, progress=lambda _m: None) -> dict:
@@ -456,7 +819,7 @@ def install_codex_extension_only(values: dict, home: Path, progress=lambda _m: N
         values.get("base_url", "https://codex.anhlaptrinh.vn/v1"),
     )
     merged = dict(values, skip_editor=False)
-    return install_antigravity_and_extension(merged, home, progress=progress)
+    return install_antigravity_and_extension(merged, home, progress=progress, check_latest=True)
 
 
 def get_modular_status(home: Path | None = None, preferred_member: str = "emtroly") -> dict:
@@ -464,13 +827,16 @@ def get_modular_status(home: Path | None = None, preferred_member: str = "emtrol
     c_home = codex_home_dir(resolved_home)
     codex_bin = find_codex_binary(resolved_home, isolated_only=False)
     codex_ready = bool(codex_bin and (c_home / "config.toml").is_file())
+    codex_info = get_installed_codex_cli_info(resolved_home)
+    codex_ver = codex_info.get("version", "") or codex_info.get("extension_version", "")
 
     app_target, ide_cli = find_antigravity_cli(resolved_home)
     ide_ready = bool(ide_cli)
+    ide_ver = get_installed_antigravity_version(resolved_home) if ide_ready else ""
 
-    ext_root = data_root(resolved_home) / "antigravity/Extensions"
-    ext_dirs = sorted(ext_root.glob("openai.chatgpt-*")) if ext_root.is_dir() else []
-    ext_ready = len(ext_dirs) > 0
+    ext_info = get_installed_codex_extension_info(resolved_home)
+    ext_ready = bool(ext_info["installed"])
+    ext_ver = ext_info.get("version", "")
 
     oc_root = resolved_home / f".openclaw-member-{preferred_member}"
     if not (oc_root / "openclaw.json").is_file():
@@ -481,18 +847,21 @@ def get_modular_status(home: Path | None = None, preferred_member: str = "emtrol
     return {
         "codex_cli": {
             "installed": codex_ready,
+            "version": codex_ver,
             "path": str(codex_bin) if codex_bin else "",
-            "detail": f"Đã cài ({codex_bin.name})" if codex_ready and codex_bin else "Chưa cài đặt",
+            "detail": f"Đã cài ({'v' + codex_ver + ' · ' if codex_ver else ''}{codex_bin.name})" if codex_ready and codex_bin else "Chưa cài đặt",
         },
         "antigravity_ide": {
             "installed": ide_ready,
+            "version": ide_ver,
             "path": str(app_target or ide_cli or ""),
-            "detail": f"Đã sẵn sàng ({(app_target or ide_cli).name})" if ide_ready else "Chưa tìm thấy trên máy",
+            "detail": f"Đã sẵn sàng ({'v' + ide_ver + ' · ' if ide_ver else ''}{(app_target or ide_cli).name})" if ide_ready else "Chưa tìm thấy trên máy",
         },
         "codex_extension": {
             "installed": ext_ready,
-            "path": str(ext_dirs[-1]) if ext_dirs else "",
-            "detail": f"Đã cài ({ext_dirs[-1].name})" if ext_ready else "Chưa cài vào Antigravity",
+            "version": ext_ver,
+            "path": ext_info.get("path", ""),
+            "detail": f"Đã cài ({'v' + ext_ver if ext_ver else Path(ext_info.get('path', '')).name})" if ext_ready else "Chưa cài vào Antigravity",
         },
         "openclaw": {
             "installed": oc_ready,

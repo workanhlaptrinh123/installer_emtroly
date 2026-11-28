@@ -1240,20 +1240,27 @@ function Test-EmTroLyHasAnyFootprint {
 
 function Get-EmTroLyModularStatus {
   $codexInstalled = $false
+  $codexCliVer = ''
   $codexDetail = 'Chưa cài đặt — chỉ cần bấm Cài phần này (~20 giây, không cần Telegram)'
   $emBase = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'EmTroLy' } else { '' }
   if (Get-Command -Name 'Find-EmTroLyCodexCli' -ErrorAction Ignore) {
     $cInfo = Find-EmTroLyCodexCli
+    if ($cInfo -and $cInfo.PSObject.Properties['Version'] -and $cInfo.Version) {
+      $codexCliVer = ([string]$cInfo.Version).Trim()
+    }
     $hasCfg = $emBase -and (Test-Path -LiteralPath (Join-Path $emBase 'Codex\config.toml') -PathType Leaf)
     if ($cInfo.Available -and ($cInfo.Source -eq 'emtroly' -or $hasCfg)) {
       $codexInstalled = $true
       $shortExec = [string]$cInfo.Executable
+      $verSuffix = if ($codexCliVer) { "v$codexCliVer · " } else { '' }
       if ($shortExec -match '\\EmTroLy\\Antigravity\\Extensions\\') {
-        $codexDetail = 'Đã sẵn sàng (Bản cô lập Em Trợ Lý · lệnh codex)'
+        $codexDetail = "Đã sẵn sàng (${verSuffix}Bản cô lập Em Trợ Lý · lệnh codex)"
+      } elseif ($shortExec -match '\\EmTroLy\\Codex\\bin\\') {
+        $codexDetail = "Đã sẵn sàng (${verSuffix}Bản độc lập Em Trợ Lý · lệnh codex)"
       } elseif ($shortExec -match '\\EmTroLy\\CodexCli\\') {
-        $codexDetail = 'Đã sẵn sàng (Bản độc lập Em Trợ Lý · lệnh codex)'
+        $codexDetail = "Đã sẵn sàng (${verSuffix}Bản độc lập Em Trợ Lý · lệnh codex)"
       } else {
-        $codexDetail = "Đã sẵn sàng ($shortExec)"
+        $codexDetail = "Đã sẵn sàng (${verSuffix}$shortExec)"
       }
     } elseif ($cInfo.Available) {
       $codexInstalled = $true
@@ -1264,6 +1271,7 @@ function Get-EmTroLyModularStatus {
   $ideInstalled = $false
   $idePath = ''
   $ideVer = ''
+  $ideMarketingVer = ''
   $ideCandidates = @()
   if ($emBase) {
     $recFile = Join-Path $emBase 'editor-app-path.txt'
@@ -1302,6 +1310,7 @@ function Get-EmTroLyModularStatus {
           $ideInstalled = $true
           $idePath = $candDir
           $ideVer = [string]$prod.version
+          $ideMarketingVer = if ($prod.PSObject.Properties['ideVersion'] -and $prod.ideVersion) { [string]$prod.ideVersion } else { $ideVer }
           break
         }
       } catch { }
@@ -1399,22 +1408,26 @@ function Get-EmTroLyModularStatus {
   }
 
   return [pscustomobject]@{
-    CodexCliInstalled        = $codexInstalled
-    CodexCliDetail           = $codexDetail
-    AntigravityInstalled     = $ideInstalled
-    AntigravityPath          = $idePath
-    AntigravityDetail        = $ideDetail
-    AntigravityCliReady      = [bool]$hasAgyCli
-    AntigravityCliVersion    = $agyCliVer
-    AntigravityCliDetail     = $agyCliDetail
-    CodexExtensionInstalled  = ($extInstalled -and $hasShortcut)
-    CodexExtensionDetail     = $extDetail
-    OpenClawInstalled        = $ocInstalled
-    OpenClawInstalledVersion = $ocCurVer
-    OpenClawTargetVersion    = $ocTargetVer
-    OpenClawNeedsUpgrade     = [bool]$ocNeedsUpgrade
-    ZaloInstalled            = $zaloInstalled
-    OpenClawDetail           = $ocDetail
+    CodexCliInstalled         = $codexInstalled
+    CodexCliVersion           = $codexCliVer
+    CodexCliDetail            = $codexDetail
+    AntigravityInstalled      = $ideInstalled
+    AntigravityPath           = $idePath
+    AntigravityIdeVersion     = $ideMarketingVer
+    AntigravityProductVersion = $ideVer
+    AntigravityDetail         = $ideDetail
+    AntigravityCliReady       = [bool]$hasAgyCli
+    AntigravityCliVersion     = $agyCliVer
+    AntigravityCliDetail      = $agyCliDetail
+    CodexExtensionInstalled   = ($extInstalled -and $hasShortcut)
+    CodexExtensionVersion     = $extVer
+    CodexExtensionDetail      = $extDetail
+    OpenClawInstalled         = $ocInstalled
+    OpenClawInstalledVersion  = $ocCurVer
+    OpenClawTargetVersion     = $ocTargetVer
+    OpenClawNeedsUpgrade      = [bool]$ocNeedsUpgrade
+    ZaloInstalled             = $zaloInstalled
+    OpenClawDetail            = $ocDetail
   }
 }
 

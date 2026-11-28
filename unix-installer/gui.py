@@ -1425,9 +1425,15 @@ def main():
                 refresh_codex_state()
                 refresh_modular_status()
                 if kind == "mod_success":
-                    done_names = ", ".join(value.get("components", []))
-                    mod_progress_var.set(f"✓ Hoàn tất cài đặt thành phần: {done_names}!")
-                    messagebox.showinfo("Hoàn tất cài từng phần", f"Đã cài đặt thành công: {done_names}!")
+                    comps_done = list(value.get("components", []))
+                    skipped_set = set(value.get("skipped", []))
+                    done_names = ", ".join(comps_done)
+                    if comps_done and all(c in skipped_set for c in comps_done):
+                        mod_progress_var.set(f"✓ Tất cả thành phần đã chọn đã ở phiên bản mới nhất ({done_names}) — không cần tải lại!")
+                        messagebox.showinfo("Đã ở phiên bản mới nhất", f"Các thành phần đã chọn ({done_names}) đều đang ở phiên bản mới nhất — không cần tải lại.")
+                    else:
+                        mod_progress_var.set(f"✓ Hoàn tất cài đặt thành phần: {done_names}!")
+                        messagebox.showinfo("Hoàn tất cài từng phần", f"Đã cài đặt thành công: {done_names}!")
                 else:
                     mod_progress_var.set("Chưa hoàn tất: " + value)
                     messagebox.showerror("Chưa hoàn tất", value)

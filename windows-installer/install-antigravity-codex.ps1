@@ -15,6 +15,7 @@ $ideHash = '307c7a41b050ffe742fd4dd1045050df1464de219271f74b5f6c269e9e00c822'
 $extensionVersion = '26.51111.21308'
 $extensionUrl = 'https://open-vsx.org/api/openai/chatgpt/win32-x64/26.51111.21308/file/openai.chatgpt-26.51111.21308@win32-x64.vsix'
 $extensionHash = '5abdd18242a77e85e60b8b727231924c4cdf048fdf5c39079e5d811390c3fca8'
+$minIdeProductVersion = '1.107.0'
 $base = Join-Path $env:LOCALAPPDATA 'EmTroLy'
 $userData = Join-Path $base 'Antigravity\UserData'
 $extensions = Join-Path $base 'Antigravity\Extensions'
@@ -335,8 +336,109 @@ dlChunk(url0,startPos,1,0).then((ok)=>{if(ok==='OK')process.exit(0);process.exit
   }
 }
 
-function Install-AntigravityCliRuntime([string]$StagingDir) {
-  if (-not $env:USERPROFILE) { return }
+function Compare-EmTroLyVersion {
+  param(
+    [string]$Current = '',
+    [string]$Target = ''
+  )
+  $splitVer = {
+    param([string]$Raw)
+    $clean = ([string]$Raw).Trim().TrimStart('v', 'V')
+    $noBuild = ($clean -split '\+')[0]
+    $dashIdx = $noBuild.IndexOf('-')
+    $mainStr = if ($dashIdx -ge 0) { $noBuild.Substring(0, $dashIdx) } else { $noBuild }
+    $preStr = if ($dashIdx -ge 0) { $noBuild.Substring($dashIdx + 1) } else { '' }
+    $nums = @()
+    foreach ($seg in @($mainStr -split '\.')) {
+      $v = 0
+      if ([int]::TryParse($seg, [ref]$v)) { $nums += $v } else { $nums += 0 }
+    }
+    while ($nums.Count -lt 3) { $nums += 0 }
+    return [pscustomobject]@{ Nums = $nums; Pre = $preStr }
+  }
+  $a = & $splitVer $Current
+  $b = & $splitVer $Target
+  $maxLen = [Math]::Max($a.Nums.Count, $b.Nums.Count)
+  for ($i = 0; $i -lt $maxLen; $i++) {
+    $av = if ($i -lt $a.Nums.Count) { [int]$a.Nums[$i] } else { 0 }
+    $bv = if ($i -lt $b.Nums.Count) { [int]$b.Nums[$i] } else { 0 }
+    if ($av -lt $bv) { return -1 }
+    if ($av -gt $bv) { return 1 }
+  }
+  if ([string]::IsNullOrWhiteSpace($a.Pre) -and -not [string]::IsNullOrWhiteSpace($b.Pre)) { return 1 }
+  if (-not [string]::IsNullOrWhiteSpace($a.Pre) -and [string]::IsNullOrWhiteSpace($b.Pre)) { return -1 }
+  if ($a.Pre -ceq $b.Pre) { return 0 }
+  return [string]::CompareOrdinal($a.Pre, $b.Pre)
+}
+
+function Test-TrustedOpenVsxUrl {
+  param([string]$Url = '', [bool]$AllowLoopback = $false)
+  if ([string]::IsNullOrWhiteSpace($Url)) { return $false }
+  $parsed = $null
+  if (-not [uri]::TryCreate($Url.Trim(), [System.UriKind]::Absolute, [ref]$parsed)) { return $false }
+  if ($AllowLoopback -and $parsed.Scheme -ieq 'http' -and $parsed.Host -ieq '127.0.0.1') { return $true }
+  if ($parsed.Scheme -ine 'https') { return $false }
+  $h = ([string]$parsed.Host).ToLowerInvariant()
+  return ($h -eq 'open-vsx.org' -or $h.EndsWith('.open-vsx.org'))
+}
+
+function Resolve-LatestCodexExtensionTarget {
+  param([bool]$AllowRemote = $true)
+  $customMetaUrl = if ($env:EMTROLY_CODEX_OPENVSX_URL) { $env:EMTROLY_CODEX_OPENVSX_URL.Trim() } else { '' }
+  $skipRemote = (-not $AllowRemote) -or ($env:EMTROLY_SKIP_REMOTE_VERSION_CHECK -eq '1')
+  if ($skipRemote -and -not $customMetaUrl) {
+    return [pscustomobject]@{
+      Version        = $extensionVersion
+      Url            = $extensionUrl
+      Hash           = $extensionHash
+      RemoteResolved = $false
+    }
+  }
+  $metaUrl = if ($customMetaUrl) { $customMetaUrl } else { 'https://open-vsx.org/api/openai/chatgpt/win32-x64/latest' }
+  $allowLoopback = ($customMetaUrl -match '^http://127\.0\.0\.1:\d+')
+  if (-not (Test-TrustedOpenVsxUrl -Url $metaUrl -AllowLoopback $allowLoopback)) {
+    return [pscustomobject]@{ Version = $extensionVersion; Url = $extensionUrl; Hash = $extensionHash; RemoteResolved = $false }
+  }
+  try {
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]3072 -bor [Net.SecurityProtocolType]12288 } catch { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 }
+    $meta = Invoke-RestMethod -UseBasicParsing -Method Get -Uri $metaUrl -TimeoutSec 8 -MaximumRedirection 3
+    $remoteVer = if ($meta -and $meta.version) { ([string]$meta.version).Trim() } else { '' }
+    $dlUrl = if ($meta -and $meta.files -and $meta.files.download) { ([string]$meta.files.download).Trim() } else { '' }
+    $shaUrl = if ($meta -and $meta.files -and $meta.files.sha256) { ([string]$meta.files.sha256).Trim() } else { '' }
+    if ($remoteVer -match '^\d+\.\d+\.\d+$' -and
+        (Compare-EmTroLyVersion -Current $remoteVer -Target $extensionVersion) -ge 0 -and
+        (Test-TrustedOpenVsxUrl -Url $dlUrl -AllowLoopback $allowLoopback) -and
+        (Test-TrustedOpenVsxUrl -Url $shaUrl -AllowLoopback $allowLoopback)) {
+      $shaResp = Invoke-WebRequest -UseBasicParsing -Method Get -Uri $shaUrl -TimeoutSec 8 -MaximumRedirection 3
+      $shaTxt = if ($shaResp.Content -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($shaResp.Content) } else { [string]$shaResp.Content }
+      $mSha = [regex]::Match($shaTxt, '(?i)\b([a-f0-9]{64})\b')
+      if ($mSha.Success) {
+        return [pscustomobject]@{
+          Version        = $remoteVer
+          Url            = $dlUrl
+          Hash           = $mSha.Groups[1].Value.ToLowerInvariant()
+          RemoteResolved = $true
+        }
+      }
+    }
+  } catch { }
+  return [pscustomobject]@{
+    Version        = $extensionVersion
+    Url            = $extensionUrl
+    Hash           = $extensionHash
+    RemoteResolved = $false
+  }
+}
+
+function Install-AntigravityCliRuntime {
+  param(
+    [Parameter(Mandatory=$true)][string]$StagingDir,
+    [switch]$PassThru
+  )
+  if (-not $env:USERPROFILE) {
+    if ($PassThru) { return [pscustomobject]@{ Ready = $false; Skipped = $false; Version = ''; TargetVersion = '' } }
+    return
+  }
   $geminiBinDir = Join-Path $env:USERPROFILE '.gemini\bin'
   $agyExe = Join-Path $geminiBinDir 'agy.exe'
   $agySidecar = Join-Path $geminiBinDir 'agy.version.json'
@@ -373,11 +475,13 @@ function Install-AntigravityCliRuntime([string]$StagingDir) {
   }
 
   $alreadyReady = $false
+  $resolvedInstalledVer = ''
   if (Test-Path -LiteralPath $agyExe -PathType Leaf) {
     try {
       $curSha512 = (Get-FileHash -LiteralPath $agyExe -Algorithm SHA512).Hash
       if ($curSha512 -ieq $targetSha512) {
         $alreadyReady = $true
+        $resolvedInstalledVer = $targetVer
       } else {
         $verTestPsi = New-Object System.Diagnostics.ProcessStartInfo
         $verTestPsi.FileName = $agyExe
@@ -391,9 +495,8 @@ function Install-AntigravityCliRuntime([string]$StagingDir) {
           $verOut = ($verTestProc.StandardOutput.ReadToEnd() + ' ' + $verTestProc.StandardError.ReadToEnd()).Trim()
           $mVer = [regex]::Match($verOut, '(\d+\.\d+\.\d+)')
           if ($mVer.Success) {
-            $vInstalled = [version]$mVer.Groups[1].Value
-            $vMinTarget = [version](($targetVer -replace '[^0-9.].*$', ''))
-            if ($vInstalled -ge $vMinTarget) { $alreadyReady = $true }
+            $resolvedInstalledVer = $mVer.Groups[1].Value
+            if ((Compare-EmTroLyVersion -Current $resolvedInstalledVer -Target $targetVer) -ge 0) { $alreadyReady = $true }
           }
         } else {
           try { if (-not $verTestProc.HasExited) { $verTestProc.Kill() } } catch { }
@@ -403,7 +506,10 @@ function Install-AntigravityCliRuntime([string]$StagingDir) {
     } catch { }
   }
 
-  if (-not $alreadyReady) {
+  if ($alreadyReady) {
+    $dispCliVer = if ($resolvedInstalledVer) { $resolvedInstalledVer } else { $targetVer }
+    Write-EditorStatus "✓ Antigravity Runtime CLI (agy.exe) đã ở phiên bản mới nhất (v$dispCliVer) — không cần tải lại."
+  } else {
     [void][IO.Directory]::CreateDirectory($geminiBinDir)
     Write-EditorStatus "Đang tải Antigravity runtime CLI v$targetVer (~234 MB) để mở Antigravity IDE không bị lỗi mạng..."
     $stagedCli = Join-Path $StagingDir 'cli_windows_x64.exe'
@@ -416,6 +522,7 @@ function Install-AntigravityCliRuntime([string]$StagingDir) {
     foreach ($oldF in @(Get-ChildItem -LiteralPath $geminiBinDir -Filter 'agy.exe.old.*' -File -ErrorAction SilentlyContinue)) {
       Remove-Item -LiteralPath $oldF.FullName -Force -ErrorAction SilentlyContinue
     }
+    $resolvedInstalledVer = $targetVer
   }
 
   if ((Test-Path -LiteralPath $agyExe -PathType Leaf) -and (-not $alreadyReady -or -not (Test-Path -LiteralPath $agySidecar -PathType Leaf))) {
@@ -437,6 +544,14 @@ function Install-AntigravityCliRuntime([string]$StagingDir) {
       }
       [IO.File]::WriteAllText($agySidecar, ($sidecarObj | ConvertTo-Json -Depth 4), (New-Object System.Text.UTF8Encoding($false)))
     } catch { }
+  }
+  if ($PassThru) {
+    return [pscustomobject]@{
+      Ready         = (Test-Path -LiteralPath $agyExe -PathType Leaf)
+      Skipped       = [bool]$alreadyReady
+      Version       = $(if ($resolvedInstalledVer) { $resolvedInstalledVer } else { $targetVer })
+      TargetVersion = $targetVer
+    }
   }
 }
 
@@ -512,12 +627,18 @@ function Resolve-EditorBundle([string]$Root, [bool]$RequirePinnedVersion = $fals
     $product = Get-Content -LiteralPath $productPath -Raw | ConvertFrom-Json
     if ($product.applicationName -notin @('antigravity-ide', 'antigravity')) { return $null }
     if ([string]::IsNullOrWhiteSpace([string]$product.version)) { return $null }
-    if ($RequirePinnedVersion -and $product.version -ne '1.107.0') { return $null }
+    $ideVer = if ($product.PSObject.Properties['ideVersion']) { ([string]$product.ideVersion).Trim() } else { '' }
+    if ($RequirePinnedVersion) {
+      $prodOk = (Compare-EmTroLyVersion -Current ([string]$product.version) -Target $minIdeProductVersion) -ge 0
+      $ideOk = (-not [string]::IsNullOrWhiteSpace($ideVer)) -and ((Compare-EmTroLyVersion -Current $ideVer -Target $ideVersion) -ge 0)
+      if (-not $prodOk -and -not $ideOk) { return $null }
+    }
     return [pscustomobject]@{
-      AppDir    = $Root
-      Editor    = $matchedExe
-      EditorCli = $matchedCli
-      Version   = [string]$product.version
+      AppDir     = $Root
+      Editor     = $matchedExe
+      EditorCli  = $matchedCli
+      Version    = [string]$product.version
+      IdeVersion = $ideVer
     }
   } catch {
     return $null
@@ -578,13 +699,13 @@ function Test-EditorDataComplete([string]$Root) {
     try {
       $package = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
       return $package.publisher -eq 'openai' -and $package.name -eq 'chatgpt' -and
-        $package.version -eq $extensionVersion -and
+        (Compare-EmTroLyVersion -Current ([string]$package.version) -Target $extensionVersion) -ge 0 -and
         (Test-Path -LiteralPath (Join-Path $_.FullName 'bin\windows-x86_64\codex.exe') -PathType Leaf)
     } catch {
       return $false
     }
   })
-  if ($installed.Count -ne 1) { return $false }
+  if ($installed.Count -lt 1) { return $false }
   $recordedAppFile = Join-Path $Root 'editor-app-path.txt'
   if (Test-Path -LiteralPath $recordedAppFile -PathType Leaf) {
     $recordedApp = ([IO.File]::ReadAllText($recordedAppFile)).Trim()
@@ -701,7 +822,11 @@ function Test-EditorInstallation([string]$Editor) {
   $productPath = Join-Path $appDir 'resources\app\product.json'
   if (-not (Test-Path -LiteralPath $productPath -PathType Leaf)) { throw 'editor-version-unsupported' }
   $product = Get-Content -LiteralPath $productPath -Raw | ConvertFrom-Json
-  if ($product.applicationName -ne 'antigravity-ide' -or $product.version -ne '1.107.0') { throw 'editor-version-unsupported' }
+  if ($product.applicationName -ne 'antigravity-ide') { throw 'editor-version-unsupported' }
+  $ideVer = if ($product.PSObject.Properties['ideVersion']) { ([string]$product.ideVersion).Trim() } else { '' }
+  $prodOk = (Compare-EmTroLyVersion -Current ([string]$product.version) -Target $minIdeProductVersion) -ge 0
+  $ideOk = (-not [string]::IsNullOrWhiteSpace($ideVer)) -and ((Compare-EmTroLyVersion -Current $ideVer -Target $ideVersion) -ge 0)
+  if (-not $prodOk -and -not $ideOk) { throw 'editor-version-unsupported' }
 }
 
 function Get-EditorRegistryEntries {
@@ -811,7 +936,14 @@ try {
   }
   New-PrivateDirectory $downloadDir
   if ($reusingExistingEditor) {
-    Write-EditorStatus 'Đã phát hiện Antigravity IDE có sẵn trên máy; đang dùng để cài Extension Codex và cấu hình riêng...'
+    $dispIde = if ($reusedBundle.PSObject.Properties['IdeVersion'] -and $reusedBundle.IdeVersion) {
+      "v$($reusedBundle.IdeVersion) ($($reusedBundle.Version))"
+    } elseif ($reusedBundle.PSObject.Properties['Version'] -and $reusedBundle.Version) {
+      "v$($reusedBundle.Version)"
+    } else {
+      $ideVersion
+    }
+    Write-EditorStatus "✓ Antigravity IDE đã có phiên bản $dispIde — không cần tải lại bộ cài; đang đồng bộ cấu hình..."
   } else {
     if (-not (Test-Path -LiteralPath $editor -PathType Leaf)) {
       Write-EditorStatus 'Đang tải Antigravity IDE chính thức (khoảng 190 MB)...'
@@ -828,8 +960,11 @@ try {
 
   # Pre-stage Antigravity runtime CLI (~/.gemini/bin/agy.exe) so opening Antigravity never stalls for 30s on storage.googleapis.com
   $spTestCmd = Get-Command Start-Process -ErrorAction SilentlyContinue
-  $isMockedFixtureRun = ($spTestCmd -and $spTestCmd.CommandType -eq 'Function')
-  if ($env:EMTROLY_SKIP_AGY_CLI_PREFETCH -ne '1' -and -not $isMockedFixtureRun) {
+  $iwrTestCmd = Get-Command Invoke-WebRequest -ErrorAction SilentlyContinue
+  $isMockedFixtureRun = ($spTestCmd -and $spTestCmd.CommandType -eq 'Function') -or ($iwrTestCmd -and $iwrTestCmd.CommandType -eq 'Function')
+  $agyExeCheck = if ($env:USERPROFILE) { Join-Path $env:USERPROFILE '.gemini\bin\agy.exe' } else { '' }
+  $skipAgyForExtOnly = ($ComponentMode -eq 'extension-only' -and $agyExeCheck -and (Test-Path -LiteralPath $agyExeCheck -PathType Leaf))
+  if ($env:EMTROLY_SKIP_AGY_CLI_PREFETCH -ne '1' -and -not $isMockedFixtureRun -and -not $skipAgyForExtOnly) {
     Install-AntigravityCliRuntime -StagingDir $downloadDir
   }
 
@@ -864,77 +999,126 @@ requires_openai_auth = true
   } | ConvertTo-Json
   [IO.File]::WriteAllText((Join-Path $editorSettingsDir 'settings.json'), $editorSettings, (New-Object Text.UTF8Encoding($false)))
 
+  $vsix = ''
   if ($ComponentMode -ne 'ide-only') {
-    $vsix = Join-Path $base ('codex-' + $extensionVersion + '.vsix')
-    if (-not (Test-Path -LiteralPath $vsix -PathType Leaf) -or (Get-FileHash -LiteralPath $vsix -Algorithm SHA256).Hash -ine $extensionHash) {
-      Write-EditorStatus 'Đang tải Codex Extension (khoảng 370 MB)...'
-      $part = Join-Path $downloadDir 'codex.vsix'
-      Get-VerifiedDownload -Url $extensionUrl -Path $part -Hash $extensionHash
-      Move-Item -LiteralPath $part -Destination $vsix -Force
-    }
-    $env:CODEX_HOME = $codexHome
-    $env:OPENAI_API_KEY = $null
-    $env:VSCODE_IPC_HOOK_CLI = $null
-    $env:ELECTRON_RUN_AS_NODE = $null
-    $env:NODE_OPTIONS = $null
-    Write-EditorStatus 'Đang cài Codex Extension vào thư mục riêng...'
-    $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
-    $extLog = Join-Path $downloadDir 'ext-install.log'
-    $cliArgs = '/d /v:off /s /c "chcp 65001 >nul && ' + (Quote-Cmd $editorCli) + ' --user-data-dir ' + (Quote-Cmd $userData) + ' --extensions-dir ' + (Quote-Cmd $extensions) + ' --install-extension ' + (Quote-Cmd $vsix) + ' --force --do-not-include-pack-dependencies > ' + (Quote-Cmd $extLog) + ' 2>&1"'
-    $extInstalledOk = $false
-    for ($extAttempt = 1; $extAttempt -le 3; $extAttempt++) {
-      if ((Invoke-HiddenProcess $cmd $cliArgs 900) -eq 0) {
-        $extInstalledOk = $true
-        break
-      }
-      if ($extAttempt -lt 3) {
-        Start-Sleep -Seconds 3
-      }
-    }
-    if (-not $extInstalledOk) { throw 'editor-extension-install-failed' }
-    $installed = @(Get-ChildItem -LiteralPath $extensions -Directory -Filter 'openai.chatgpt-*' | Where-Object {
-      $manifest = Join-Path $_.FullName 'package.json'
-      if (-not (Test-Path -LiteralPath $manifest)) { return $false }
-      try { $package = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json; return $package.publisher -eq 'openai' -and $package.name -eq 'chatgpt' -and $package.version -eq $extensionVersion } catch { return $false }
-    })
-    if ($installed.Count -ne 1) { throw 'editor-extension-verification-failed' }
-    $codex = Join-Path $installed[0].FullName 'bin\windows-x86_64\codex.exe'
-    if (-not (Test-Path -LiteralPath $codex -PathType Leaf)) { throw 'editor-codex-missing' }
+    Write-EditorStatus 'Đang kiểm tra phiên bản mới nhất của Codex Extension...'
+    $extTarget = Resolve-LatestCodexExtensionTarget -AllowRemote:(-not $isMockedFixtureRun)
+    $targetExtVer = $extTarget.Version
+    $targetExtUrl = $extTarget.Url
+    $targetExtHash = $extTarget.Hash
 
-    Write-EditorStatus 'Đang kiểm tra Codex và API bằng một yêu cầu thử...'
-    $probeArgs = 'exec --skip-git-repo-check --sandbox read-only ' + (Quote-Cmd 'Reply with OK only.')
-    $codexProbeOk = $false
-    $codexProbeDelayMs = if ($env:TEST_FAIL_CODEX) { 100 } else { 2000 }
-    for ($probeAttempt = 1; $probeAttempt -le 3; $probeAttempt++) {
-      if ((Invoke-HiddenProcess $codex $probeArgs 180) -eq 0) {
-        $codexProbeOk = $true
-        break
+    $existingExtMatches = @(Get-ChildItem -LiteralPath $extensions -Directory -Filter 'openai.chatgpt-*' -ErrorAction SilentlyContinue | ForEach-Object {
+      $mf = Join-Path $_.FullName 'package.json'
+      $bx = Join-Path $_.FullName 'bin\windows-x86_64\codex.exe'
+      if ((Test-Path -LiteralPath $mf -PathType Leaf) -and (Test-Path -LiteralPath $bx -PathType Leaf)) {
+        try {
+          $pk = Get-Content -LiteralPath $mf -Raw | ConvertFrom-Json
+          if ($pk.publisher -eq 'openai' -and $pk.name -eq 'chatgpt' -and -not [string]::IsNullOrWhiteSpace([string]$pk.version)) {
+            [pscustomobject]@{
+              Dir     = $_.FullName
+              Version = ([string]$pk.version).Trim()
+              Codex   = $bx
+            }
+          }
+        } catch { }
       }
-      if ($probeAttempt -lt 3) { Start-Sleep -Milliseconds ($codexProbeDelayMs * $probeAttempt) }
-    }
-    if (-not $codexProbeOk) { throw 'editor-codex-probe-failed' }
+    } | Where-Object { $null -ne $_ -and (Compare-EmTroLyVersion -Current $_.Version -Target $targetExtVer) -ge 0 })
 
-    Write-EditorStatus 'Đang kiểm tra Codex Extension trong Antigravity IDE...'
-    $activationMarker = Join-Path $downloadDir 'activation.ok'
-    $env:EMTROLY_CODEX_ACTIVATION_MARKER = $activationMarker
-    $activationOk = $false
-    $gpuFlagsList = @('--disable-gpu', '--disable-gpu --disable-software-rasterizer')
-    for ($actAttempt = 0; $actAttempt -lt $gpuFlagsList.Count; $actAttempt++) {
-      if (Test-Path -LiteralPath $activationMarker -PathType Leaf) {
-        Remove-Item -LiteralPath $activationMarker -Force -ErrorAction SilentlyContinue
+    if ($existingExtMatches.Count -gt 0) {
+      $newestMatch = $existingExtMatches[0]
+      foreach ($mItem in $existingExtMatches) {
+        if ((Compare-EmTroLyVersion -Current $mItem.Version -Target $newestMatch.Version) -gt 0) {
+          $newestMatch = $mItem
+        }
       }
-      $activationArgs = $gpuFlagsList[$actAttempt] + ' --skip-welcome --disable-workspace-trust --user-data-dir ' + (Quote-Cmd $userData) +
-        ' --extensions-dir ' + (Quote-Cmd $extensions) + ' --extensionDevelopmentPath ' + (Quote-Cmd $activationProbe) +
-        ' --extensionTestsPath ' + (Quote-Cmd $activationTest) + ' ' + (Quote-Cmd $downloadDir)
-      if ((Invoke-HiddenProcess $editor $activationArgs 180) -eq 0 -and
-          (Test-Path -LiteralPath $activationMarker -PathType Leaf) -and
-          ([IO.File]::ReadAllText($activationMarker) -ceq 'ok')) {
-        $activationOk = $true
-        break
+      foreach ($otherExt in @(Get-ChildItem -LiteralPath $extensions -Directory -Filter 'openai.chatgpt-*' -ErrorAction SilentlyContinue)) {
+        if ($otherExt.FullName -cne $newestMatch.Dir) {
+          Remove-Item -LiteralPath $otherExt.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
       }
-      if ($actAttempt -lt ($gpuFlagsList.Count - 1)) { Start-Sleep -Seconds 2 }
+      Write-EditorStatus "✓ Codex Extension đã ở phiên bản mới nhất (v$($newestMatch.Version)) — không cần tải lại."
+    } else {
+      $vsix = Join-Path $base ('codex-' + $targetExtVer + '.vsix')
+      if (-not (Test-Path -LiteralPath $vsix -PathType Leaf) -or (Get-FileHash -LiteralPath $vsix -Algorithm SHA256).Hash -ine $targetExtHash) {
+        Write-EditorStatus "Đang tải Codex Extension v$targetExtVer (khoảng 370 MB)..."
+        $part = Join-Path $downloadDir 'codex.vsix'
+        Get-VerifiedDownload -Url $targetExtUrl -Path $part -Hash $targetExtHash
+        Move-Item -LiteralPath $part -Destination $vsix -Force
+      }
+      $env:CODEX_HOME = $codexHome
+      $env:OPENAI_API_KEY = $null
+      $env:VSCODE_IPC_HOOK_CLI = $null
+      $env:ELECTRON_RUN_AS_NODE = $null
+      $env:NODE_OPTIONS = $null
+      Write-EditorStatus "Đang cài Codex Extension v$targetExtVer vào thư mục riêng..."
+      $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
+      $extLog = Join-Path $downloadDir 'ext-install.log'
+      $cliArgs = '/d /v:off /s /c "chcp 65001 >nul && ' + (Quote-Cmd $editorCli) + ' --user-data-dir ' + (Quote-Cmd $userData) + ' --extensions-dir ' + (Quote-Cmd $extensions) + ' --install-extension ' + (Quote-Cmd $vsix) + ' --force --do-not-include-pack-dependencies > ' + (Quote-Cmd $extLog) + ' 2>&1"'
+      $extInstalledOk = $false
+      for ($extAttempt = 1; $extAttempt -le 3; $extAttempt++) {
+        if ((Invoke-HiddenProcess $cmd $cliArgs 900) -eq 0) {
+          $extInstalledOk = $true
+          break
+        }
+        if ($extAttempt -lt 3) {
+          Start-Sleep -Seconds 3
+        }
+      }
+      if (-not $extInstalledOk) { throw 'editor-extension-install-failed' }
+      $installed = @(Get-ChildItem -LiteralPath $extensions -Directory -Filter 'openai.chatgpt-*' | Where-Object {
+        $manifest = Join-Path $_.FullName 'package.json'
+        if (-not (Test-Path -LiteralPath $manifest)) { return $false }
+        try {
+          $package = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+          return $package.publisher -eq 'openai' -and $package.name -eq 'chatgpt' -and
+            (Compare-EmTroLyVersion -Current ([string]$package.version) -Target $targetExtVer) -ge 0
+        } catch { return $false }
+      })
+      if ($installed.Count -lt 1) { throw 'editor-extension-verification-failed' }
+      $keepExt = $installed | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+      foreach ($allExtDir in @(Get-ChildItem -LiteralPath $extensions -Directory -Filter 'openai.chatgpt-*' -ErrorAction SilentlyContinue)) {
+        if ($allExtDir.FullName -cne $keepExt.FullName) {
+          Remove-Item -LiteralPath $allExtDir.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
+      }
+      $codex = Join-Path $keepExt.FullName 'bin\windows-x86_64\codex.exe'
+      if (-not (Test-Path -LiteralPath $codex -PathType Leaf)) { throw 'editor-codex-missing' }
+
+      Write-EditorStatus 'Đang kiểm tra Codex và API bằng một yêu cầu thử...'
+      $probeArgs = 'exec --skip-git-repo-check --sandbox read-only ' + (Quote-Cmd 'Reply with OK only.')
+      $codexProbeOk = $false
+      $codexProbeDelayMs = if ($env:TEST_FAIL_CODEX) { 100 } else { 2000 }
+      for ($probeAttempt = 1; $probeAttempt -le 3; $probeAttempt++) {
+        if ((Invoke-HiddenProcess $codex $probeArgs 180) -eq 0) {
+          $codexProbeOk = $true
+          break
+        }
+        if ($probeAttempt -lt 3) { Start-Sleep -Milliseconds ($codexProbeDelayMs * $probeAttempt) }
+      }
+      if (-not $codexProbeOk) { throw 'editor-codex-probe-failed' }
+
+      Write-EditorStatus 'Đang kiểm tra Codex Extension trong Antigravity IDE...'
+      $activationMarker = Join-Path $downloadDir 'activation.ok'
+      $env:EMTROLY_CODEX_ACTIVATION_MARKER = $activationMarker
+      $activationOk = $false
+      $gpuFlagsList = @('--disable-gpu', '--disable-gpu --disable-software-rasterizer')
+      for ($actAttempt = 0; $actAttempt -lt $gpuFlagsList.Count; $actAttempt++) {
+        if (Test-Path -LiteralPath $activationMarker -PathType Leaf) {
+          Remove-Item -LiteralPath $activationMarker -Force -ErrorAction SilentlyContinue
+        }
+        $activationArgs = $gpuFlagsList[$actAttempt] + ' --skip-welcome --disable-workspace-trust --user-data-dir ' + (Quote-Cmd $userData) +
+          ' --extensions-dir ' + (Quote-Cmd $extensions) + ' --extensionDevelopmentPath ' + (Quote-Cmd $activationProbe) +
+          ' --extensionTestsPath ' + (Quote-Cmd $activationTest) + ' ' + (Quote-Cmd $downloadDir)
+        if ((Invoke-HiddenProcess $editor $activationArgs 180) -eq 0 -and
+            (Test-Path -LiteralPath $activationMarker -PathType Leaf) -and
+            ([IO.File]::ReadAllText($activationMarker) -ceq 'ok')) {
+          $activationOk = $true
+          break
+        }
+        if ($actAttempt -lt ($gpuFlagsList.Count - 1)) { Start-Sleep -Seconds 2 }
+      }
+      if (-not $activationOk) { throw 'editor-activation-failed' }
     }
-    if (-not $activationOk) { throw 'editor-activation-failed' }
   }
 
   $hasInstalledCodexExt = @(Get-ChildItem -LiteralPath $extensions -Directory -Filter 'openai.chatgpt-*' -ErrorAction SilentlyContinue).Count -gt 0

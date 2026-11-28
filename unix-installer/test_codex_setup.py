@@ -32,6 +32,12 @@ class UnixCodexSetupTests(unittest.TestCase):
     def test_write_codex_home_creates_isolated_config_and_auth(self):
         with tempfile.TemporaryDirectory() as td:
             home = Path(td)
+            dot_codex = home / ".codex"
+            dot_codex.mkdir(parents=True)
+            (dot_codex / "config.toml").write_text(
+                'model = "gpt-5"\n\n[projects."/tmp/demo"]\ntrust_level = "trusted"\n\n[mcp_servers.demo]\ncommand = "echo"\n',
+                encoding="utf-8",
+            )
             c_home = codex_setup.write_codex_home(home, "sk-test-123456", "gpt-6.2-sol", "https://codex.anhlaptrinh.vn/v1")
             self.assertTrue((c_home / "config.toml").is_file())
             self.assertTrue((c_home / "auth.json").is_file())
@@ -40,6 +46,14 @@ class UnixCodexSetupTests(unittest.TestCase):
             self.assertIn('base_url = "https://codex.anhlaptrinh.vn/v1"', cfg)
             auth = json.loads((c_home / "auth.json").read_text(encoding="utf-8"))
             self.assertEqual(auth["OPENAI_API_KEY"], "sk-test-123456")
+
+            default_cfg = (dot_codex / "config.toml").read_text(encoding="utf-8")
+            self.assertIn('model_provider = "router"', default_cfg)
+            self.assertIn('base_url = "https://codex.anhlaptrinh.vn/v1"', default_cfg)
+            self.assertIn('[projects."/tmp/demo"]', default_cfg)
+            self.assertIn("[mcp_servers.demo]", default_cfg)
+            default_auth = json.loads((dot_codex / "auth.json").read_text(encoding="utf-8"))
+            self.assertEqual(default_auth["OPENAI_API_KEY"], "sk-test-123456")
 
     def test_auto_heal_step_repairs_transient_failure_and_logs_audit(self):
         with tempfile.TemporaryDirectory() as td:
@@ -184,6 +198,115 @@ class UnixCodexSetupTests(unittest.TestCase):
 
         self.assertEqual(order, ["codex-cli", "antigravity-editor", "openclaw-init"])
         self.assertEqual(res["gateway_port"], 19789)
+
+    def test_unix_codex_and_extension_skip_download_when_latest_and_upgrade_when_older(self):
+        import http.server
+        import threading
+        from unittest.mock import MagicMock
+
+        class MockMetaHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path.endswith("/@openai/codex/latest"):
+                    body = json.dumps({"version": "0.172.0"}).encode("utf-8")
+                elif self.path.endswith("/openai/chatgpt/latest"):
+                    body = json.dumps({"version": "26.51120.50957"}).encode("utf-8")
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), MockMetaHandler)
+        port = server.server_address[1]
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                home = Path(td).resolve()
+                source = Path(__file__).resolve().parent.parent
+                fake_node = home / "node"
+                fake_npm = home / "npm"
+                fake_ide = home / "antigravity-cli"
+                for f in (fake_node, fake_npm, fake_ide):
+                    f.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+                    f.chmod(0o755)
+
+                npm_bin = codex_setup.data_root(home) / "codex-cli/node_modules/.bin/codex"
+                npm_pkg = codex_setup.data_root(home) / "codex-cli/node_modules/@openai/codex/package.json"
+                npm_bin.parent.mkdir(parents=True, exist_ok=True)
+                npm_pkg.parent.mkdir(parents=True, exist_ok=True)
+                npm_bin.write_text("#!/bin/sh\necho codex-cli 0.172.0\n", encoding="utf-8")
+                npm_bin.chmod(0o755)
+                npm_pkg.write_text(json.dumps({"version": "0.172.0"}), encoding="utf-8")
+
+                ext_dir = codex_setup.data_root(home) / "antigravity/Extensions/openai.chatgpt-26.51120.50957"
+                (ext_dir / "bin/darwin-arm64").mkdir(parents=True, exist_ok=True)
+                (ext_dir / "package.json").write_text(
+                    json.dumps({"publisher": "openai", "name": "chatgpt", "version": "26.51120.50957"}),
+                    encoding="utf-8",
+                )
+
+                env_patch = {
+                    "XDG_CONFIG_HOME": str(home / ".config"),
+                    "EMTROLY_ANTIGRAVITY_CLI": str(fake_ide),
+                    "EMTROLY_CODEX_NPM_LATEST_URL": f"http://127.0.0.1:{port}/@openai/codex/latest",
+                    "EMTROLY_CODEX_OPENVSX_URL": f"http://127.0.0.1:{port}/api/openai/chatgpt/latest",
+                }
+                calls = []
+
+                def fake_subproc(cmd, *args, **kwargs):
+                    calls.append(list(cmd))
+                    return MagicMock(returncode=0, stdout="", stderr="")
+
+                ai_vals = {"ai_api_key": "sk-unix-latest-test", "model": "gpt-6.2-sol", "base_url": "https://codex.anhlaptrinh.vn/v1"}
+                with patch.dict(os.environ, env_patch), \
+                        patch.object(runner.os, "geteuid", return_value=1000, create=True), \
+                        patch.object(runner.platform, "system", return_value="Darwin"), \
+                        patch.object(codex_setup.platform, "system", return_value="Darwin"), \
+                        patch.object(runner.Path, "home", return_value=home), \
+                        patch.object(runner.provider, "verify", return_value="gpt-6.2-sol"), \
+                        patch.object(runner.dependencies, "install_node", return_value=(fake_node, fake_npm)), \
+                        patch.object(codex_setup.subprocess, "run", side_effect=fake_subproc):
+                    # 1. Both codex-cli and codex-extension already latest -> zero npm install / --install-extension calls
+                    res_skip = runner.install_components(
+                        ["codex-cli", "antigravity-ide", "codex-extension"],
+                        ai_vals,
+                        source,
+                        force_reinstall=True,
+                    )
+                    self.assertIn("codex-cli", res_skip["skipped"])
+                    self.assertIn("codex-extension", res_skip["skipped"])
+                    self.assertFalse(
+                        any("@openai/codex" in " ".join(c) or "--install-extension" in c for c in calls),
+                        f"Expected zero npm/@openai/codex or --install-extension calls when up to date, got: {calls}",
+                    )
+
+                    # 2. Downgrade codex-cli (0.169.0) & extension (26.51111.21308) -> triggers both installs cleanly
+                    npm_pkg.write_text(json.dumps({"version": "0.169.0"}), encoding="utf-8")
+                    (ext_dir / "package.json").write_text(
+                        json.dumps({"publisher": "openai", "name": "chatgpt", "version": "26.51111.21308"}),
+                        encoding="utf-8",
+                    )
+                    res_upg = runner.install_components(
+                        ["codex-cli", "codex-extension"],
+                        ai_vals,
+                        source,
+                        force_reinstall=True,
+                    )
+                    self.assertFalse(res_upg["codex"]["skipped"])
+                    self.assertFalse(res_upg["codex_extension"]["skipped"])
+                    self.assertTrue(any("@openai/codex" in " ".join(c) for c in calls))
+                    self.assertTrue(any("--install-extension" in c for c in calls))
+        finally:
+            server.shutdown()
+            server.server_close()
 
 
 if __name__ == "__main__":

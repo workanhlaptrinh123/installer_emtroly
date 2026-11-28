@@ -446,12 +446,18 @@ requires_openai_auth = true
 "@
           [IO.File]::WriteAllText((Join-Path $emCodexDir 'config.toml'), $reuseCfg, $utf8NoBomEd)
           [IO.File]::WriteAllText((Join-Path $emCodexDir 'auth.json'), (@{ OPENAI_API_KEY = $edKey } | ConvertTo-Json -Compress), $utf8NoBomEd)
+          if (Get-Command -Name 'Sync-EmTroLyUserCodexHome' -ErrorAction Ignore) {
+            [void](Sync-EmTroLyUserCodexHome -ApiKey $edKey -Model $edMdl -BaseUrl 'https://codex.anhlaptrinh.vn/v1')
+          }
         }
         $psExeReuse = if ($env:OS -eq 'Windows_NT') { Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' } else { Join-Path $PSHOME 'pwsh' }
         & $psExeReuse -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $repairScript *> $null
         if ($LASTEXITCODE -eq 0) {
           if (Get-Command -Name 'Register-EmTroLyCodexCli' -ErrorAction Ignore) {
             [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot)
+          }
+          if (Get-Command -Name 'Sync-EmTroLyAntigravityDefaultExtension' -ErrorAction Ignore) {
+            [void](Sync-EmTroLyAntigravityDefaultExtension)
           }
           return
         }
@@ -521,6 +527,12 @@ requires_openai_auth = true
     }
     if (Get-Command -Name 'Register-EmTroLyCodexCli' -ErrorAction Ignore) {
       [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot)
+    }
+    if (Get-Command -Name 'Sync-EmTroLyUserCodexHome' -ErrorAction Ignore) {
+      [void](Sync-EmTroLyUserCodexHome -ApiKey ([string]$EditorSettingsObj.ai_api_key) -Model ([string]$EditorSettingsObj.model) -BaseUrl ([string]$EditorSettingsObj.base_url))
+    }
+    if (Get-Command -Name 'Sync-EmTroLyAntigravityDefaultExtension' -ErrorAction Ignore) {
+      [void](Sync-EmTroLyAntigravityDefaultExtension)
     }
   }
 
@@ -667,12 +679,55 @@ requires_openai_auth = true
     }
 
     # =========================================================================
-    # MODULAR COMPONENT EXECUTION MODE (Smart skip already-installed apps!)
+    # MODULAR COMPONENT EXECUTION MODE (Smart skip already-installed & latest!)
     # =========================================================================
     if ($isModularRun) {
       $completedLabels = @()
       $skippedLabels = @()
+      $upToDateLabels = @()
       $modSnapNow = if (Get-Command -Name 'Get-EmTroLyModularStatus' -ErrorAction Ignore) { Get-EmTroLyModularStatus } else { $null }
+
+      $syncCodexConfigAndShortcut = {
+        $emBaseSync = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'EmTroLy' } else { '' }
+        if ($emBaseSync) {
+          $syncCodexDir = Join-Path $emBaseSync 'Codex'
+          [void][IO.Directory]::CreateDirectory($syncCodexDir)
+          $utf8Sync = New-Object System.Text.UTF8Encoding($false)
+          $sModel = if ([string]$settings.model -match '^[A-Za-z0-9._-]+$') { ([string]$settings.model).Trim() } else { 'gpt-6.2-sol' }
+          $sKey = ([string]$settings.ai_api_key).Trim()
+          if (-not [string]::IsNullOrWhiteSpace($sKey)) {
+            $syncCfg = @"
+model_provider = "router"
+model = "$sModel"
+model_context_window = 272000
+model_auto_compact_token_limit = 200000
+cli_auth_credentials_store = "file"
+
+[model_providers.router]
+name = "router"
+base_url = "https://codex.anhlaptrinh.vn/v1"
+wire_api = "responses"
+requires_openai_auth = true
+"@
+            [IO.File]::WriteAllText((Join-Path $syncCodexDir 'config.toml'), $syncCfg, $utf8Sync)
+            [IO.File]::WriteAllText((Join-Path $syncCodexDir 'auth.json'), (@{ OPENAI_API_KEY = $sKey } | ConvertTo-Json -Compress), $utf8Sync)
+            if (Get-Command -Name 'Sync-EmTroLyUserCodexHome' -ErrorAction Ignore) {
+              [void](Sync-EmTroLyUserCodexHome -ApiKey $sKey -Model $sModel -BaseUrl 'https://codex.anhlaptrinh.vn/v1')
+            }
+          }
+          if (Get-Command -Name 'Register-EmTroLyCodexCli' -ErrorAction Ignore) {
+            try { [void](Register-EmTroLyCodexCli -PayloadRoot $PayloadRoot) } catch { }
+          }
+          if (Get-Command -Name 'Sync-EmTroLyAntigravityDefaultExtension' -ErrorAction Ignore) {
+            try { [void](Sync-EmTroLyAntigravityDefaultExtension) } catch { }
+          }
+          $repSc = Join-Path $PayloadRoot 'windows-installer\repair-antigravity-shortcut.ps1'
+          if ((Test-Path -LiteralPath (Join-Path $emBaseSync 'installer-job.txt') -PathType Leaf) -and (Test-Path -LiteralPath $repSc -PathType Leaf)) {
+            $psSync = if ($env:OS -eq 'Windows_NT') { Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe' } else { Join-Path $PSHOME 'pwsh' }
+            try { & $psSync -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $repSc *> $null } catch { }
+          }
+        }
+      }
 
       if ('codex-cli' -in $requestedComponents) {
         $stage = 'codex-cli'
@@ -685,9 +740,15 @@ requires_openai_auth = true
           $skippedLabels += 'Codex CLI'
         } else {
           if (-not (Get-Command -Name 'Install-EmTroLyCodexCliFirst' -ErrorAction Ignore)) { throw 'editor-module-missing' }
-          $codexOnlyRes = Install-EmTroLyCodexCliFirst -Settings $settings -PayloadRoot $PayloadRoot -StatusFile $LogFile -EditorJobId $editorJobId -ForceConfigUpdate
+          $codexOnlyRes = Install-EmTroLyCodexCliFirst -Settings $settings -PayloadRoot $PayloadRoot -StatusFile $LogFile -EditorJobId $editorJobId -ForceConfigUpdate -CheckLatestVersion:$forceReinstall
           if (-not $codexOnlyRes.Installed) { throw 'codex-cli-install-failed' }
-          $completedLabels += 'Codex CLI'
+          if ($forceReinstall -and $codexOnlyRes.PSObject.Properties['Skipped'] -and $codexOnlyRes.Skipped -and $codexOnlyRes.PSObject.Properties['UpToDate'] -and $codexOnlyRes.UpToDate) {
+            $verLblCodex = if ($codexOnlyRes.PSObject.Properties['Version'] -and $codexOnlyRes.Version) { " (v$($codexOnlyRes.Version))" } else { '' }
+            Write-SafeStatus "✓ Codex CLI đã ở phiên bản mới nhất$verLblCodex — không cần tải lại."
+            $upToDateLabels += "Codex CLI$verLblCodex"
+          } else {
+            $completedLabels += 'Codex CLI'
+          }
         }
       }
 
@@ -710,6 +771,35 @@ requires_openai_auth = true
           Write-SafeStatus '✓ Codex Extension đã cài đặt sẵn — bỏ qua không cài lại.'
           $wantExt = $false
           $skippedLabels += 'Codex Extension'
+        }
+      } elseif ($forceReinstall -and $modSnapNow) {
+        if ($wantIde -and $modSnapNow.AntigravityInstalled) {
+          $ideVerCur = if ($modSnapNow.PSObject.Properties['AntigravityIdeVersion']) { [string]$modSnapNow.AntigravityIdeVersion } else { '' }
+          $ideProdCur = if ($modSnapNow.PSObject.Properties['AntigravityProductVersion']) { [string]$modSnapNow.AntigravityProductVersion } else { '' }
+          $ideAtLatest = ((Get-Command -Name 'Compare-EmTroLyVersion' -ErrorAction Ignore) -and (
+            ($ideVerCur -and (Compare-EmTroLyVersion -Current $ideVerCur -Target '2.7.0') -ge 0) -or
+            ($ideProdCur -and (Compare-EmTroLyVersion -Current $ideProdCur -Target '1.107.0') -ge 0)
+          ))
+          if ($ideAtLatest) {
+            $dispIdeVer = if ($ideVerCur) { "v$ideVerCur" } else { "v$ideProdCur" }
+            if ($env:EMTROLY_SKIP_AGY_CLI_PREFETCH -ne '1' -and -not ($modSnapNow.PSObject.Properties['AntigravityCliReady'] -and $modSnapNow.AntigravityCliReady)) {
+              $wantAgyCli = $true
+            }
+            if (-not $wantExt) { & $syncCodexConfigAndShortcut }
+            Write-SafeStatus "✓ Antigravity IDE đã ở phiên bản mới nhất ($dispIdeVer) — không cần tải lại."
+            $wantIde = $false
+            $upToDateLabels += "Antigravity IDE ($dispIdeVer)"
+          }
+        }
+        if ($wantExt -and $modSnapNow.CodexExtensionInstalled -and $modSnapNow.PSObject.Properties['CodexExtensionVersion'] -and $modSnapNow.CodexExtensionVersion -and (Get-Command -Name 'Resolve-EmTroLyCodexVsixTarget' -ErrorAction Ignore) -and (Get-Command -Name 'Compare-EmTroLyVersion' -ErrorAction Ignore)) {
+          Write-SafeStatus 'Đang kiểm tra phiên bản mới nhất của Codex Extension...'
+          $extTargetCheck = Resolve-EmTroLyCodexVsixTarget
+          if ((Compare-EmTroLyVersion -Current $modSnapNow.CodexExtensionVersion -Target $extTargetCheck.Version) -ge 0) {
+            & $syncCodexConfigAndShortcut
+            Write-SafeStatus "✓ Codex Extension đã ở phiên bản mới nhất (v$($modSnapNow.CodexExtensionVersion)) — không cần tải lại."
+            $wantExt = $false
+            $upToDateLabels += "Codex Extension (v$($modSnapNow.CodexExtensionVersion))"
+          }
         }
       }
 
@@ -746,7 +836,14 @@ requires_openai_auth = true
           job_id     = $editorJobId
         }
         Invoke-EditorStepWithCodexAutoHeal -EditorSettingsObj $modCliSettings -ComponentMode 'cli-runtime-only' -AllowUpdateExisting:$true
-        $completedLabels += 'Antigravity Runtime CLI'
+        $cliStatusLine = if (Test-Path -LiteralPath $LogFile -PathType Leaf) {
+          try { [IO.File]::ReadAllText($LogFile, [Text.Encoding]::UTF8) } catch { '' }
+        } else { '' }
+        if ($cliStatusLine -match 'đã ở phiên bản mới nhất') {
+          $upToDateLabels += 'Antigravity Runtime CLI'
+        } else {
+          $completedLabels += 'Antigravity Runtime CLI'
+        }
       }
 
       if ($wantOpenClaw -and $openClawSkipUpToDate) {
@@ -760,12 +857,15 @@ requires_openai_auth = true
         if (Get-Command -Name 'Install-EmTroLyAppShortcut' -ErrorAction Ignore) {
           try { [void](Install-EmTroLyAppShortcut -PayloadRoot $PayloadRoot) } catch { }
         }
-        if ($completedLabels.Count -gt 0 -and $skippedLabels.Count -gt 0) {
-          Write-SafeStatus ("Hoàn tất: Đã cài đặt ($($completedLabels -join ', ')) · Đã bỏ qua phần có sẵn ($($skippedLabels -join ', '))!")
+        $allSkippedOrLatest = @($upToDateLabels) + @($skippedLabels)
+        if ($completedLabels.Count -gt 0 -and $allSkippedOrLatest.Count -gt 0) {
+          Write-SafeStatus ("Hoàn tất: Đã cài đặt/cập nhật ($($completedLabels -join ', ')) · Đã ở phiên bản mới nhất/có sẵn ($($allSkippedOrLatest -join ', '))!")
         } elseif ($completedLabels.Count -gt 0) {
           Write-SafeStatus ("Hoàn tất: Đã cài đặt thành công phần đã chọn ($($completedLabels -join ', '))!")
+        } elseif ($upToDateLabels.Count -gt 0 -and $skippedLabels.Count -eq 0) {
+          Write-SafeStatus ("Hoàn tất: Tất cả thành phần đã chọn đã ở phiên bản mới nhất ($($upToDateLabels -join ', ')) — không cần tải lại!")
         } else {
-          Write-SafeStatus ("Hoàn tất: Tất cả ứng dụng đã chọn đều đã cài đặt sẵn ($($skippedLabels -join ', ')) — không cần cài lại!")
+          Write-SafeStatus ("Hoàn tất: Tất cả ứng dụng đã chọn đều đã cài đặt sẵn ($($allSkippedOrLatest -join ', ')) — không cần cài lại!")
         }
         exit 0
       }
