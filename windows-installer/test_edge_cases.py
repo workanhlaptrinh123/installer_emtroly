@@ -1993,6 +1993,170 @@ class Step3CleanPcAndFailureUiTests(unittest.TestCase):
             self.assertNotIn("The pipe has been ended", diag_data["code"])
             self.assertIn("ERR_SSL_CIPHER_OPERATION_FAILED", diag_data["friendlyMessage"])
 
+    @unittest.skipUnless(SHELL and os.name == "nt", "Requires Windows PowerShell")
+    def test_autoheal_rejects_broken_npm_cli_without_win32_optional_and_recovers(self):
+        import zipfile
+        codex_ps1 = ROOT / "windows-installer/codex-cli.ps1"
+        heal_ps1 = ROOT / "windows-installer/auto-heal-codex.ps1"
+        with tempfile.TemporaryDirectory(prefix="emtroly-heal-win32-") as td:
+            root = Path(td)
+            local = root / "local"
+            heal_root = local / "EmTroLy/AutoHealCli"
+            heal_bin = heal_root / "node_modules/.bin"
+            codex_pkg_bin = heal_root / "node_modules/@openai/codex/bin"
+            for d in (heal_bin, codex_pkg_bin):
+                d.mkdir(parents=True, exist_ok=True)
+            (heal_bin / "codex.cmd").write_text("@echo off\r\necho fake-npm-wrapper\r\nexit /b 1\r\n", encoding="ascii")
+            # Presence of @openai/codex/bin/codex.js without @openai/codex-win32-x64 means broken npm install
+            (codex_pkg_bin / "codex.js").write_text("// missing @openai/codex-win32-x64", encoding="utf-8")
+
+            # Also seed a cached VSIX with extension/bin/windows-x86_64/codex.exe so offline recovery succeeds immediately
+            vsix_path = local / "EmTroLy/codex-26.51111.21308.vsix"
+            with zipfile.ZipFile(vsix_path, "w") as zf:
+                zf.writestr("extension/bin/windows-x86_64/codex.exe", "FAKE_CODEX_EXE_BYTES")
+
+            sys32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+            clean_path = os.pathsep.join([sys32, os.path.join(sys32, "WindowsPowerShell", "v1.0")])
+            res = subprocess.run(
+                [
+                    "powershell.exe",
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    "$ErrorActionPreference = 'Stop'\n"
+                    f". '{codex_ps1}'\n"
+                    f". '{heal_ps1}'\n"
+                    "$info = Find-EmTroLyCodexCli\n"
+                    "if ($info.Available) { throw 'broken-autoheal-marked-available' }\n"
+                    "if (Test-EmTroLyCodexBinaryRunnable -Executable (Join-Path $env:LOCALAPPDATA 'EmTroLy\\AutoHealCli\\node_modules\\.bin\\codex.cmd')) { throw 'broken-autoheal-marked-runnable' }\n"
+                    "$recovered = Ensure-AutoHealCodexBinary\n"
+                    "if ($recovered -notmatch 'EmTroLy\\\\Codex\\\\bin\\\\codex\\.exe$' -or -not (Test-Path -LiteralPath $recovered)) { throw ('did-not-recover-from-vsix:' + $recovered) }\n"
+                    "$srcHeal = [IO.File]::ReadAllText('" + str(heal_ps1).replace("'", "''") + "', [Text.Encoding]::UTF8)\n"
+                    "if ($srcHeal -notmatch '--include=optional' -or $srcHeal -notmatch '@openai/codex-win32-x64') { throw 'optional-win32-install-flag-missing' }\n"
+                    "Write-Output 'AUTOHEAL_WIN32_RECOVERY_OK'\n",
+                ],
+                env={**os.environ, "LOCALAPPDATA": str(local), "USERPROFILE": str(root), "PATH": clean_path},
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=30,
+            )
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertIn("AUTOHEAL_WIN32_RECOVERY_OK", res.stdout)
+
+    @unittest.skipUnless(SHELL and os.name == "nt", "Requires Windows PowerShell")
+    def test_editor_download_resumes_range_across_truncated_streams(self):
+        import http.server
+        import threading
+
+        editor_ps1 = ROOT / "windows-installer/install-antigravity-codex.ps1"
+        part1 = b"A" * 65536
+        part2 = b"B" * 65536
+        part3 = b"C" * 32768
+        payload_bytes = part1 + part2 + part3
+        expected_hash = hashlib.sha256(payload_bytes).hexdigest()
+        req_count = {"n": 0}
+
+        class FlakyRangeHandler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                req_count["n"] += 1
+                rng = self.headers.get("Range")
+                if not rng:
+                    # First request lies about Content-Length then truncates mid-stream after part1
+                    self.send_response(200)
+                    self.send_header("Accept-Ranges", "bytes")
+                    self.send_header("Content-Length", str(len(payload_bytes)))
+                    self.end_headers()
+                    self.wfile.write(part1)
+                    self.wfile.flush()
+                    self.connection.close()
+                    return
+                start = int(rng.replace("bytes=", "").split("-")[0])
+                rem = payload_bytes[start:]
+                chunk = rem[:65536] if len(rem) > 65536 else rem
+                end = start + len(rem) - 1
+                self.send_response(206)
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Range", f"bytes {start}-{end}/{len(payload_bytes)}")
+                self.send_header("Content-Length", str(len(rem)))
+                self.end_headers()
+                self.wfile.write(chunk)
+                self.wfile.flush()
+                if len(chunk) < len(rem):
+                    self.connection.close()
+
+            def log_message(self, format, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), FlakyRangeHandler)
+        port = server.server_address[1]
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        try:
+            with tempfile.TemporaryDirectory(prefix="emtroly-range-dl-") as td:
+                out_file = Path(td) / "Antigravity IDE.exe"
+                status_file = Path(td) / "status.txt"
+                res = run_ps(
+                    "$ErrorActionPreference = 'Stop'\n"
+                    f"$tokens = $null; $errs = $null\n"
+                    f"$ast = [Management.Automation.Language.Parser]::ParseFile('{editor_ps1}', [ref]$tokens, [ref]$errs)\n"
+                    "$fn = @($ast.FindAll({ param($x) $x -is [Management.Automation.Language.FunctionDefinitionAst] -and $x.Name -eq 'Get-VerifiedDownload' }, $true))[0]\n"
+                    "Invoke-Expression $fn.Extent.Text\n"
+                    f"$StatusFile = '{status_file}'\n"
+                    "function Write-EditorStatus([string]$Text) { [IO.File]::WriteAllText($StatusFile, $Text, [Text.UTF8Encoding]::new($false)) }\n"
+                    f"Get-VerifiedDownload -Url 'http://127.0.0.1:{port}/Antigravity%20IDE.exe' -Path '{out_file}' -Hash '{expected_hash}'\n"
+                    f"$gotHash = (Get-FileHash -LiteralPath '{out_file}' -Algorithm SHA256).Hash\n"
+                    f"if ($gotHash -ine '{expected_hash}') {{ throw 'hash-mismatch-after-range-resume' }}\n"
+                    "Write-Output 'RANGE_RESUME_OK'\n"
+                )
+                self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+                self.assertIn("RANGE_RESUME_OK", res.stdout)
+                self.assertGreaterEqual(req_count["n"], 2)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_modular_install_keeps_inline_view_and_dotnet48_xaml_clean(self):
+        wiz_text = (ROOT / "windows-installer/wizard.ps1").read_text(encoding="utf-8-sig")
+        for control_name in (
+            "ModProgressCard",
+            "ModActiveCompPill",
+            "ModActiveCompText",
+            "ModProgressStatusText",
+            "ModProgressPercentText",
+            "ModProgressBar",
+            "ModProgressSubText",
+            "ModFailureActions",
+            "ModErrorStepText",
+            "ModErrorSummaryHeading",
+            "ModErrorDetailBox",
+            "ModCopyErrorBtn",
+            "ModOpenCodexBtn",
+            "ModRetryBtn",
+            "ModAutoHealBtn",
+            "ModExportBtn",
+        ):
+            self.assertIn(f'x:Name="{control_name}"', wiz_text)
+        # Ensure ModErrorDetailBox complies with .NET 4.8 XamlReader rules (no TextBoxBase attributes in XAML)
+        m = re.search(r'<TextBox\s+x:Name="ModErrorDetailBox"[^/>]*/?>', wiz_text)
+        self.assertIsNotNone(m)
+        tag = m.group(0)
+        for forbidden in ("IsReadOnly=", "AcceptsReturn=", "VerticalScrollBarVisibility="):
+            self.assertNotIn(forbidden, tag)
+        # Start-ModularInstall must stay on modular tab and never jump to ViewProgress
+        start_mod_body = re.search(
+            r"function Start-ModularInstall.*?^\}",
+            wiz_text,
+            re.DOTALL | re.MULTILINE,
+        )
+        self.assertIsNotNone(start_mod_body)
+        self.assertIn("$script:activeInstallOrigin = 'modular'", start_mod_body.group(0))
+        self.assertIn("Set-NavActive 'modular'", start_mod_body.group(0))
+        self.assertNotIn("Set-NavActive 'progress'", start_mod_body.group(0))
+
 
 if __name__ == "__main__":
     unittest.main()
